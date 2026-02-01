@@ -1,0 +1,22 @@
+# env
+.env
+.env.*
+!.env.example
+
+# build
+bin/
+dist/
+
+# editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Go
+**/*.test
+**/*.out
+
+# dev tooling
+**/tmp/
