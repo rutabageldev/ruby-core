@@ -1,0 +1,22 @@
+# Markdownlint configuration
+# https://github.com/DavidAnson/markdownlint
+
+# Disable line length rule (MD013)
+# ADRs and documentation often have long lines
+MD013: false
+
+# Allow inline HTML
+MD033: false
+
+# Allow duplicate headings in different sections
+MD024:
+  siblings_only: true
+
+# Allow trailing punctuation in headings
+MD026: false
+
+# Don't require language for fenced code blocks
+MD040: false
+
+# Don't require first line to be h1 (files may start with h2)
+MD041: false

@@ -190,8 +190,10 @@ generate_nkeys() {
         # nk -gen user -pubout outputs: line 1 = seed, line 2 = public key
         local nkey_output
         nkey_output=$(nk -gen user -pubout)
-        local seed=$(echo "${nkey_output}" | head -1)
-        local pubkey=$(echo "${nkey_output}" | tail -1)
+        local seed
+        local pubkey
+        seed=$(echo "${nkey_output}" | head -1)
+        pubkey=$(echo "${nkey_output}" | tail -1)
 
         # Validate the keys look correct (don't log secrets on error)
         if [[ ! "${seed}" =~ ^SU ]]; then
@@ -288,6 +290,7 @@ generate_tls_certs() {
 
     local tmp_dir
     tmp_dir=$(mktemp -d)
+    # shellcheck disable=SC2064  # We want immediate expansion here since tmp_dir is local
     trap "rm -rf ${tmp_dir}" EXIT
 
     for service in "${SERVICES[@]}"; do

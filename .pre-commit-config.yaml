@@ -3,7 +3,7 @@
 
 repos:
   # ==========================================================================
-  # Code Linting & Formatting - golangci-lint (gofumpt, govet, staticcheck, gosec)
+  # Go - golangci-lint (gofumpt, govet, staticcheck, gosec)
   # ==========================================================================
   - repo: https://github.com/golangci/golangci-lint
     rev: v2.8.0
@@ -23,6 +23,63 @@ repos:
         entry: gitleaks protect --staged --verbose
         language: golang
         pass_filenames: false
+
+  # ==========================================================================
+  # Dockerfiles - hadolint (via Docker)
+  # ==========================================================================
+  - repo: https://github.com/AleksaC/hadolint-py
+    rev: v2.12.0.3
+    hooks:
+      - id: hadolint
+        name: hadolint
+        description: Lint Dockerfiles
+
+  # ==========================================================================
+  # YAML - yamllint
+  # ==========================================================================
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        name: yamllint
+        description: Lint YAML files
+        args: [-c, .yamllint.yml]
+        types: [yaml]
+
+  # ==========================================================================
+  # GitHub Actions - actionlint
+  # ==========================================================================
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.4
+    hooks:
+      - id: actionlint
+        name: actionlint
+        description: Lint GitHub Actions workflows
+        files: ^\.github/workflows/
+
+  # ==========================================================================
+  # Markdown - markdownlint (optional)
+  # ==========================================================================
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.43.0
+    hooks:
+      - id: markdownlint
+        name: markdownlint
+        description: Lint Markdown files
+        args: [--config, .markdownlint.yml, --fix]
+        types: [markdown]
+
+  # ==========================================================================
+  # Shell Scripts - shellcheck (optional)
+  # ==========================================================================
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        name: shellcheck
+        description: Lint shell scripts
+        types: [shell]
+        args: [--severity=warning]
 
 # ==========================================================================
 # Future additions (Phase 6):
