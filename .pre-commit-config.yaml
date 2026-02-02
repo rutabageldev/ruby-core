@@ -4,24 +4,19 @@
 
 repos:
   # ==========================================================================
-  # Go Formatting - gofumpt (stricter gofmt)
+  # Code Linting & Formatting - golangci-lint (gofumpt, govet, staticcheck, gosec)
   # ==========================================================================
-  - repo: https://github.com/mvdan/gofumpt
-    rev: v0.6.0
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v1.62.2
     hooks:
-      - id: gofumpt
-        name: gofumpt
-        description: Format Go code with gofumpt (stricter gofmt)
-        entry: gofumpt
-        language: golang
-        types: [go]
-        args: [-w]
+      - id: golangci-lint
+        args: [--fix, --timeout=5m]
 
   # ==========================================================================
   # Secrets Scanning - gitleaks
   # ==========================================================================
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.1
+    rev: v8.30.0
     hooks:
       - id: gitleaks
         name: gitleaks
@@ -34,7 +29,7 @@ repos:
 # Phase 6 additions (commented out for now):
 # ==========================================================================
 # - repo: https://github.com/golangci/golangci-lint
-#   rev: v1.55.2
+#   rev: v1.62.2
 #   hooks:
 #     - id: golangci-lint
 #       args: [--timeout=5m]
