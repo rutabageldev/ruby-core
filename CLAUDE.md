@@ -9,6 +9,7 @@ Ruby Core is an event-driven control plane for home automation. It uses NATS Jet
 ## Architecture
 
 ### Core Services (in `services/`)
+
 - **Gateway**: HA WebSocket ingest + HA REST actuation for external communication
 - **Engine**: Rules/automation logic via pure pub/sub patterns
 - **Notifier**: Notification handling service
@@ -16,12 +17,15 @@ Ruby Core is an event-driven control plane for home automation. It uses NATS Jet
 - **Adapters**: Integration adapters (UniFi, Zigbee2MQTT)
 
 ### Shared Packages (in `pkg/`)
+
 - **events**: Event type definitions
 - **obs**: Observability utilities
 - **util**: Common utilities
 
 ### Deployment (in `deploy/`)
+
 Docker Compose stacks with base/dev/prod configurations:
+
 - **dev**: Bind mounts + hot reload
 - **prod**: Immutable images + pinned tags
 

@@ -38,6 +38,7 @@ timedatectl status
 ```
 
 Example good output:
+
 ```
                Local time: Mon 2026-02-02 10:00:00 UTC
            Universal time: Mon 2026-02-02 10:00:00 UTC
@@ -67,6 +68,7 @@ chronyc sources -v
 ```
 
 Example good output:
+
 ```
 Reference ID    : A29FC87B (time.cloudflare.com)
 Stratum         : 3

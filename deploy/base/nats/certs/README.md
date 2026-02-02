@@ -67,6 +67,7 @@ cd deploy/base/nats
 ```
 
 The validator checks for:
+
 - Unreplaced placeholder NKEYs
 - Missing TLS certificate files
 - Required TLS configuration

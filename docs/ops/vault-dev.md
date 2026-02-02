@@ -8,7 +8,7 @@ Ruby Core uses Vault as the exclusive source of truth for secrets (ADR-0015). Fo
 
 - Runs entirely in-memory (no persistent storage)
 - Automatically unseals on startup
-- Enables the UI at http://localhost:8200/ui
+- Enables the UI at <http://localhost:8200/ui>
 - Uses a predictable root token for easy access
 
 **WARNING: Dev mode is for local development only. Never use dev mode in production.**
@@ -23,6 +23,7 @@ docker compose -f compose.dev.yaml up vault
 ```
 
 This starts Vault with:
+
 - Address: `http://localhost:8201` (port 8201 to avoid conflicts)
 - Root token: Set via `VAULT_DEV_TOKEN` env var in your `.env` file
 
@@ -150,6 +151,7 @@ vault kv get -field=seed secret/ruby-core/nats/gateway
 ### "connection refused" errors
 
 Ensure Vault is running:
+
 ```bash
 docker compose -f deploy/dev/compose.dev.yaml ps vault
 ```
@@ -157,6 +159,7 @@ docker compose -f deploy/dev/compose.dev.yaml ps vault
 ### "permission denied" errors
 
 Verify your token is set:
+
 ```bash
 echo $VAULT_TOKEN
 vault token lookup
@@ -165,6 +168,7 @@ vault token lookup
 ### "path not found" errors
 
 Enable the KV secrets engine (may be needed if not using -dev mode):
+
 ```bash
 vault secrets enable -path=secret kv-v2
 ```
