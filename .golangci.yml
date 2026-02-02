@@ -1,4 +1,4 @@
-version: 1
+version: 2.8.0
 linters:
   enable:
     - gofumpt
