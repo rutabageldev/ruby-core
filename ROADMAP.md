@@ -1,8 +1,6 @@
 ## Ruby Core Implementation Roadmap (Revised)
 
-### **Phase 0: Project Setup & Core Contracts**
-
-*(No changes to this phase)*
+### **Phase 0: Project Setup & Core Contracts** ✅ COMPLETE
 
 **Goal:** Establish the absolute foundational code structure and data contracts before any service logic is written.
 
@@ -12,7 +10,7 @@
     3.  Create a shared `pkg/natsx` package to codify the subject naming convention.
     4.  Set up a basic `docker-compose.yml` with placeholders.
 *   **Acceptance Criteria:**
-    *   `[ ]` Data schemas are centralized and versioned in code (ADR-0014, ADR-0027).
+    *   `[x]` Data schemas are centralized and versioned in code (ADR-0014, ADR-0027).
 
 ### **Phase 1: Secure Infrastructure & Minimal CI**
 
