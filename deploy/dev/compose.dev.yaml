@@ -1,0 +1,81 @@
+# Ruby Core Development Environment
+# Phase 1: Secure Infrastructure
+#
+# ADR-0021: Single-node NATS with JetStream persistence
+# ADR-0018: TLS everywhere (mTLS for NATS)
+# ADR-0017: NKEY-based authentication
+
+services:
+  # ==========================================================================
+  # NATS JetStream Message Broker
+  # ==========================================================================
+  nats:
+    image: nats:2.10-alpine
+    container_name: ruby-core-nats
+    restart: unless-stopped
+    ports:
+      # Client port (TLS)
+      - "4222:4222"
+      # HTTP monitoring (dev only - bind to localhost in prod)
+      - "8222:8222"
+    volumes:
+      # JetStream persistent storage (ADR-0021)
+      - nats-data:/data/jetstream
+      # NATS configuration
+      - ../base/nats/nats.conf:/etc/nats/nats.conf:ro
+      # TLS certificates (generate with mkcert for dev)
+      - ../base/nats/certs:/etc/nats/certs:ro
+    command: ["-c", "/etc/nats/nats.conf"]
+    healthcheck:
+      # Health check via HTTP monitoring endpoint
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ==========================================================================
+  # Vault (Dev Mode) - Secrets Management
+  # ==========================================================================
+  # ADR-0015: Vault for secrets management
+  # WARNING: Dev mode is for local development only!
+  # The root token is printed to logs - this is intentional for dev.
+  #
+  # SECURITY NOTE: Vault binds to localhost only by default. If you need
+  # to access Vault from other containers, use Docker networking (vault:8200)
+  # rather than exposing to all interfaces.
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: ruby-core-vault
+    restart: unless-stopped
+    ports:
+      # Bind to localhost only - prevents exposure on shared networks
+      - "127.0.0.1:8200:8200"
+    environment:
+      # Dev mode configuration
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_TOKEN:-dev-root-token}
+      # Listen on all interfaces INSIDE container (required for Docker networking)
+      # External access is restricted by the port binding above
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      # Required for Vault's memory locking
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+# ==========================================================================
+# Named Volumes
+# ==========================================================================
+volumes:
+  # Persistent JetStream storage (dev only)
+  # NOTE: For production, ADR-0021 requires a host bind mount to a reliable
+  # path that is included in automated backups. Example for prod:
+  #   volumes:
+  #     - /var/lib/ruby-core/nats:/data/jetstream
+  # See deploy/prod/compose.prod.yaml for production configuration.
+  nats-data:
+    driver: local

@@ -1,0 +1,62 @@
+# Ruby Core Production Environment
+# Phase 2+ will flesh this out with service definitions
+#
+# ADR-0021: Single-node NATS with host bind mount for backups
+# ADR-0018: TLS everywhere
+# ADR-0017: NKEY-based authentication
+
+services:
+  # ==========================================================================
+  # NATS JetStream Message Broker (Production)
+  # ==========================================================================
+  nats:
+    image: nats:2.10-alpine
+    container_name: ruby-core-nats
+    restart: unless-stopped
+    ports:
+      # Client port (TLS only)
+      - "4222:4222"
+      # HTTP monitoring - bind to localhost only in production
+      - "127.0.0.1:8222:8222"
+    volumes:
+      # JetStream persistent storage - HOST BIND MOUNT (ADR-0021)
+      # This path MUST be included in automated backups
+      - /var/lib/ruby-core/nats:/data/jetstream
+      # NATS configuration
+      - ../base/nats/nats.conf:/etc/nats/nats.conf:ro
+      # TLS certificates (from Vault PKI in production)
+      - ../base/nats/certs:/etc/nats/certs:ro
+    command: ["-c", "/etc/nats/nats.conf"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ==========================================================================
+  # Services (Phase 2+)
+  # ==========================================================================
+  # gateway:
+  #   image: ghcr.io/${GITHUB_REPOSITORY}/gateway:${VERSION}
+  #   restart: unless-stopped
+  #   depends_on:
+  #     nats:
+  #       condition: service_healthy
+  #   environment:
+  #     - VAULT_ADDR=${VAULT_ADDR}
+  #   # ... additional config
+
+  # engine:
+  #   image: ghcr.io/${GITHUB_REPOSITORY}/engine:${VERSION}
+  #   restart: unless-stopped
+  #   depends_on:
+  #     nats:
+  #       condition: service_healthy
+  #   environment:
+  #     - VAULT_ADDR=${VAULT_ADDR}
+  #   # ... additional config
+
+# ==========================================================================
+# No named volumes in production - use host bind mounts for reliable backups
+# ==========================================================================
