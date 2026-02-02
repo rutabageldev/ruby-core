@@ -11,7 +11,7 @@ To ensure a baseline of code quality, consistency, and security before code is r
 
 We will adopt a multi-stage pre-commit policy using the `pre-commit` framework. The following checks **MUST** be configured to run on all staged files where applicable:
 
-1.  **Formatting:** All Go files (`*.go`) **MUST** be automatically formatted using `gofumpt`, a stricter superset of `gofmt`.
+1.  **Formatting:** All Go files (`*.go`) **MUST** be automatically formatted via `golangci-lint`, with the `gofumpt` linter enabled (a stricter superset of `gofmt`). This avoids a separate gofumpt hook while still enforcing the stricter formatting standard.
 2.  **Secrets Scanning:** All staged changes **MUST** be scanned for hard-coded secrets using `gitleaks`. A commit that contains potential secrets will be blocked.
 3.  **Static Analysis & Linting:** The `golangci-lint` linter **MUST** be run. Its configuration **MUST** enable the following essential linters at a minimum:
     *   `govet`: Catches common mistakes and suspicious constructs.
@@ -31,7 +31,7 @@ We will adopt a multi-stage pre-commit policy using the `pre-commit` framework. 
 
 ### Negative Consequences
 
-*   **Adds Dependencies:** Requires developers to have `pre-commit` and the associated tools (`gofumpt`, `golangci-lint`, `gitleaks`) installed and configured.
+*   **Adds Dependencies:** Requires developers to have `pre-commit` and the associated tools (`golangci-lint`, `gitleaks`) installed and configured.
 *   **Commit Time Overhead:** Adds a small delay (typically a few seconds) to each commit, which is a deliberate trade-off for the quality and security gains.
 
 ### Neutral Consequences

@@ -1,0 +1,8 @@
+linters:
+  enable:
+    - gofumpt
+    - govet
+    - staticcheck
+    - gosec
+run:
+  timeout: 5m

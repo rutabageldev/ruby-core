@@ -1,13 +1,12 @@
 # Pre-commit hooks for Ruby Core
-# Phase 1: Minimal hooks (gofumpt + gitleaks) per ADR-0011
-# Phase 6 will add: golangci-lint, go mod tidy, fast unit tests
+# Phase 1: Lint + Format Baseline (golangci-lint) and Secrets (gitleaks) per ADR-0011
 
 repos:
   # ==========================================================================
   # Code Linting & Formatting - golangci-lint (gofumpt, govet, staticcheck, gosec)
   # ==========================================================================
   - repo: https://github.com/golangci/golangci-lint
-    rev: v1.62.2
+    rev: v2.8.0
     hooks:
       - id: golangci-lint
         args: [--fix, --timeout=5m]
@@ -26,14 +25,8 @@ repos:
         pass_filenames: false
 
 # ==========================================================================
-# Phase 6 additions (commented out for now):
+# Future additions (Phase 6):
 # ==========================================================================
-# - repo: https://github.com/golangci/golangci-lint
-#   rev: v1.62.2
-#   hooks:
-#     - id: golangci-lint
-#       args: [--timeout=5m]
-#
 # - repo: local
 #   hooks:
 #     - id: go-mod-tidy

@@ -19,13 +19,13 @@
 *   **Key Tasks:**
     1.  **NATS:** Deploy a single, persistent, TLS-enabled NATS server with NKEY/ACL auth.
     2.  **Vault:** Set up the local Vault dev server for managing secrets.
-    3.  **Dev Tooling:** Create a basic dev container and a minimal pre-commit hook (`gofumpt`, `gitleaks`).
+    3.  **Dev Tooling:** Create a basic dev container and a minimal pre-commit hook (implemented `golangci-lint` with `gofumpt`, `govet`, `staticcheck`, `gosec` enabled, `gitleaks`).
     4.  **CI Gates:** Add a basic test gate to the CI workflow that runs `go test ./...` and verifies the code builds on every pull request.
     5.  **Operations:** Validate that the target host is configured to use NTP for time synchronization (per ADR-0026).
 
 *   **Acceptance Criteria:**
     *   `[X]` A secure NATS server is running (TLS + NKEY auth + JetStream).
-    *   `[X]` `git commit` triggers basic formatting and secret scanning.
+    *   `[X]` `git commit` triggers formatting, linting, and secret scanning.
     *   `[X]` A pull request is blocked if basic tests or the build fails.
     *   `[X]` Host time synchronization is confirmed (docs/ops/ntp.md).
 
@@ -33,7 +33,7 @@
     *   NATS config: `deploy/base/nats/nats.conf` with JetStream, TLS, NKEY ACLs
     *   Compose: `deploy/dev/compose.dev.yaml` with NATS + Vault services
     *   Vault docs: `docs/ops/vault-dev.md`
-    *   Pre-commit: `.pre-commit-config.yaml` (gofumpt + gitleaks)
+    *   Pre-commit: `.pre-commit-config.yaml` (golangci-lint with gofumpt, govet, staticcheck, gosec + gitleaks)
     *   CI: `.github/workflows/ci.yml` (test + build on PRs)
     *   Release: `.github/workflows/release.yml` (manual GHCR workflow)
     *   NTP docs: `docs/ops/ntp.md`
@@ -103,7 +103,7 @@
 
 *   **Key Tasks:**
     1.  **DevEx:** Enhance `docker-compose.dev.yml` to use `air` for a fast, live-reload experience (ADR-0010).
-    2.  **Pre-commit:** Flesh out the pre-commit hook to include the full `golangci-lint` suite and fast unit tests (ADR-0011).
+    2.  **Pre-commit:** Flesh out the pre-commit hook to include fast unit tests (ADR-0011).
     3.  **CI Polish:** Expand the CI pipeline to run the full comprehensive test gates, including **integration tests**, on all pull requests (ADR-0013).
 
 *   **Acceptance Criteria:**
