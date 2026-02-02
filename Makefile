@@ -7,7 +7,7 @@
         dev-up dev-down dev-restart dev-logs dev-ps \
         prod-up prod-down prod-restart prod-logs prod-ps \
         docker-ps docker-images docker-volumes docker-clean \
-        nats-validate
+        setup-dev-creds setup-dev-creds-force nats-validate
 
 # Default target
 .DEFAULT_GOAL := help
@@ -51,6 +51,9 @@ help: ## Show this help message
 	@echo ""
 	@echo "Docker:"
 	@grep -E '^docker-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Setup:"
+	@grep -E '^setup-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Validation:"
 	@grep -E '^nats-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -164,6 +167,16 @@ docker-nuke: ## Remove ALL ruby-core containers, images, and volumes (use with c
 	@echo "Removing volumes..."
 	@docker volume ls --filter "name=ruby" -q | xargs -r docker volume rm || true
 	@echo "Done. Images preserved (remove manually if needed)."
+
+# =============================================================================
+# Setup
+# =============================================================================
+
+setup-dev-creds: ## Generate and store dev credentials (NKEYs + TLS) in Vault
+	@scripts/setup-dev-credentials.sh
+
+setup-dev-creds-force: ## Regenerate ALL dev credentials (overwrites existing)
+	@FORCE_REGEN=true scripts/setup-dev-credentials.sh
 
 # =============================================================================
 # Validation (Phase 1)
