@@ -1,3 +1,4 @@
+version: 1
 linters:
   enable:
     - gofumpt
