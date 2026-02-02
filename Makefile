@@ -4,8 +4,9 @@
 # Usage: make help
 
 .PHONY: help build test fmt lint clean \
-        dev-up dev-down dev-restart dev-logs \
-        prod-up prod-down prod-restart prod-logs \
+        dev-up dev-down dev-restart dev-logs dev-ps \
+        prod-up prod-down prod-restart prod-logs prod-ps \
+        docker-ps docker-images docker-volumes docker-clean \
         nats-validate
 
 # Default target
@@ -47,6 +48,9 @@ help: ## Show this help message
 	@echo ""
 	@echo "Production Environment:"
 	@grep -E '^prod-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Docker:"
+	@grep -E '^docker-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Validation:"
 	@grep -E '^nats-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -124,6 +128,42 @@ prod-logs: ## Tail prod logs (or SERVICE=<name>)
 
 prod-ps: ## Show prod container status
 	$(COMPOSE_CMD) -f $(PROD_COMPOSE) ps
+
+# =============================================================================
+# Docker Utilities
+# =============================================================================
+
+# Container name prefix for filtering
+CONTAINER_PREFIX := ruby-core
+
+docker-ps: ## Show ruby-core containers only
+	@docker ps -a --filter "name=$(CONTAINER_PREFIX)" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+docker-images: ## Show ruby-core images only
+	@docker images --filter "reference=*ruby-core*" --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}"
+	@echo ""
+	@echo "Base images used:"
+	@docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep -E "(nats|vault)" || true
+
+docker-volumes: ## Show ruby-core volumes
+	@docker volume ls --filter "name=ruby" --format "table {{.Name}}\t{{.Driver}}"
+
+docker-clean: ## Remove stopped ruby-core containers and dangling images
+	@echo "Removing stopped ruby-core containers..."
+	@docker ps -a --filter "name=$(CONTAINER_PREFIX)" --filter "status=exited" -q | xargs -r docker rm || true
+	@echo "Removing dangling images..."
+	@docker image prune -f
+	@echo "Done."
+
+docker-nuke: ## Remove ALL ruby-core containers, images, and volumes (use with caution)
+	@echo "WARNING: This will remove all ruby-core containers, images, and volumes!"
+	@echo "Press Ctrl+C to cancel, or wait 5 seconds to continue..."
+	@sleep 5
+	@echo "Stopping and removing containers..."
+	@docker ps -a --filter "name=$(CONTAINER_PREFIX)" -q | xargs -r docker rm -f || true
+	@echo "Removing volumes..."
+	@docker volume ls --filter "name=ruby" -q | xargs -r docker volume rm || true
+	@echo "Done. Images preserved (remove manually if needed)."
 
 # =============================================================================
 # Validation (Phase 1)
