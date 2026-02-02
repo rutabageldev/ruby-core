@@ -1,0 +1,10 @@
+version: "3.9"
+
+services:
+  gateway:
+    image: ruby-core-gateway:placeholder
+    # Placeholder only; no ports, env, or volumes yet.
+
+  engine:
+    image: ruby-core-engine:placeholder
+    # Placeholder only; no ports, env, or volumes yet.
