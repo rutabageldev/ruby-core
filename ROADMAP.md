@@ -1,6 +1,6 @@
 ## Ruby Core Implementation Roadmap (Revised)
 
-### **Phase 0: Project Setup & Core Contracts** ✅ COMPLETE
+### **Phase 0: Project Setup & Core Contracts** [Complete]
 
 **Goal:** Establish the absolute foundational code structure and data contracts before any service logic is written.
 
@@ -10,9 +10,9 @@
     3.  Create a shared `pkg/natsx` package to codify the subject naming convention.
     4.  Set up a basic `docker-compose.yml` with placeholders.
 *   **Acceptance Criteria:**
-    *   `[x]` Data schemas are centralized and versioned in code (ADR-0014, ADR-0027).
+    *   `[X]` Data schemas are centralized and versioned in code (ADR-0014, ADR-0027).
 
-### **Phase 1: Secure Infrastructure & Minimal CI**
+### **Phase 1: Secure Infrastructure & Minimal CI** [Complete]
 
 **Goal:** Deploy secure infrastructure (NATS, Vault) and establish the *minimum viable* CI safety net to support foundational development.
 
@@ -24,10 +24,19 @@
     5.  **Operations:** Validate that the target host is configured to use NTP for time synchronization (per ADR-0026).
 
 *   **Acceptance Criteria:**
-    *   `[ ]` A secure NATS server is running.
-    *   `[ ]` `git commit` triggers basic formatting and secret scanning.
-    *   `[ ]` A pull request is blocked if basic tests or the build fails.
-    *   `[ ]` Host time synchronization is confirmed.
+    *   `[X]` A secure NATS server is running (TLS + NKEY auth + JetStream).
+    *   `[X]` `git commit` triggers basic formatting and secret scanning.
+    *   `[X]` A pull request is blocked if basic tests or the build fails.
+    *   `[X]` Host time synchronization is confirmed (docs/ops/ntp.md).
+
+*   **Implementation Notes (Phase 1):**
+    *   NATS config: `deploy/base/nats/nats.conf` with JetStream, TLS, NKEY ACLs
+    *   Compose: `deploy/dev/compose.dev.yaml` with NATS + Vault services
+    *   Vault docs: `docs/ops/vault-dev.md`
+    *   Pre-commit: `.pre-commit-config.yaml` (gofumpt + gitleaks)
+    *   CI: `.github/workflows/ci.yml` (test + build on PRs)
+    *   Release: `.github/workflows/release.yml` (manual GHCR workflow)
+    *   NTP docs: `docs/ops/ntp.md`
 
 ### **Phase 2: "Hello World" Production Release**
 
