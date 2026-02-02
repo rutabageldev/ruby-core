@@ -23,7 +23,7 @@ docker compose -f compose.dev.yaml up vault
 ```
 
 This starts Vault with:
-- Address: `http://localhost:8200`
+- Address: `http://localhost:8201` (port 8201 to avoid conflicts)
 - Root token: Set via `VAULT_DEV_TOKEN` env var in your `.env` file
 
 ## Option 2: Running Vault Directly
@@ -44,7 +44,7 @@ vault server -dev -dev-root-token-id="<your-dev-token>"
 Set these environment variables to interact with Vault:
 
 ```bash
-export VAULT_ADDR='http://127.0.0.1:8200'
+export VAULT_ADDR='http://127.0.0.1:8201'
 export VAULT_TOKEN='<your-dev-token>'
 ```
 
@@ -52,7 +52,7 @@ Add these to your shell profile (`.bashrc`, `.zshrc`) or to `deploy/dev/.env`:
 
 ```bash
 # .env file (do NOT commit this file)
-VAULT_ADDR=http://127.0.0.1:8200
+VAULT_ADDR=http://127.0.0.1:8201
 VAULT_TOKEN=<your-dev-token>
 ```
 

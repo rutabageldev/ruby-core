@@ -50,7 +50,8 @@ services:
     restart: unless-stopped
     ports:
       # Bind to localhost only - prevents exposure on shared networks
-      - "127.0.0.1:8200:8200"
+      # Using 8201 to avoid conflicts with other Vault instances
+      - "127.0.0.1:8201:8200"
     environment:
       # Dev mode configuration
       VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_TOKEN:-dev-root-token}

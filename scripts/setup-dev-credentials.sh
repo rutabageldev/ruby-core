@@ -40,8 +40,8 @@ NATS_CONF="${PROJECT_ROOT}/deploy/base/nats/nats.conf"
 CERTS_DIR="${PROJECT_ROOT}/deploy/base/nats/certs"
 COMPOSE_FILE="${PROJECT_ROOT}/deploy/dev/compose.dev.yaml"
 
-# Vault configuration
-export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
+# Vault configuration (port 8201 to avoid conflicts with other Vault instances)
+export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8201}"
 export VAULT_TOKEN="${VAULT_TOKEN:-dev-root-token}"
 
 # Services that need NKEYs
