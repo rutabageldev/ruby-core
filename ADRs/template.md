@@ -1,7 +1,7 @@
 # [ADR-XXXX] - Title of Decision
 
-*   **Status:** Proposed | Accepted | Deprecated | Superseded by [ADR-YYYY](ADR-YYYY-link.md)
-*   **Date:** YYYY-MM-DD
+* **Status:** Proposed | Accepted | Deprecated | Superseded by [ADR-YYYY](ADR-YYYY-link.md)
+* **Date:** YYYY-MM-DD
 
 ## Context
 
@@ -21,12 +21,12 @@ This section describes the results and impact of the decision. It is the most im
 
 ### Positive Consequences
 
-*   What becomes better? (e.g., improved performance, better developer experience, more resilient)
+* What becomes better? (e.g., improved performance, better developer experience, more resilient)
 
 ### Negative Consequences
 
-*   What becomes worse? (e.g., increased complexity, harder to debug, a specific feature becomes more difficult to implement)
+* What becomes worse? (e.g., increased complexity, harder to debug, a specific feature becomes more difficult to implement)
 
 ### Neutral Consequences (Trade-offs)
 
-*   What are the trade-offs? (e.g., we gain X but lose Y, we are locking ourselves into a specific vendor)
+* What are the trade-offs? (e.g., we gain X but lose Y, we are locking ourselves into a specific vendor)
