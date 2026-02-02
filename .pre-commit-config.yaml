@@ -1,0 +1,56 @@
+# Pre-commit hooks for Ruby Core
+# Phase 1: Minimal hooks (gofumpt + gitleaks) per ADR-0011
+# Phase 6 will add: golangci-lint, go mod tidy, fast unit tests
+
+repos:
+  # ==========================================================================
+  # Go Formatting - gofumpt (stricter gofmt)
+  # ==========================================================================
+  - repo: https://github.com/mvdan/gofumpt
+    rev: v0.6.0
+    hooks:
+      - id: gofumpt
+        name: gofumpt
+        description: Format Go code with gofumpt (stricter gofmt)
+        entry: gofumpt
+        language: golang
+        types: [go]
+        args: [-w]
+
+  # ==========================================================================
+  # Secrets Scanning - gitleaks
+  # ==========================================================================
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.1
+    hooks:
+      - id: gitleaks
+        name: gitleaks
+        description: Detect hardcoded secrets in code
+        entry: gitleaks protect --staged --verbose
+        language: golang
+        pass_filenames: false
+
+# ==========================================================================
+# Phase 6 additions (commented out for now):
+# ==========================================================================
+# - repo: https://github.com/golangci/golangci-lint
+#   rev: v1.55.2
+#   hooks:
+#     - id: golangci-lint
+#       args: [--timeout=5m]
+#
+# - repo: local
+#   hooks:
+#     - id: go-mod-tidy
+#       name: go mod tidy
+#       entry: go mod tidy
+#       language: system
+#       files: go\.(mod|sum)$
+#       pass_filenames: false
+#
+#     - id: go-test-fast
+#       name: fast unit tests
+#       entry: go test -tags=fast ./...
+#       language: system
+#       types: [go]
+#       pass_filenames: false
