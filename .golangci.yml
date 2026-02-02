@@ -1,7 +1,6 @@
 version: 2
 linters:
   enable:
-    - gofumpt
     - govet
     - staticcheck
     - gosec
