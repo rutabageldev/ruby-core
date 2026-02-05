@@ -5,5 +5,20 @@
   },
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
-  "postCreateCommand": "pre-commit install"
+
+  "mounts": [
+    "source=${localEnv:HOME}/.docker-tls,target=/run/secrets/docker,type=bind,readonly"
+  ],
+
+  "runArgs": [
+    "--add-host=host.docker.internal:host-gateway"
+  ],
+
+  "containerEnv": {
+    "DOCKER_HOST": "tcp://${localEnv:DOCKER_TLS_HOST:host.docker.internal}:${localEnv:DOCKER_TLS_PORT:2376}",
+    "DOCKER_TLS_VERIFY": "1",
+    "DOCKER_CERT_PATH": "/run/secrets/docker"
+  },
+
+  "postCreateCommand": "pre-commit install && if [ -f /run/secrets/docker/cert.pem ]; then docker version || echo 'Docker TLS connection failed - check certs and host config'; else echo 'Docker TLS certs not mounted at /run/secrets/docker - remote Docker unavailable'; fi"
 }

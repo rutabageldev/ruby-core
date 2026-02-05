@@ -19,21 +19,22 @@
 * **Key Tasks:**
     1. **NATS:** Deploy a single, persistent, TLS-enabled NATS server with NKEY/ACL auth.
     2. **Vault:** Set up the local Vault dev server for managing secrets.
-    3. **Dev Tooling:** Create a basic dev container and a minimal pre-commit hook (implemented `golangci-lint` with `gofumpt`, `govet`, `staticcheck`, `gosec` enabled, `gitleaks`).
+    3. **Dev Tooling:** Create a basic dev container and a pre-commit hook (implemented `golangci-lint` with `gofumpt`, `govet`, `staticcheck`, `gosec` enabled, `gitleaks`, plus early non-Go linters like `hadolint`, `yamllint`, `actionlint`, `markdownlint`, `shellcheck`).
     4. **CI Gates:** Add a basic test gate to the CI workflow that runs `go test ./...` and verifies the code builds on every pull request.
     5. **Operations:** Validate that the target host is configured to use NTP for time synchronization (per ADR-0026).
 
 * **Acceptance Criteria:**
   * `[X]` A secure NATS server is running (TLS + NKEY auth + JetStream).
-  * `[X]` `git commit` triggers formatting, linting, and secret scanning.
+  * `[X]` `git commit` triggers formatting, linting (Go + non-Go), and secret scanning.
   * `[X]` A pull request is blocked if basic tests or the build fails.
   * `[X]` Host time synchronization is confirmed (docs/ops/ntp.md).
+  * `[ ]` The dev container can be built and opened successfully, and supports running go test ./... and pre-commit run --all-files.
 
 * **Implementation Notes (Phase 1):**
   * NATS config: `deploy/base/nats/nats.conf` with JetStream, TLS, NKEY ACLs
   * Compose: `deploy/dev/compose.dev.yaml` with NATS + Vault services
   * Vault docs: `docs/ops/vault-dev.md`
-  * Pre-commit: `.pre-commit-config.yaml` (golangci-lint with gofumpt, govet, staticcheck, gosec + gitleaks)
+  * Pre-commit: `.pre-commit-config.yaml` (golangci-lint with gofumpt, govet, staticcheck, gosec + gitleaks; hadolint, yamllint, actionlint, markdownlint, shellcheck)
   * CI: `.github/workflows/ci.yml` (test + build on PRs)
   * Release: `.github/workflows/release.yml` (manual GHCR workflow)
   * NTP docs: `docs/ops/ntp.md`
