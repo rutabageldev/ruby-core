@@ -28,7 +28,7 @@
   * `[X]` `git commit` triggers formatting, linting (Go + non-Go), and secret scanning.
   * `[X]` A pull request is blocked if basic tests or the build fails.
   * `[X]` Host time synchronization is confirmed (docs/ops/ntp.md).
-  * `[ ]` The dev container can be built and opened successfully, and supports running go test ./... and pre-commit run --all-files.
+  * `[x]` The dev container can be built and opened successfully, and supports running go test ./... and pre-commit run --all-files.
 
 * **Implementation Notes (Phase 1):**
   * NATS config: `deploy/base/nats/nats.conf` with JetStream, TLS, NKEY ACLs

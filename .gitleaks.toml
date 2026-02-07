@@ -1,0 +1,11 @@
+# Gitleaks configuration for Ruby Core
+# Extends the default ruleset with allowlists for known false positives.
+
+[extend]
+useDefault = true
+
+# NATS NKEY public keys (prefix "U") are not secrets.
+# Only seed keys (prefix "S") are secrets; those live in Vault (ADR-0015).
+[[allowlists]]
+  description = "NATS NKEY public user keys in nats.conf"
+  paths = ['''deploy/base/nats/nats\.conf''']
