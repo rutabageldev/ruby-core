@@ -1,9 +1,10 @@
 # Ruby Core Production Environment
-# Phase 2+ will flesh this out with service definitions
+# Phase 2: Minimal gateway + engine with NATS
 #
 # ADR-0021: Single-node NATS with host bind mount for backups
 # ADR-0018: TLS everywhere
 # ADR-0017: NKEY-based authentication
+# ADR-0015: Secrets from Vault
 
 services:
   # ==========================================================================
@@ -14,8 +15,8 @@ services:
     container_name: ruby-core-nats
     restart: unless-stopped
     ports:
-      # Client port (TLS only)
-      - "4222:4222"
+      # Client port (TLS only) - localhost since services are co-located
+      - "127.0.0.1:4222:4222"
       # HTTP monitoring - bind to localhost only in production
       - "127.0.0.1:8222:8222"
     volumes:
@@ -35,27 +36,48 @@ services:
       start_period: 10s
 
   # ==========================================================================
-  # Services (Phase 2+)
+  # Gateway Service
   # ==========================================================================
-  # gateway:
-  #   image: ghcr.io/${GITHUB_REPOSITORY}/gateway:${VERSION}
-  #   restart: unless-stopped
-  #   depends_on:
-  #     nats:
-  #       condition: service_healthy
-  #   environment:
-  #     - VAULT_ADDR=${VAULT_ADDR}
-  #   # ... additional config
+  gateway:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-gateway:${VERSION:-v0.1.0}
+    container_name: ruby-core-gateway
+    restart: unless-stopped
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - VAULT_ADDR=${VAULT_ADDR}
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - NATS_URL=${NATS_URL:-tls://nats:4222}
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_GATEWAY:-secret/data/ruby-core/nats/gateway}
+      - NATS_CA_PATH=${NATS_CA_PATH:-/etc/nats/certs/ca.pem}
+      - NATS_CLIENT_CERT_PATH=${NATS_CLIENT_CERT_PATH:-/etc/nats/certs/client-cert.pem}
+      - NATS_CLIENT_KEY_PATH=${NATS_CLIENT_KEY_PATH:-/etc/nats/certs/client-key.pem}
+    volumes:
+      - ../base/nats/certs:/etc/nats/certs:ro
 
-  # engine:
-  #   image: ghcr.io/${GITHUB_REPOSITORY}/engine:${VERSION}
-  #   restart: unless-stopped
-  #   depends_on:
-  #     nats:
-  #       condition: service_healthy
-  #   environment:
-  #     - VAULT_ADDR=${VAULT_ADDR}
-  #   # ... additional config
+  # ==========================================================================
+  # Engine Service
+  # ==========================================================================
+  engine:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-engine:${VERSION:-v0.1.0}
+    container_name: ruby-core-engine
+    restart: unless-stopped
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - VAULT_ADDR=${VAULT_ADDR}
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - NATS_URL=${NATS_URL:-tls://nats:4222}
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_ENGINE:-secret/data/ruby-core/nats/engine}
+      - NATS_CA_PATH=${NATS_CA_PATH:-/etc/nats/certs/ca.pem}
+      - NATS_CLIENT_CERT_PATH=${NATS_CLIENT_CERT_PATH:-/etc/nats/certs/client-cert.pem}
+      - NATS_CLIENT_KEY_PATH=${NATS_CLIENT_KEY_PATH:-/etc/nats/certs/client-key.pem}
+    volumes:
+      - ../base/nats/certs:/etc/nats/certs:ro
 
 # ==========================================================================
 # No named volumes in production - use host bind mounts for reliable backups
