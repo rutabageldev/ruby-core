@@ -3,6 +3,10 @@
 This document describes how to configure TLS-secured Docker API access from the
 devcontainer to the host Docker daemon using Vault-managed certificates.
 
+## Decision Rationale
+
+We grant the devcontainer controlled access to the host Docker daemon so developers can rebuild services and check container status without switching between local and container shells. This reduces context switching while keeping Docker access gated by TLS and explicit certificate management.
+
 ## Architecture
 
 ```

@@ -19,6 +19,8 @@ See deploy/ for docker compose stacks.
 
 Open in VS Code with the Dev Containers extension or use the GitHub Codespaces button. The container includes Go and pre-commit tooling.
 
+The devcontainer is also configured to access the host Docker daemon over TLS. This keeps developers in a single shell while still allowing service rebuilds, container status checks, and compose workflows from inside the devcontainer. Setup details are documented in `.devcontainer/DOCKER_TLS_SETUP.md`.
+
 ```bash
 go test ./...              # run tests
 pre-commit run --all-files # run linters
