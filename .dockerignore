@@ -1,0 +1,13 @@
+.git
+.github
+.devcontainer
+.gitleaks.toml
+.pre-commit-config.yaml
+.markdownlint.yml
+.yamllint.yml
+docs
+deploy
+scripts
+*.md
+.env
+.env.*
