@@ -50,9 +50,10 @@
     4. Manually deploy to production by updating `docker-compose.prod.yml` to use the `v0.1.0` images.
 
 * **Acceptance Criteria:**
-  * `[ ]` Services start successfully by fetching secrets from Vault (ADR-0015).
-  * `[ ]` Pushing a `v0.1.0` tag successfully builds and pushes versioned images to GHCR (ADR-0016).
-  * `[ ]` The `v0.1.0` services run successfully in the production environment.
+  * `[ ]` Gateway and engine log successful NATS connection using Vault-sourced credentials (ADR-0015).
+  * `[ ]` Pushing a `v0.1.0` tag builds and pushes `gateway:v0.1.0` and `engine:v0.1.0` to GHCR (ADR-0016).
+  * `[ ]` `docker compose` deploy runs both services and they stay running for at least 5 minutes.
+  * `[ ]` Rollback instructions exist for redeploying a prior tag.
 
 ### **Phase 3: Reliability Patterns**
 

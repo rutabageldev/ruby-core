@@ -128,6 +128,10 @@ vault kv get secret/ruby-core/nats/gateway
 vault kv get -field=seed secret/ruby-core/nats/gateway
 ```
 
+## Known Limitations (Phase 2)
+
+- **Static VAULT_TOKEN:** Services authenticate to Vault using a static token passed via environment variable. This is acceptable for Phase 2 but should be migrated to AppRole or Kubernetes auth in a future phase (ADR-0015).
+
 ## Security Notes
 
 1. **Dev tokens are secrets** - The dev root token, while convenient, grants full access to Vault. Treat it as a secret:
