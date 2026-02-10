@@ -206,10 +206,11 @@ main() {
 
     preflight
     echo ""
-    start_services
-    echo ""
 
     trap cleanup EXIT
+
+    start_services
+    echo ""
 
     if verify; then
         echo ""

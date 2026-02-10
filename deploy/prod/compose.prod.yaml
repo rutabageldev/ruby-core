@@ -35,6 +35,10 @@ services:
       retries: 3
       start_period: 10s
 
+  # NOTE: Gateway and Engine require Vault connectivity at startup to fetch
+  # NKEY seeds and TLS certificates. Vault is external in production —
+  # ensure VAULT_ADDR is reachable before starting services.
+
   # ==========================================================================
   # Gateway Service
   # ==========================================================================
@@ -46,6 +50,7 @@ services:
       nats:
         condition: service_healthy
     environment:
+      - ENVIRONMENT=production
       - VAULT_ADDR=${VAULT_ADDR}
       - VAULT_TOKEN=${VAULT_TOKEN}
       - NATS_URL=${NATS_URL:-tls://nats:4222}
@@ -64,6 +69,7 @@ services:
       nats:
         condition: service_healthy
     environment:
+      - ENVIRONMENT=production
       - VAULT_ADDR=${VAULT_ADDR}
       - VAULT_TOKEN=${VAULT_TOKEN}
       - NATS_URL=${NATS_URL:-tls://nats:4222}

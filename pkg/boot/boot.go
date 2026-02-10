@@ -5,9 +5,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	vault "github.com/hashicorp/vault/api"
 	"github.com/nats-io/nats.go"
@@ -16,11 +18,11 @@ import (
 
 // Config holds bootstrap configuration read from environment variables.
 type Config struct {
-	VaultAddr     string
-	VaultToken    string
-	NATSUrl       string
-	VaultNKEYPath string
-	VaultTLSPath  string
+	VaultAddr       string
+	VaultToken      string
+	NATSUrl         string
+	VaultNKEYPath   string
+	VaultTLSPath    string
 	NATSRequireMTLS bool
 }
 
@@ -31,10 +33,15 @@ type TLSMaterial struct {
 	CA   []byte
 }
 
+// vaultReader abstracts Vault read operations for testing.
+type vaultReader interface {
+	Read(path string) (*vault.Secret, error)
+}
+
 // LoadConfig reads bootstrap configuration from environment variables.
 func LoadConfig(service string) Config {
 	requireMTLS, _ := strconv.ParseBool(os.Getenv("NATS_REQUIRE_MTLS"))
-	return Config{
+	cfg := Config{
 		VaultAddr:       envOrDefault("VAULT_ADDR", "http://127.0.0.1:8201"),
 		VaultToken:      os.Getenv("VAULT_TOKEN"),
 		NATSUrl:         envOrDefault("NATS_URL", "tls://localhost:4222"),
@@ -42,12 +49,19 @@ func LoadConfig(service string) Config {
 		VaultTLSPath:    envOrDefault("VAULT_TLS_PATH", "secret/data/ruby-core/tls/"+service),
 		NATSRequireMTLS: requireMTLS,
 	}
+
+	// Reject plaintext Vault in production (ADR-0015)
+	if os.Getenv("ENVIRONMENT") == "production" && strings.HasPrefix(cfg.VaultAddr, "http://") {
+		log.Fatalf("vault: VAULT_ADDR uses plaintext HTTP (%s); HTTPS required in production", cfg.VaultAddr)
+	}
+
+	return cfg
 }
 
-// FetchNATSSeed retrieves the NATS NKEY seed from Vault KV v2.
-func FetchNATSSeed(addr, token, path string) (string, error) {
+// newVaultClient creates a configured Vault client.
+func newVaultClient(addr, token string) (*vault.Client, error) {
 	if token == "" {
-		return "", fmt.Errorf("VAULT_TOKEN is not set")
+		return nil, fmt.Errorf("VAULT_TOKEN is not set")
 	}
 
 	cfg := vault.DefaultConfig()
@@ -55,11 +69,47 @@ func FetchNATSSeed(addr, token, path string) (string, error) {
 
 	client, err := vault.NewClient(cfg)
 	if err != nil {
-		return "", fmt.Errorf("create client: %w", err)
+		return nil, fmt.Errorf("create client: %w", err)
 	}
 	client.SetToken(token)
+	return client, nil
+}
 
-	secret, err := client.Logical().Read(path)
+// FetchNATSSeed retrieves the NATS NKEY seed from Vault KV v2.
+func FetchNATSSeed(addr, token, path string) (string, error) {
+	client, err := newVaultClient(addr, token)
+	if err != nil {
+		return "", err
+	}
+
+	var seed string
+	err = withRetry(func() error {
+		var fetchErr error
+		seed, fetchErr = fetchSeed(client.Logical(), path)
+		return fetchErr
+	})
+	return seed, err
+}
+
+// FetchNATSTLS retrieves TLS client certificate material from Vault KV v2.
+func FetchNATSTLS(addr, token, path string) (*TLSMaterial, error) {
+	client, err := newVaultClient(addr, token)
+	if err != nil {
+		return nil, err
+	}
+
+	var mat *TLSMaterial
+	err = withRetry(func() error {
+		var fetchErr error
+		mat, fetchErr = fetchTLS(client.Logical(), path)
+		return fetchErr
+	})
+	return mat, err
+}
+
+// fetchSeed reads and parses the NKEY seed from a Vault KV v2 path.
+func fetchSeed(r vaultReader, path string) (string, error) {
+	secret, err := r.Read(path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", path, err)
 	}
@@ -79,22 +129,9 @@ func FetchNATSSeed(addr, token, path string) (string, error) {
 	return seed, nil
 }
 
-// FetchNATSTLS retrieves TLS client certificate material from Vault KV v2.
-func FetchNATSTLS(addr, token, path string) (*TLSMaterial, error) {
-	if token == "" {
-		return nil, fmt.Errorf("VAULT_TOKEN is not set")
-	}
-
-	cfg := vault.DefaultConfig()
-	cfg.Address = addr
-
-	client, err := vault.NewClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("create client: %w", err)
-	}
-	client.SetToken(token)
-
-	secret, err := client.Logical().Read(path)
+// fetchTLS reads and parses TLS certificate material from a Vault KV v2 path.
+func fetchTLS(r vaultReader, path string) (*TLSMaterial, error) {
+	secret, err := r.Read(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
@@ -167,7 +204,7 @@ func ConnectNATS(cfg Config, name, seed string, tlsMat *TLSMaterial) (*nats.Conn
 		tlsCfg := &tls.Config{
 			RootCAs:      pool,
 			Certificates: []tls.Certificate{clientCert},
-			MinVersion:   tls.VersionTLS12,
+			MinVersion:   tls.VersionTLS13,
 		}
 		opts = append(opts, nats.Secure(tlsCfg))
 	}
@@ -177,6 +214,23 @@ func ConnectNATS(cfg Config, name, seed string, tlsMat *TLSMaterial) (*nats.Conn
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 	return nc, nil
+}
+
+// withRetry retries fn up to 3 times with exponential backoff (1s, 2s, 4s).
+func withRetry(fn func() error) error {
+	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
+	var err error
+	for i := 0; i <= len(delays); i++ {
+		err = fn()
+		if err == nil {
+			return nil
+		}
+		if i < len(delays) {
+			log.Printf("vault: retry %d/%d after error: %v", i+1, len(delays), err)
+			time.Sleep(delays[i])
+		}
+	}
+	return err
 }
 
 func envOrDefault(key, fallback string) string {

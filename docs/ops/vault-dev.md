@@ -72,7 +72,7 @@ go install github.com/nats-io/nkeys/nk@latest
 # Generate a key pair for a service
 nk -gen user -pubout
 
-# Output example:
+# Output example (DO NOT USE these values — generate your own):
 # SUAIBDPBAUTWCWBKIO6XHQNINK5FWJW4OHLXC3HQ2KFE4PEJUA44CNHTC4  <- seed (secret)
 # UDXU4RCSJNZOIQHZNWXHXORDPRTGNJAHAHFRGZNEEJCPQTT2M7NLCNF4   <- public key
 ```
