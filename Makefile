@@ -5,6 +5,7 @@
 
 .PHONY: help build test fmt lint clean \
         dev-up dev-down dev-restart dev-logs dev-ps \
+        dev-services-up dev-services-down dev-verify \
         prod-up prod-down prod-restart prod-logs prod-ps \
         docker-ps docker-images docker-volumes docker-clean \
         setup-dev-creds setup-dev-creds-force nats-validate
@@ -112,6 +113,19 @@ dev-logs: ## Tail dev logs (or SERVICE=<name>)
 
 dev-ps: ## Show dev container status
 	$(COMPOSE_CMD) -f $(DEV_COMPOSE) ps
+
+# =============================================================================
+# Development Services (profile: services)
+# =============================================================================
+
+dev-services-up: ## Build and start gateway+engine in dev (requires infra running)
+	$(COMPOSE_CMD) -f $(DEV_COMPOSE) --profile services up -d --build $(COMPOSE_SERVICE)
+
+dev-services-down: ## Stop gateway+engine in dev
+	$(COMPOSE_CMD) -f $(DEV_COMPOSE) --profile services stop gateway engine
+
+dev-verify: ## Verify gateway+engine connect via Vault-sourced mTLS
+	@scripts/verify-tls-stack.sh
 
 # =============================================================================
 # Production Environment

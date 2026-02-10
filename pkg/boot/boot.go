@@ -20,12 +20,15 @@ type Config struct {
 	VaultToken    string
 	NATSUrl       string
 	VaultNKEYPath string
-
-	// TLS paths for mTLS with NATS (ADR-0018)
-	NATSCaPath      string
-	NATSCertPath    string
-	NATSKeyPath     string
+	VaultTLSPath  string
 	NATSRequireMTLS bool
+}
+
+// TLSMaterial holds PEM-encoded TLS certificate material fetched from Vault.
+type TLSMaterial struct {
+	Cert []byte
+	Key  []byte
+	CA   []byte
 }
 
 // LoadConfig reads bootstrap configuration from environment variables.
@@ -36,9 +39,7 @@ func LoadConfig(service string) Config {
 		VaultToken:      os.Getenv("VAULT_TOKEN"),
 		NATSUrl:         envOrDefault("NATS_URL", "tls://localhost:4222"),
 		VaultNKEYPath:   envOrDefault("VAULT_NKEY_PATH", "secret/data/ruby-core/nats/"+service),
-		NATSCaPath:      os.Getenv("NATS_CA_PATH"),
-		NATSCertPath:    os.Getenv("NATS_CLIENT_CERT_PATH"),
-		NATSKeyPath:     os.Getenv("NATS_CLIENT_KEY_PATH"),
+		VaultTLSPath:    envOrDefault("VAULT_TLS_PATH", "secret/data/ruby-core/tls/"+service),
 		NATSRequireMTLS: requireMTLS,
 	}
 }
@@ -78,8 +79,58 @@ func FetchNATSSeed(addr, token, path string) (string, error) {
 	return seed, nil
 }
 
+// FetchNATSTLS retrieves TLS client certificate material from Vault KV v2.
+func FetchNATSTLS(addr, token, path string) (*TLSMaterial, error) {
+	if token == "" {
+		return nil, fmt.Errorf("VAULT_TOKEN is not set")
+	}
+
+	cfg := vault.DefaultConfig()
+	cfg.Address = addr
+
+	client, err := vault.NewClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create client: %w", err)
+	}
+	client.SetToken(token)
+
+	secret, err := client.Logical().Read(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	if secret == nil || secret.Data == nil {
+		return nil, fmt.Errorf("no data at %s", path)
+	}
+
+	data, ok := secret.Data["data"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected data format at %s", path)
+	}
+
+	cert, ok := data["cert"].(string)
+	if !ok || cert == "" {
+		return nil, fmt.Errorf("missing cert in %s", path)
+	}
+
+	key, ok := data["key"].(string)
+	if !ok || key == "" {
+		return nil, fmt.Errorf("missing key in %s", path)
+	}
+
+	ca, ok := data["ca"].(string)
+	if !ok || ca == "" {
+		return nil, fmt.Errorf("missing ca in %s", path)
+	}
+
+	return &TLSMaterial{
+		Cert: []byte(cert),
+		Key:  []byte(key),
+		CA:   []byte(ca),
+	}, nil
+}
+
 // ConnectNATS establishes a NATS connection using NKEY auth and mTLS.
-func ConnectNATS(cfg Config, name, seed string) (*nats.Conn, error) {
+func ConnectNATS(cfg Config, name, seed string, tlsMat *TLSMaterial) (*nats.Conn, error) {
 	kp, err := nkeys.FromSeed([]byte(seed))
 	if err != nil {
 		return nil, fmt.Errorf("parse seed: %w", err)
@@ -99,28 +150,18 @@ func ConnectNATS(cfg Config, name, seed string) (*nats.Conn, error) {
 
 	useTLS := strings.HasPrefix(cfg.NATSUrl, "tls://") || cfg.NATSRequireMTLS
 	if useTLS {
-		if cfg.NATSCaPath == "" {
-			return nil, fmt.Errorf("NATS_CA_PATH is required for TLS connection")
-		}
-		if cfg.NATSCertPath == "" {
-			return nil, fmt.Errorf("NATS_CLIENT_CERT_PATH is required for mTLS connection")
-		}
-		if cfg.NATSKeyPath == "" {
-			return nil, fmt.Errorf("NATS_CLIENT_KEY_PATH is required for mTLS connection")
+		if tlsMat == nil {
+			return nil, fmt.Errorf("TLS material is required for mTLS connection")
 		}
 
-		caCert, err := os.ReadFile(cfg.NATSCaPath)
-		if err != nil {
-			return nil, fmt.Errorf("read CA cert %s: %w", cfg.NATSCaPath, err)
-		}
 		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA cert %s", cfg.NATSCaPath)
+		if !pool.AppendCertsFromPEM(tlsMat.CA) {
+			return nil, fmt.Errorf("failed to parse CA certificate from Vault")
 		}
 
-		clientCert, err := tls.LoadX509KeyPair(cfg.NATSCertPath, cfg.NATSKeyPath)
+		clientCert, err := tls.X509KeyPair(tlsMat.Cert, tlsMat.Key)
 		if err != nil {
-			return nil, fmt.Errorf("load client cert: %w", err)
+			return nil, fmt.Errorf("parse client certificate from Vault: %w", err)
 		}
 
 		tlsCfg := &tls.Config{

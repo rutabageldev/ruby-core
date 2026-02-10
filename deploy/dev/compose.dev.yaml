@@ -68,6 +68,55 @@ services:
       retries: 3
       start_period: 5s
 
+  # ==========================================================================
+  # Gateway Service (profile: services)
+  # ==========================================================================
+  # Activated with: docker compose --profile services up -d
+  # ADR-0015: All secrets from Vault (no cert volume mounts)
+  # ADR-0018: mTLS via Vault-sourced client certificates
+  gateway:
+    profiles: [services]
+    build:
+      context: ../..
+      dockerfile: services/gateway/Dockerfile
+    container_name: ruby-core-gateway
+    restart: unless-stopped
+    depends_on:
+      vault:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-dev-root-token}
+      - NATS_URL=tls://nats:4222
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=secret/data/ruby-core/nats/gateway
+      - VAULT_TLS_PATH=secret/data/ruby-core/tls/gateway
+
+  # ==========================================================================
+  # Engine Service (profile: services)
+  # ==========================================================================
+  engine:
+    profiles: [services]
+    build:
+      context: ../..
+      dockerfile: services/engine/Dockerfile
+    container_name: ruby-core-engine
+    restart: unless-stopped
+    depends_on:
+      vault:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-dev-root-token}
+      - NATS_URL=tls://nats:4222
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=secret/data/ruby-core/nats/engine
+      - VAULT_TLS_PATH=secret/data/ruby-core/tls/engine
+
 # ==========================================================================
 # Named Volumes
 # ==========================================================================

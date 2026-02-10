@@ -51,11 +51,7 @@ services:
       - NATS_URL=${NATS_URL:-tls://nats:4222}
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_GATEWAY:-secret/data/ruby-core/nats/gateway}
-      - NATS_CA_PATH=${NATS_CA_PATH:-/etc/nats/certs/ca.pem}
-      - NATS_CLIENT_CERT_PATH=${NATS_CLIENT_CERT_PATH:-/etc/nats/certs/client-cert.pem}
-      - NATS_CLIENT_KEY_PATH=${NATS_CLIENT_KEY_PATH:-/etc/nats/certs/client-key.pem}
-    volumes:
-      - ../base/nats/certs:/etc/nats/certs:ro
+      - VAULT_TLS_PATH=${VAULT_TLS_PATH_GATEWAY:-secret/data/ruby-core/tls/gateway}
 
   # ==========================================================================
   # Engine Service
@@ -73,11 +69,7 @@ services:
       - NATS_URL=${NATS_URL:-tls://nats:4222}
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_ENGINE:-secret/data/ruby-core/nats/engine}
-      - NATS_CA_PATH=${NATS_CA_PATH:-/etc/nats/certs/ca.pem}
-      - NATS_CLIENT_CERT_PATH=${NATS_CLIENT_CERT_PATH:-/etc/nats/certs/client-cert.pem}
-      - NATS_CLIENT_KEY_PATH=${NATS_CLIENT_KEY_PATH:-/etc/nats/certs/client-key.pem}
-    volumes:
-      - ../base/nats/certs:/etc/nats/certs:ro
+      - VAULT_TLS_PATH=${VAULT_TLS_PATH_ENGINE:-secret/data/ruby-core/tls/engine}
 
 # ==========================================================================
 # No named volumes in production - use host bind mounts for reliable backups

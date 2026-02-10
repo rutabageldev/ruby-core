@@ -28,7 +28,13 @@ func main() {
 	}
 	log.Printf("vault: fetched NATS seed from %s", cfg.VaultNKEYPath)
 
-	nc, err := boot.ConnectNATS(cfg, "ruby-core-engine", seed)
+	tlsMat, err := boot.FetchNATSTLS(cfg.VaultAddr, cfg.VaultToken, cfg.VaultTLSPath)
+	if err != nil {
+		log.Fatalf("vault: %v", err)
+	}
+	log.Printf("vault: fetched TLS material from %s", cfg.VaultTLSPath)
+
+	nc, err := boot.ConnectNATS(cfg, "ruby-core-engine", seed, tlsMat)
 	if err != nil {
 		log.Fatalf("nats: %v", err)
 	}
