@@ -4,7 +4,7 @@
 # ADR-0021: Single-node NATS with host bind mount for backups
 # ADR-0018: TLS everywhere
 # ADR-0017: NKEY-based authentication
-# ADR-0015: Secrets from Vault
+# ADR-0015: Secrets from Vault (general-purpose Vault on node)
 
 services:
   # ==========================================================================
@@ -12,19 +12,21 @@ services:
   # ==========================================================================
   nats:
     image: nats:2.10-alpine
-    container_name: ruby-core-nats
+    container_name: ruby-core-prod-nats
     restart: unless-stopped
     ports:
-      # Client port (TLS only) - localhost since services are co-located
-      - "127.0.0.1:4222:4222"
-      # HTTP monitoring - bind to localhost only in production
-      - "127.0.0.1:8222:8222"
+      # Client port (TLS only) - offset from dev (4222) to allow coexistence
+      - "127.0.0.1:4223:4222"
+      # HTTP monitoring - localhost only, offset from dev (8222)
+      - "127.0.0.1:8223:8222"
     volumes:
       # JetStream persistent storage - HOST BIND MOUNT (ADR-0021)
       # This path MUST be included in automated backups
       - /var/lib/ruby-core/nats:/data/jetstream
       # NATS configuration
       - ../base/nats/nats.conf:/etc/nats/nats.conf:ro
+      # Generated authorization config (from scripts/setup-credentials.sh)
+      - ../base/nats/auth.conf:/etc/nats/auth.conf:ro
       # TLS certificates (from Vault PKI in production)
       - ../base/nats/certs:/etc/nats/certs:ro
     command: ["-c", "/etc/nats/nats.conf"]
@@ -36,23 +38,27 @@ services:
       start_period: 10s
 
   # NOTE: Gateway and Engine require Vault connectivity at startup to fetch
-  # NKEY seeds and TLS certificates. Vault is external in production —
-  # ensure VAULT_ADDR is reachable before starting services.
+  # NKEY seeds and TLS certificates. The general-purpose Vault on this node
+  # must be running before starting services.
 
   # ==========================================================================
   # Gateway Service
   # ==========================================================================
   gateway:
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-gateway:${VERSION:-v0.1.0}
-    container_name: ruby-core-gateway
+    container_name: ruby-core-prod-gateway
     restart: unless-stopped
+    networks:
+      - default
+      - vault
     depends_on:
       nats:
         condition: service_healthy
     environment:
       - ENVIRONMENT=production
-      - VAULT_ADDR=${VAULT_ADDR}
+      - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN}
+      - VAULT_ALLOW_HTTP=true
       - NATS_URL=${NATS_URL:-tls://nats:4222}
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_GATEWAY:-secret/data/ruby-core/nats/gateway}
@@ -63,19 +69,32 @@ services:
   # ==========================================================================
   engine:
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-engine:${VERSION:-v0.1.0}
-    container_name: ruby-core-engine
+    container_name: ruby-core-prod-engine
     restart: unless-stopped
+    networks:
+      - default
+      - vault
     depends_on:
       nats:
         condition: service_healthy
     environment:
       - ENVIRONMENT=production
-      - VAULT_ADDR=${VAULT_ADDR}
+      - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN}
+      - VAULT_ALLOW_HTTP=true
       - NATS_URL=${NATS_URL:-tls://nats:4222}
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_ENGINE:-secret/data/ruby-core/nats/engine}
       - VAULT_TLS_PATH=${VAULT_TLS_PATH_ENGINE:-secret/data/ruby-core/tls/engine}
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  default:
+  vault:
+    external: true
+    name: vault_default
 
 # ==========================================================================
 # No named volumes in production - use host bind mounts for reliable backups

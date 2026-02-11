@@ -39,7 +39,7 @@
   * Release: `.github/workflows/release.yml` (manual GHCR workflow)
   * NTP docs: `docs/ops/ntp.md`
 
-### **Phase 2: "Hello World" Production Release**
+### **Phase 2: "Hello World" Production Release** [Complete]
 
 **Goal:** Build the minimum viable services to validate the full, automated release path, from Git tag to a running "production" container.
 
@@ -50,10 +50,21 @@
     4. Manually deploy to production by updating `docker-compose.prod.yml` to use the `v0.1.0` images.
 
 * **Acceptance Criteria:**
-  * `[ ]` Gateway and engine log successful NATS connection using Vault-sourced credentials (ADR-0015).
-  * `[ ]` Pushing a `v0.1.0` tag builds and pushes `gateway:v0.1.0` and `engine:v0.1.0` to GHCR (ADR-0016).
-  * `[ ]` `docker compose` deploy runs both services and they stay running for at least 5 minutes.
-  * `[ ]` Rollback instructions exist for redeploying a prior tag.
+  * `[X]` Gateway and engine log successful NATS connection using Vault-sourced credentials (ADR-0015).
+  * `[X]` Pushing a `v0.1.0` tag builds and pushes `gateway:v0.1.0` and `engine:v0.1.0` to GHCR (ADR-0016).
+  * `[X]` `docker compose` deploy runs both services and they stay running for at least 5 minutes.
+  * `[X]` Rollback instructions exist for redeploying a prior tag.
+
+* **Implementation Notes (Phase 2):**
+  * Gateway: `services/gateway/main.go` — Vault-sourced NKEY + mTLS, graceful shutdown
+  * Engine: `services/engine/main.go` — same pattern
+  * Boot package: `pkg/boot/boot.go` — Vault fetch with retry, TLS 1.3, prod HTTPS guard
+  * Unit tests: `pkg/boot/boot_test.go` (28 test cases)
+  * Release pipeline: `.github/workflows/release.yml` (v* tag -> GHCR matrix build)
+  * Prod compose: `deploy/prod/compose.prod.yaml` (ENVIRONMENT=production, Vault-sourced secrets)
+  * Verification: `scripts/verify-tls-stack.sh`, `make dev-verify`
+  * Rollback runbook: `docs/ops/deploy-rollback.md`
+  * Verification report: `docs/ops/phase2-verification.md`
 
 ### **Phase 3: Reliability Patterns**
 

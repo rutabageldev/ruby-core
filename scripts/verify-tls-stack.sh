@@ -7,7 +7,7 @@
 #
 # Prerequisites:
 #   - Dev infrastructure running (make dev-up)
-#   - Vault seeded with credentials (make setup-dev-creds)
+#   - General-purpose Vault running with credentials seeded (make setup-creds)
 #
 # Usage:
 #   ./scripts/verify-tls-stack.sh
@@ -25,6 +25,13 @@ COMPOSE_FILE="${PROJECT_ROOT}/deploy/dev/compose.dev.yaml"
 TIMEOUT=60
 POLL_INTERVAL=3
 SERVICES=("gateway" "engine")
+
+# Container name prefix (dev environment)
+CONTAINER_PREFIX="ruby-core-dev"
+
+# Vault configuration — general-purpose Vault on this node
+export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
+export VAULT_TOKEN="${VAULT_TOKEN:-root}"
 
 # Expected log messages (from services/gateway/main.go and services/engine/main.go)
 EXPECTED_LOGS=(
@@ -67,28 +74,36 @@ cleanup() {
 # =============================================================================
 
 preflight() {
-    log_info "Checking dev infrastructure..."
+    log_info "Checking infrastructure..."
 
     local missing=0
 
-    for container in ruby-core-vault ruby-core-nats; do
-        if docker ps --format '{{.Names}}' | grep -q "^${container}$"; then
-            local health
-            health=$(docker inspect --format='{{.State.Health.Status}}' "${container}" 2>/dev/null || echo "unknown")
-            if [ "${health}" = "healthy" ]; then
-                log_success "${container} is running (healthy)"
-            else
-                log_warn "${container} is running but status: ${health}"
-            fi
+    # Check NATS container
+    local nats_container="${CONTAINER_PREFIX}-nats"
+    if docker ps --format '{{.Names}}' | grep -q "^${nats_container}$"; then
+        local health
+        health=$(docker inspect --format='{{.State.Health.Status}}' "${nats_container}" 2>/dev/null || echo "unknown")
+        if [ "${health}" = "healthy" ]; then
+            log_success "${nats_container} is running (healthy)"
         else
-            log_error "${container} is not running"
-            missing=1
+            log_warn "${nats_container} is running but status: ${health}"
         fi
-    done
+    else
+        log_error "${nats_container} is not running"
+        missing=1
+    fi
+
+    # Check Vault connectivity (general-purpose Vault, not a project container)
+    if vault status &>/dev/null 2>&1; then
+        log_success "Vault is reachable"
+    else
+        log_error "Vault is not reachable (check general-purpose Vault container)"
+        missing=1
+    fi
 
     if [ ${missing} -eq 1 ]; then
         echo ""
-        log_error "Dev infrastructure not running. Start it with: make dev-up"
+        log_error "Infrastructure not ready. Start with: make dev-up"
         exit 1
     fi
 }
@@ -184,9 +199,6 @@ verify() {
         done
         echo "--- nats logs ---"
         compose logs nats 2>/dev/null || true
-        echo ""
-        echo "--- vault logs (last 20 lines) ---"
-        compose logs --tail=20 vault 2>/dev/null || true
         return 1
     fi
 

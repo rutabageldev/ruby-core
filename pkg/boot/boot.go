@@ -42,7 +42,7 @@ type vaultReader interface {
 func LoadConfig(service string) Config {
 	requireMTLS, _ := strconv.ParseBool(os.Getenv("NATS_REQUIRE_MTLS"))
 	cfg := Config{
-		VaultAddr:       envOrDefault("VAULT_ADDR", "http://127.0.0.1:8201"),
+		VaultAddr:       envOrDefault("VAULT_ADDR", "http://127.0.0.1:8200"),
 		VaultToken:      os.Getenv("VAULT_TOKEN"),
 		NATSUrl:         envOrDefault("NATS_URL", "tls://localhost:4222"),
 		VaultNKEYPath:   envOrDefault("VAULT_NKEY_PATH", "secret/data/ruby-core/nats/"+service),
@@ -51,8 +51,13 @@ func LoadConfig(service string) Config {
 	}
 
 	// Reject plaintext Vault in production (ADR-0015)
+	// VAULT_ALLOW_HTTP=true opts out for single-node deployments where Vault
+	// is co-located and accessed via Docker networking.
 	if os.Getenv("ENVIRONMENT") == "production" && strings.HasPrefix(cfg.VaultAddr, "http://") {
-		log.Fatalf("vault: VAULT_ADDR uses plaintext HTTP (%s); HTTPS required in production", cfg.VaultAddr)
+		allow, _ := strconv.ParseBool(os.Getenv("VAULT_ALLOW_HTTP"))
+		if !allow {
+			log.Fatalf("vault: VAULT_ADDR uses plaintext HTTP (%s); HTTPS required in production (set VAULT_ALLOW_HTTP=true for single-node deployments)", cfg.VaultAddr)
+		}
 	}
 
 	return cfg

@@ -4,6 +4,7 @@
 # ADR-0021: Single-node NATS with JetStream persistence
 # ADR-0018: TLS everywhere (mTLS for NATS)
 # ADR-0017: NKEY-based authentication
+# ADR-0015: Vault for secrets (general-purpose Vault on node)
 
 services:
   # ==========================================================================
@@ -11,58 +12,26 @@ services:
   # ==========================================================================
   nats:
     image: nats:2.10-alpine
-    container_name: ruby-core-nats
+    container_name: ruby-core-dev-nats
     restart: unless-stopped
     ports:
       # Client port (TLS)
       - "4222:4222"
-      # HTTP monitoring (dev only - bind to localhost in prod)
+      # HTTP monitoring
       - "8222:8222"
     volumes:
       # JetStream persistent storage (ADR-0021)
-      - nats-data:/data/jetstream
+      - ruby-core-dev-nats-data:/data/jetstream
       # NATS configuration
       - ../base/nats/nats.conf:/etc/nats/nats.conf:ro
+      # Generated authorization config (from scripts/setup-credentials.sh)
+      - ../base/nats/auth.conf:/etc/nats/auth.conf:ro
       # TLS certificates (generate with mkcert for dev)
       - ../base/nats/certs:/etc/nats/certs:ro
     command: ["-c", "/etc/nats/nats.conf"]
     healthcheck:
       # Health check via HTTP monitoring endpoint
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-
-  # ==========================================================================
-  # Vault (Dev Mode) - Secrets Management
-  # ==========================================================================
-  # ADR-0015: Vault for secrets management
-  # WARNING: Dev mode is for local development only!
-  # The root token is printed to logs - this is intentional for dev.
-  #
-  # SECURITY NOTE: Vault binds to localhost only by default. If you need
-  # to access Vault from other containers, use Docker networking (vault:8200)
-  # rather than exposing to all interfaces.
-  vault:
-    image: hashicorp/vault:1.15
-    container_name: ruby-core-vault
-    restart: unless-stopped
-    ports:
-      # Bind to localhost only - prevents exposure on shared networks
-      # Using 8201 to avoid conflicts with other Vault instances
-      - "127.0.0.1:8201:8200"
-    environment:
-      # Dev mode configuration
-      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_TOKEN:-dev-root-token}
-      # Listen on all interfaces INSIDE container (required for Docker networking)
-      # External access is restricted by the port binding above
-      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
-    cap_add:
-      # Required for Vault's memory locking
-      - IPC_LOCK
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8200/v1/sys/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -79,16 +48,17 @@ services:
     build:
       context: ../..
       dockerfile: services/gateway/Dockerfile
-    container_name: ruby-core-gateway
+    container_name: ruby-core-dev-gateway
     restart: unless-stopped
+    networks:
+      - default
+      - vault
     depends_on:
-      vault:
-        condition: service_healthy
       nats:
         condition: service_healthy
     environment:
       - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=${VAULT_TOKEN:-dev-root-token}
+      - VAULT_TOKEN=${VAULT_TOKEN:-root}
       - NATS_URL=tls://nats:4222
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=secret/data/ruby-core/nats/gateway
@@ -102,20 +72,30 @@ services:
     build:
       context: ../..
       dockerfile: services/engine/Dockerfile
-    container_name: ruby-core-engine
+    container_name: ruby-core-dev-engine
     restart: unless-stopped
+    networks:
+      - default
+      - vault
     depends_on:
-      vault:
-        condition: service_healthy
       nats:
         condition: service_healthy
     environment:
       - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=${VAULT_TOKEN:-dev-root-token}
+      - VAULT_TOKEN=${VAULT_TOKEN:-root}
       - NATS_URL=tls://nats:4222
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=secret/data/ruby-core/nats/engine
       - VAULT_TLS_PATH=secret/data/ruby-core/tls/engine
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  default:
+  vault:
+    external: true
+    name: vault_default
 
 # ==========================================================================
 # Named Volumes
@@ -127,5 +107,5 @@ volumes:
   #   volumes:
   #     - /var/lib/ruby-core/nats:/data/jetstream
   # See deploy/prod/compose.prod.yaml for production configuration.
-  nats-data:
+  ruby-core-dev-nats-data:
     driver: local

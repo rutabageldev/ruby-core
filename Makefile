@@ -1,5 +1,5 @@
 # Ruby Core Makefile
-# Phase 1: Minimal build, test, and environment management
+# Build, test, and environment management
 #
 # Usage: make help
 
@@ -7,8 +7,9 @@
         dev-up dev-down dev-restart dev-logs dev-ps \
         dev-services-up dev-services-down dev-verify \
         prod-up prod-down prod-restart prod-logs prod-ps \
+        deploy-prod deploy-prod-down \
         docker-ps docker-images docker-volumes docker-clean \
-        setup-dev-creds setup-dev-creds-force nats-validate
+        setup-creds setup-creds-force nats-validate
 
 # Default target
 .DEFAULT_GOAL := help
@@ -32,38 +33,43 @@ else
   COMPOSE_SERVICE =
 endif
 
+# Stability test configuration
+STABILITY_TIMEOUT ?= 300
+STABILITY_POLL    ?= 15
+
 # =============================================================================
 # Help
 # =============================================================================
 
 help: ## Show this help message
-	@echo "Ruby Core - Phase 1 Makefile"
+	@echo "Ruby Core Makefile"
 	@echo ""
 	@echo "Usage: make [target] [SERVICE=<service>]"
 	@echo ""
 	@echo "Build & Test:"
-	@grep -E '^(build|test|fmt|lint|clean):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
+	@grep -E '^(build|test|fmt|lint|clean):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Development Environment:"
-	@grep -E '^dev-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
+	@grep -E '^dev-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Production Environment:"
-	@grep -E '^prod-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
+	@grep -E '^(prod-|deploy-).*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Docker:"
-	@grep -E '^docker-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
+	@grep -E '^docker-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Setup:"
-	@grep -E '^setup-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
+	@grep -E '^setup-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Validation:"
-	@grep -E '^nats-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
+	@grep -E '^nats-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Examples:"
-	@echo "  make dev-up              # Start all dev services"
+	@echo "  make dev-up              # Start dev NATS"
 	@echo "  make dev-up SERVICE=nats # Start only NATS in dev"
-	@echo "  make dev-logs SERVICE=vault # Tail Vault logs"
-	@echo "  make prod-restart SERVICE=nats # Restart NATS in prod"
+	@echo "  make dev-services-up     # Build and start gateway+engine"
+	@echo "  make deploy-prod         # Pull images and deploy to prod with stability test"
+	@echo "  make setup-creds         # Generate/sync credentials from Vault"
 
 # =============================================================================
 # Build & Test
@@ -147,6 +153,37 @@ prod-ps: ## Show prod container status
 	$(COMPOSE_CMD) -f $(PROD_COMPOSE) ps
 
 # =============================================================================
+# Production Deployment
+# =============================================================================
+
+deploy-prod: nats-validate ## Pull GHCR images and deploy to prod with 5-min stability test
+	@echo "=== Deploying to production ==="
+	$(COMPOSE_CMD) -f $(PROD_COMPOSE) pull
+	$(COMPOSE_CMD) -f $(PROD_COMPOSE) up -d
+	@echo ""
+	@echo "=== Running $(STABILITY_TIMEOUT)s stability test ==="
+	@elapsed=0; \
+	while [ $$elapsed -lt $(STABILITY_TIMEOUT) ]; do \
+		unhealthy=$$(docker ps --filter "name=ruby-core-prod" \
+			--format '{{.Names}} {{.Status}}' | grep -v "Up" || true); \
+		if [ -n "$$unhealthy" ]; then \
+			echo "[FAIL] Unhealthy: $$unhealthy"; \
+			$(COMPOSE_CMD) -f $(PROD_COMPOSE) logs --tail=30; \
+			exit 1; \
+		fi; \
+		remaining=$$(($(STABILITY_TIMEOUT) - elapsed)); \
+		echo "[$$elapsed/$(STABILITY_TIMEOUT)s] All prod containers healthy ($$remaining s remaining)"; \
+		sleep $(STABILITY_POLL); \
+		elapsed=$$((elapsed + $(STABILITY_POLL))); \
+	done
+	@echo ""
+	@echo "=== Stability test PASSED ($(STABILITY_TIMEOUT)s) ==="
+	@$(COMPOSE_CMD) -f $(PROD_COMPOSE) ps
+
+deploy-prod-down: ## Stop and remove prod deployment
+	$(COMPOSE_CMD) -f $(PROD_COMPOSE) down
+
+# =============================================================================
 # Docker Utilities
 # =============================================================================
 
@@ -186,15 +223,15 @@ docker-nuke: ## Remove ALL ruby-core containers, images, and volumes (use with c
 # Setup
 # =============================================================================
 
-setup-dev-creds: ## Generate and store dev credentials (NKEYs + TLS) in Vault
-	@scripts/setup-dev-credentials.sh
+setup-creds: ## Generate and store credentials (NKEYs + TLS) in Vault
+	@scripts/setup-credentials.sh
 
-setup-dev-creds-force: ## Regenerate ALL dev credentials (overwrites existing)
-	@FORCE_REGEN=true scripts/setup-dev-credentials.sh
+setup-creds-force: ## Regenerate ALL credentials (overwrites existing)
+	@FORCE_REGEN=true scripts/setup-credentials.sh
 
 # =============================================================================
-# Validation (Phase 1)
+# Validation
 # =============================================================================
 
-nats-validate: ## Validate NATS configuration (checks for placeholders, TLS, etc.)
+nats-validate: ## Validate NATS configuration (checks auth.conf, TLS, etc.)
 	@deploy/base/nats/validate-config.sh

@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Ruby Core is an event-driven control plane for home automation. It uses NATS JetStream as the message broker.
 
+This is a personal project where all components and environments (dev, prod) are hosted on a single Debian utility node. The goal is to practice industry best practices within reason for a single-node deployment. The node has a broader Docker presence beyond this project, including a general-purpose HashiCorp Vault instance.
+
 ## Architecture
 
 ### Core Services (in `services/`)

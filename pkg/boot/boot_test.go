@@ -365,7 +365,7 @@ func TestLoadConfig(t *testing.T) {
 
 		cfg := LoadConfig("gateway")
 
-		if cfg.VaultAddr != "http://127.0.0.1:8201" {
+		if cfg.VaultAddr != "http://127.0.0.1:8200" {
 			t.Errorf("VaultAddr = %q, want default", cfg.VaultAddr)
 		}
 		if cfg.NATSUrl != "tls://localhost:4222" {
@@ -410,6 +410,20 @@ func TestLoadConfig(t *testing.T) {
 		}
 		if !cfg.NATSRequireMTLS {
 			t.Error("NATSRequireMTLS should be true")
+		}
+	})
+
+	t.Run("VAULT_ALLOW_HTTP bypasses production guard", func(t *testing.T) {
+		t.Setenv("ENVIRONMENT", "production")
+		t.Setenv("VAULT_ADDR", "http://vault:8200")
+		t.Setenv("VAULT_TOKEN", "root")
+		t.Setenv("VAULT_ALLOW_HTTP", "true")
+		t.Setenv("NATS_REQUIRE_MTLS", "")
+
+		cfg := LoadConfig("gateway")
+
+		if cfg.VaultAddr != "http://vault:8200" {
+			t.Errorf("VaultAddr = %q, want http://vault:8200", cfg.VaultAddr)
 		}
 	})
 }

@@ -1,5 +1,14 @@
 # Deploy & Rollback Runbook
 
+## Prerequisites
+
+Before deploying or rolling back services:
+
+- **Vault** must be reachable at `VAULT_ADDR` with a valid `VAULT_TOKEN`
+- **NKEY seeds** and **TLS certificates** must be stored in Vault at the expected paths (`secret/data/ruby-core/nats/{service}` and `secret/data/ruby-core/tls/{service}`)
+- For **development**, run `scripts/setup-dev-credentials.sh` to generate and seed all credentials
+- For **production**, ensure Vault is configured with proper auth (AppRole or similar) and secrets are manually provisioned
+
 ## Deploying a New Version
 
 1. Push a Git tag to trigger the release pipeline:
