@@ -55,20 +55,19 @@ else
     fi
 fi
 
-# Check for TLS certificate files (referenced in config)
-CERT_DIR="$(dirname "$CONFIG_FILE")/certs"
-if [ -d "$CERT_DIR" ]; then
-    for cert in server-cert.pem server-key.pem ca.pem; do
-        if [ ! -f "$CERT_DIR/$cert" ]; then
-            echo "[FAIL] Missing TLS certificate: $CERT_DIR/$cert"
-            ERRORS=$((ERRORS + 1))
-        else
-            echo "[OK] Found: $CERT_DIR/$cert"
-        fi
-    done
+# Check for TLS server certificate in Vault (ADR-0015, ADR-0018)
+# Server certs are stored exclusively in Vault and fetched at container start
+if command -v vault >/dev/null 2>&1; then
+    if vault kv get "secret/ruby-core/tls/nats-server" >/dev/null 2>&1; then
+        echo "[OK] NATS server certificate found in Vault (secret/ruby-core/tls/nats-server)"
+    else
+        echo "[FAIL] NATS server certificate not found in Vault"
+        echo "       Run: make setup-creds"
+        ERRORS=$((ERRORS + 1))
+    fi
 else
-    echo "[WARN] Certificate directory not found: $CERT_DIR"
-    echo "       TLS certificates are required for mTLS (ADR-0018)"
+    echo "[WARN] vault CLI not available — skipping Vault cert check"
+    echo "       Ensure server certs are seeded with: make setup-creds"
     WARNINGS=$((WARNINGS + 1))
 fi
 

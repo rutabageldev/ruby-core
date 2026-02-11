@@ -1,88 +1,43 @@
 # NATS TLS Certificates
 
-This directory contains TLS certificates for NATS mTLS authentication (ADR-0018).
+TLS certificates for NATS mTLS authentication (ADR-0018) are stored exclusively
+in Vault (ADR-0015). No certificate files are kept on the host filesystem.
 
-## Required Files
+## How It Works
 
-- `ca.pem` - Certificate Authority certificate
-- `server-cert.pem` - NATS server certificate
-- `server-key.pem` - NATS server private key
+1. `make setup-creds` generates certificates with mkcert and stores them in Vault
+2. At container startup, the `nats-init` service fetches server certs from Vault
+   into a RAM-backed (tmpfs) Docker volume
+3. NATS reads certs from the shared volume — they never touch the host disk
+4. Service containers (gateway, engine) fetch their client certs directly from Vault
 
-## Development Setup
+## Vault Paths
 
-For local development, use `mkcert` to generate certificates:
+| Path | Contents |
+|------|----------|
+| `secret/ruby-core/tls/nats-server` | Server cert, key, and CA |
+| `secret/ruby-core/tls/gateway` | Gateway client cert and key |
+| `secret/ruby-core/tls/engine` | Engine client cert and key |
+| `secret/ruby-core/tls/notifier` | Notifier client cert and key |
+| `secret/ruby-core/tls/presence` | Presence client cert and key |
+| `secret/ruby-core/tls/admin` | Admin client cert and key |
 
-```bash
-# Install mkcert (if not already installed)
-# macOS: brew install mkcert
-# Linux: See https://github.com/FiloSottile/mkcert#installation
-
-# Install the local CA
-mkcert -install
-
-# Generate NATS server certificate
-cd deploy/base/nats/certs
-mkcert -cert-file server-cert.pem -key-file server-key.pem localhost 127.0.0.1 nats
-
-# Copy the CA certificate
-cp "$(mkcert -CAROOT)/rootCA.pem" ca.pem
-```
-
-## Production Setup
-
-For production, use Vault's PKI Secrets Engine:
+## Commands
 
 ```bash
-# Enable PKI secrets engine
-vault secrets enable pki
+# Generate and store all certs in Vault
+make setup-creds
 
-# Configure CA (see docs/ops/vault-dev.md for full setup)
-vault write pki/root/generate/internal \
-  common_name="Ruby Core CA" \
-  ttl=87600h
+# Force regeneration of all certs
+make setup-creds-force
 
-# Generate NATS server certificate
-vault write pki/issue/nats-server \
-  common_name="nats.ruby-core.local" \
-  ttl="720h"
+# Verify the cert is in Vault
+vault kv get secret/ruby-core/tls/nats-server
 ```
 
 ## Security Notes
 
-- **Never commit real certificates or keys to Git**
-- Server keys must be readable only by the NATS process
-- Rotate certificates before expiration
-- Store all secrets in Vault (ADR-0015)
-
-## Pre-Deployment Validation
-
-Before deploying NATS, run the configuration validator to catch common issues:
-
-```bash
-cd deploy/base/nats
-./validate-config.sh
-
-# Or specify a different config file:
-./validate-config.sh /path/to/nats.conf
-```
-
-The validator checks for:
-
-- Unreplaced placeholder NKEYs
-- Missing TLS certificate files
-- Required TLS configuration
-- Default deny permissions
-
-## Client Certificates
-
-Each service needs its own client certificate for mTLS. Generate using:
-
-```bash
-# For development (using mkcert)
-mkcert -client -cert-file gateway-cert.pem -key-file gateway-key.pem gateway
-
-# For production (using Vault)
-vault write pki/issue/service-client \
-  common_name="gateway.ruby-core.local" \
-  ttl="720h"
-```
+- Server private key is not stored in the repo directory
+- Certs live in a Docker-managed named volume, refreshed from Vault on each startup
+- Rotate certificates by running `make setup-creds-force` and restarting services
+- All secrets managed via Vault (ADR-0015)

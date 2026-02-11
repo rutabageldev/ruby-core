@@ -10,7 +10,7 @@
 #   1. Verifies the general-purpose Vault is reachable
 #   2. Generates NKEY pairs for each service (if missing), stores seeds in Vault
 #   3. Generates auth.conf from Vault-stored public NKEYs (always regenerated)
-#   4. Generates TLS certificates (server certs to disk, client certs to Vault)
+#   4. Generates TLS certificates (all stored in Vault, nothing on disk)
 #   5. Validates the setup
 #
 # Prerequisites:
@@ -38,7 +38,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 AUTH_CONF="${PROJECT_ROOT}/deploy/base/nats/auth.conf"
-CERTS_DIR="${PROJECT_ROOT}/deploy/base/nats/certs"
 
 # Vault configuration — points to the general-purpose Vault on this node
 export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
@@ -334,27 +333,26 @@ EOF
 generate_tls_certs() {
     log_info "Generating TLS certificates..."
 
-    # Ensure certs directory exists
-    mkdir -p "${CERTS_DIR}"
-
-    # Check if we should skip — server certs on disk AND client certs in Vault
-    if [[ "${FORCE_REGEN:-false}" != "true" ]] && \
-       [[ -f "${CERTS_DIR}/server-cert.pem" ]] && \
-       [[ -f "${CERTS_DIR}/server-key.pem" ]] && \
-       [[ -f "${CERTS_DIR}/ca.pem" ]]; then
-        # Also verify client certs exist in Vault
+    # Check if we should skip — all certs (server + client) already in Vault
+    if [[ "${FORCE_REGEN:-false}" != "true" ]]; then
         local all_in_vault=true
-        for service in "${SERVICES[@]}"; do
-            if ! vault kv get "secret/ruby-core/tls/${service}" &> /dev/null; then
-                all_in_vault=false
-                break
-            fi
-        done
+        # Check server cert
+        if ! vault kv get "secret/ruby-core/tls/nats-server" &> /dev/null; then
+            all_in_vault=false
+        fi
+        # Check client certs
         if [[ "${all_in_vault}" == "true" ]]; then
-            log_info "TLS certificates already exist (use FORCE_REGEN=true to regenerate)"
+            for service in "${SERVICES[@]}"; do
+                if ! vault kv get "secret/ruby-core/tls/${service}" &> /dev/null; then
+                    all_in_vault=false
+                    break
+                fi
+            done
+        fi
+        if [[ "${all_in_vault}" == "true" ]]; then
+            log_info "TLS certificates already exist in Vault (use FORCE_REGEN=true to regenerate)"
             return 0
         fi
-        log_info "Server certs exist on disk but client certs missing from Vault — regenerating client certs"
     fi
 
     # Install mkcert CA if not already done
@@ -365,33 +363,44 @@ generate_tls_certs() {
     local ca_root
     ca_root=$(mkcert -CAROOT)
 
+    # All cert generation uses a temp directory — nothing written to the repo
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    # shellcheck disable=SC2064  # We want immediate expansion here since tmp_dir is local
+    trap "rm -rf ${tmp_dir}" EXIT
+
     # Generate NATS server certificate
     # Include both dev and prod container names as SANs
     log_info "  Generating NATS server certificate..."
     (
-        cd "${CERTS_DIR}"
+        cd "${tmp_dir}"
         mkcert -cert-file server-cert.pem -key-file server-key.pem \
             localhost 127.0.0.1 ::1 nats ruby-core-dev-nats ruby-core-prod-nats
     )
     log_success "  Server certificate generated"
 
-    # Copy CA certificate
-    cp "${ca_root}/rootCA.pem" "${CERTS_DIR}/ca.pem"
-    log_success "  CA certificate copied"
+    # Copy CA certificate to temp dir
+    cp "${ca_root}/rootCA.pem" "${tmp_dir}/ca.pem"
 
-    # Set restrictive permissions on sensitive files
-    chmod 600 "${CERTS_DIR}/server-key.pem"
-    chmod 644 "${CERTS_DIR}/server-cert.pem"
-    chmod 644 "${CERTS_DIR}/ca.pem"
-    log_success "  File permissions set (key: 600, certs: 644)"
+    # Read server cert material
+    local server_cert_content
+    local server_key_content
+    local ca_content
+    server_cert_content=$(cat "${tmp_dir}/server-cert.pem")
+    server_key_content=$(cat "${tmp_dir}/server-key.pem")
+    ca_content=$(cat "${tmp_dir}/ca.pem")
+
+    # Store server cert in Vault
+    vault kv put "secret/ruby-core/tls/nats-server" \
+        cert="${server_cert_content}" \
+        key="${server_key_content}" \
+        ca="${ca_content}" \
+        service="nats-server" \
+        created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    log_success "  Server certificate stored in Vault at secret/ruby-core/tls/nats-server"
 
     # Generate client certificates and store in Vault
     log_info "  Generating client certificates..."
-
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-    # shellcheck disable=SC2064  # We want immediate expansion here since tmp_dir is local
-    trap "rm -rf ${tmp_dir}" EXIT
 
     for service in "${SERVICES[@]}"; do
         local vault_path="secret/ruby-core/tls/${service}"
@@ -408,8 +417,6 @@ generate_tls_certs() {
         local key_content
         cert_content=$(cat "${tmp_dir}/${service}-cert.pem")
         key_content=$(cat "${tmp_dir}/${service}-key.pem")
-        local ca_content
-        ca_content=$(cat "${CERTS_DIR}/ca.pem")
 
         # Store in Vault
         vault kv put "${vault_path}" \
@@ -423,7 +430,7 @@ generate_tls_certs() {
     done
 
     # Clean up temp files (trap handles this)
-    log_success "TLS certificates generated and stored"
+    log_success "TLS certificates generated and stored in Vault"
 }
 
 # =============================================================================
@@ -435,13 +442,13 @@ validate_setup() {
 
     local errors=0
 
-    # Check NATS server certs exist on disk
-    for cert_file in "server-cert.pem" "server-key.pem" "ca.pem"; do
-        if [[ ! -f "${CERTS_DIR}/${cert_file}" ]]; then
-            log_error "Missing: ${CERTS_DIR}/${cert_file}"
-            errors=$((errors + 1))
-        fi
-    done
+    # Check NATS server certs exist in Vault
+    if vault kv get "secret/ruby-core/tls/nats-server" &> /dev/null; then
+        log_success "Server certificate found in Vault at secret/ruby-core/tls/nats-server"
+    else
+        log_error "Missing server certificate in Vault: secret/ruby-core/tls/nats-server"
+        errors=$((errors + 1))
+    fi
 
     # Check auth.conf was generated
     if [[ ! -f "${AUTH_CONF}" ]]; then
@@ -497,9 +504,6 @@ print_summary() {
     echo ""
     echo "Generated files (git-ignored):"
     echo "  ${AUTH_CONF}"
-    echo "  ${CERTS_DIR}/server-cert.pem"
-    echo "  ${CERTS_DIR}/server-key.pem"
-    echo "  ${CERTS_DIR}/ca.pem"
     echo ""
     echo "Secrets in Vault (${VAULT_ADDR}):"
     echo ""
@@ -508,7 +512,8 @@ print_summary() {
         echo "    secret/ruby-core/nats/${service}"
     done
     echo ""
-    echo "  Client TLS Certificates:"
+    echo "  TLS Certificates:"
+    echo "    secret/ruby-core/tls/nats-server  (NATS server cert)"
     for service in "${SERVICES[@]}"; do
         echo "    secret/ruby-core/tls/${service}"
     done
@@ -536,7 +541,7 @@ main() {
     echo "  1. Verify Vault connectivity"
     echo "  2. Generate NKEY pairs (if missing) and store seeds in Vault"
     echo "  3. Generate auth.conf with public NKEYs for NATS"
-    echo "  4. Generate TLS certs (server to disk, client to Vault)"
+    echo "  4. Generate TLS certs and store ALL in Vault (nothing on disk)"
     echo "  5. Validate the setup"
     echo ""
     echo "Vault Address: ${VAULT_ADDR}"

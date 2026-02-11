@@ -8,12 +8,33 @@
 
 services:
   # ==========================================================================
+  # NATS Certificate Init (fetches server certs from Vault into tmpfs)
+  # ==========================================================================
+  nats-init:
+    image: hashicorp/vault:1.15
+    container_name: ruby-core-prod-nats-init
+    restart: "no"
+    entrypoint: ["/bin/sh"]
+    command: ["/scripts/fetch-nats-certs.sh"]
+    volumes:
+      - nats-certs:/certs
+      - ../../scripts/fetch-nats-certs.sh:/scripts/fetch-nats-certs.sh:ro
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN}
+    networks:
+      - vault
+
+  # ==========================================================================
   # NATS JetStream Message Broker (Production)
   # ==========================================================================
   nats:
     image: nats:2.10-alpine
     container_name: ruby-core-prod-nats
     restart: unless-stopped
+    depends_on:
+      nats-init:
+        condition: service_completed_successfully
     ports:
       # Client port (TLS only) - offset from dev (4222) to allow coexistence
       - "127.0.0.1:4223:4222"
@@ -27,8 +48,8 @@ services:
       - ../base/nats/nats.conf:/etc/nats/nats.conf:ro
       # Generated authorization config (from scripts/setup-credentials.sh)
       - ../base/nats/auth.conf:/etc/nats/auth.conf:ro
-      # TLS certificates (from Vault PKI in production)
-      - ../base/nats/certs:/etc/nats/certs:ro
+      # TLS certificates (fetched from Vault by nats-init into tmpfs)
+      - nats-certs:/etc/nats/certs:ro
     command: ["-c", "/etc/nats/nats.conf"]
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
@@ -97,5 +118,11 @@ networks:
     name: vault_default
 
 # ==========================================================================
-# No named volumes in production - use host bind mounts for reliable backups
+# Volumes
 # ==========================================================================
+# JetStream uses a host bind mount (not a named volume) for reliable backups.
+# The nats-certs volume is RAM-backed (tmpfs) — certs are fetched from Vault
+# at startup and never written to disk.
+volumes:
+  nats-certs:
+    driver: local

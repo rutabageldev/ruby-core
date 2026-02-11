@@ -8,12 +8,33 @@
 
 services:
   # ==========================================================================
+  # NATS Certificate Init (fetches server certs from Vault into tmpfs)
+  # ==========================================================================
+  nats-init:
+    image: hashicorp/vault:1.15
+    container_name: ruby-core-dev-nats-init
+    restart: "no"
+    entrypoint: ["/bin/sh"]
+    command: ["/scripts/fetch-nats-certs.sh"]
+    volumes:
+      - nats-certs:/certs
+      - ../../scripts/fetch-nats-certs.sh:/scripts/fetch-nats-certs.sh:ro
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-root}
+    networks:
+      - vault
+
+  # ==========================================================================
   # NATS JetStream Message Broker
   # ==========================================================================
   nats:
     image: nats:2.10-alpine
     container_name: ruby-core-dev-nats
     restart: unless-stopped
+    depends_on:
+      nats-init:
+        condition: service_completed_successfully
     ports:
       # Client port (TLS)
       - "4222:4222"
@@ -26,8 +47,8 @@ services:
       - ../base/nats/nats.conf:/etc/nats/nats.conf:ro
       # Generated authorization config (from scripts/setup-credentials.sh)
       - ../base/nats/auth.conf:/etc/nats/auth.conf:ro
-      # TLS certificates (generate with mkcert for dev)
-      - ../base/nats/certs:/etc/nats/certs:ro
+      # TLS certificates (fetched from Vault by nats-init into tmpfs)
+      - nats-certs:/etc/nats/certs:ro
     command: ["-c", "/etc/nats/nats.conf"]
     healthcheck:
       # Health check via HTTP monitoring endpoint
@@ -108,4 +129,9 @@ volumes:
   #     - /var/lib/ruby-core/nats:/data/jetstream
   # See deploy/prod/compose.prod.yaml for production configuration.
   ruby-core-dev-nats-data:
+    driver: local
+  # TLS certificates fetched from Vault by nats-init at startup.
+  # Certs live here instead of in the repo tree (deploy/base/nats/certs/).
+  # Cleaned up with: docker compose down -v
+  nats-certs:
     driver: local
