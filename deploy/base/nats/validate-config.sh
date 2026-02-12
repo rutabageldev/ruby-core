@@ -80,7 +80,7 @@ else
 fi
 
 # Check for TLS configuration
-if grep -q "^tls {" "$CONFIG_FILE" || grep -q "^tls{" "$CONFIG_FILE"; then
+if grep -qE "^[[:space:]]*tls[[:space:]]*\{" "$CONFIG_FILE"; then
     echo "[OK] TLS configuration block found"
 
     # Check for verify: true (mTLS)

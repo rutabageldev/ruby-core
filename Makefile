@@ -165,7 +165,7 @@ deploy-prod: nats-validate ## Pull GHCR images and deploy to prod with 5-min sta
 	@elapsed=0; \
 	while [ $$elapsed -lt $(STABILITY_TIMEOUT) ]; do \
 		unhealthy=$$(docker ps --filter "name=ruby-core-prod" \
-			--format '{{.Names}} {{.Status}}' | grep -v "Up" || true); \
+			--format '{{.Names}} {{.Status}}' | grep -v "nats-init" | grep -v "Up" || true); \
 		if [ -n "$$unhealthy" ]; then \
 			echo "[FAIL] Unhealthy: $$unhealthy"; \
 			$(COMPOSE_CMD) -f $(PROD_COMPOSE) logs --tail=30; \

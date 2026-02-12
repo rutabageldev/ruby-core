@@ -8,7 +8,7 @@
 
 services:
   # ==========================================================================
-  # NATS Certificate Init (fetches server certs from Vault into tmpfs)
+  # NATS Certificate Init (fetches server certs from Vault)
   # ==========================================================================
   nats-init:
     image: hashicorp/vault:1.15
@@ -48,7 +48,7 @@ services:
       - ../base/nats/nats.conf:/etc/nats/nats.conf:ro
       # Generated authorization config (from scripts/setup-credentials.sh)
       - ../base/nats/auth.conf:/etc/nats/auth.conf:ro
-      # TLS certificates (fetched from Vault by nats-init into tmpfs)
+      # TLS certificates (fetched from Vault by nats-init)
       - nats-certs:/etc/nats/certs:ro
     command: ["-c", "/etc/nats/nats.conf"]
     healthcheck:
@@ -69,6 +69,11 @@ services:
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-gateway:${VERSION:-v0.1.0}
     container_name: ruby-core-prod-gateway
     restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     networks:
       - default
       - vault
@@ -92,6 +97,11 @@ services:
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-engine:${VERSION:-v0.1.0}
     container_name: ruby-core-prod-engine
     restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     networks:
       - default
       - vault
@@ -121,8 +131,8 @@ networks:
 # Volumes
 # ==========================================================================
 # JetStream uses a host bind mount (not a named volume) for reliable backups.
-# The nats-certs volume is RAM-backed (tmpfs) — certs are fetched from Vault
-# at startup and never written to disk.
+# The nats-certs volume stores certs fetched from Vault at startup.
+# Certs are not stored in the repo tree. Clean up with: docker compose down -v
 volumes:
   nats-certs:
     driver: local

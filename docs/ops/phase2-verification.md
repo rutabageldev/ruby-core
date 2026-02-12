@@ -71,8 +71,8 @@ f17cc11 feat: Pin GitHub Actions to SHA digests and activate release pipeline
 
 1. Created a Docker Compose overlay (`compose.prod-local.yaml`) to test the production config locally
 2. Overlay added a Vault dev server, built images locally, and overrode `ENVIRONMENT` to avoid the HTTPS guard
-3. Seeded Vault with NKEYs and TLS certificates using `scripts/setup-dev-credentials.sh`
-4. Synced NKEY public keys in `nats.conf` to match Vault seeds
+3. Seeded Vault with NKEYs and TLS certificates using `scripts/setup-credentials.sh`
+4. NKEY public keys auto-synced to `auth.conf` by the setup script
 5. Started all 4 containers and waited 5 minutes
 6. Captured `docker compose ps` and service logs as proof
 7. Tore down the prod stack and cleaned up the overlay

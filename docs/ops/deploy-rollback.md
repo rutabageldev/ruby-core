@@ -6,8 +6,8 @@ Before deploying or rolling back services:
 
 - **Vault** must be reachable at `VAULT_ADDR` with a valid `VAULT_TOKEN`
 - **NKEY seeds** and **TLS certificates** must be stored in Vault at the expected paths (`secret/data/ruby-core/nats/{service}` and `secret/data/ruby-core/tls/{service}`)
-- For **development**, run `scripts/setup-dev-credentials.sh` to generate and seed all credentials
-- For **production**, ensure Vault is configured with proper auth (AppRole or similar) and secrets are manually provisioned
+- For **development**, run `scripts/setup-credentials.sh` (or `make setup-creds`) to generate and seed all credentials
+- For **production** (Phase 2), the same static Vault token is used. Future phases will migrate to AppRole auth (ADR-0015)
 
 ## Deploying a New Version
 

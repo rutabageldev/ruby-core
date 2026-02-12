@@ -6,6 +6,7 @@ useDefault = true
 
 # NATS NKEY public keys (prefix "U") are not secrets.
 # Only seed keys (prefix "S") are secrets; those live in Vault (ADR-0015).
+# auth.conf is git-ignored but the allowlist covers nats config broadly.
 [[allowlists]]
-  description = "NATS NKEY public user keys in nats.conf"
-  paths = ['''deploy/base/nats/nats\.conf''']
+  description = "NATS NKEY public user keys in NATS config files"
+  paths = ['''deploy/base/nats/.*\.conf''']

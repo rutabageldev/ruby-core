@@ -8,7 +8,7 @@
 
 services:
   # ==========================================================================
-  # NATS Certificate Init (fetches server certs from Vault into tmpfs)
+  # NATS Certificate Init (fetches server certs from Vault)
   # ==========================================================================
   nats-init:
     image: hashicorp/vault:1.15
@@ -36,10 +36,10 @@ services:
       nats-init:
         condition: service_completed_successfully
     ports:
-      # Client port (TLS)
-      - "4222:4222"
-      # HTTP monitoring
-      - "8222:8222"
+      # Client port (TLS) — localhost only
+      - "127.0.0.1:4222:4222"
+      # HTTP monitoring — localhost only (unauthenticated)
+      - "127.0.0.1:8222:8222"
     volumes:
       # JetStream persistent storage (ADR-0021)
       - ruby-core-dev-nats-data:/data/jetstream
@@ -47,7 +47,7 @@ services:
       - ../base/nats/nats.conf:/etc/nats/nats.conf:ro
       # Generated authorization config (from scripts/setup-credentials.sh)
       - ../base/nats/auth.conf:/etc/nats/auth.conf:ro
-      # TLS certificates (fetched from Vault by nats-init into tmpfs)
+      # TLS certificates (fetched from Vault by nats-init)
       - nats-certs:/etc/nats/certs:ro
     command: ["-c", "/etc/nats/nats.conf"]
     healthcheck:
@@ -78,6 +78,7 @@ services:
       nats:
         condition: service_healthy
     environment:
+      - ENVIRONMENT=development
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-root}
       - NATS_URL=tls://nats:4222
@@ -102,6 +103,7 @@ services:
       nats:
         condition: service_healthy
     environment:
+      - ENVIRONMENT=development
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-root}
       - NATS_URL=tls://nats:4222

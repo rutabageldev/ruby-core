@@ -1,14 +1,14 @@
 # NATS TLS Certificates
 
 TLS certificates for NATS mTLS authentication (ADR-0018) are stored exclusively
-in Vault (ADR-0015). No certificate files are kept on the host filesystem.
+in Vault (ADR-0015). No certificate files are kept in the repository tree.
 
 ## How It Works
 
 1. `make setup-creds` generates certificates with mkcert and stores them in Vault
 2. At container startup, the `nats-init` service fetches server certs from Vault
-   into a RAM-backed (tmpfs) Docker volume
-3. NATS reads certs from the shared volume — they never touch the host disk
+   into a Docker-managed named volume (not in the repo tree)
+3. NATS reads certs from the shared volume
 4. Service containers (gateway, engine) fetch their client certs directly from Vault
 
 ## Vault Paths

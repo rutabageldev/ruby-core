@@ -73,20 +73,23 @@ go install github.com/nats-io/nkeys/nk@latest
 nk -gen user -pubout
 
 # Output example (DO NOT USE these values — generate your own):
-# SUAIBDPBAUTWCWBKIO6XHQNINK5FWJW4OHLXC3HQ2KFE4PEJUA44CNHTC4  <- seed (secret)
+# SUA...YOUR_SEED_HERE...  (generate with: nk -gen user -pubout)  <- seed (secret)
 # UDXU4RCSJNZOIQHZNWXHXORDPRTGNJAHAHFRGZNEEJCPQTT2M7NLCNF4   <- public key
 ```
 
 Store the seed in Vault:
 
 ```bash
-# Store gateway NKEY seed
+# Store gateway NKEY seed (paste your generated seed)
 vault kv put secret/ruby-core/nats/gateway \
-  seed="SUAIBDPBAUTWCWBKIO6XHQNINK5FWJW4OHLXC3HQ2KFE4PEJUA44CNHTC4"
+  seed="<your-generated-seed>"
 
 # Store engine NKEY seed
 vault kv put secret/ruby-core/nats/engine \
-  seed="<generated-seed>"
+  seed="<your-generated-seed>"
+
+# Or use the automated script (recommended):
+# make setup-creds
 ```
 
 ### TLS Certificates
