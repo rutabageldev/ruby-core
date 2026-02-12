@@ -60,6 +60,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/ruby-core-${{ matrix.service }}
           tags: |
+            type=semver,pattern=v{{version}},value=${{ inputs.version || github.ref_name }}
             type=semver,pattern={{version}},value=${{ inputs.version || github.ref_name }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version || github.ref_name }}
             type=sha,prefix=

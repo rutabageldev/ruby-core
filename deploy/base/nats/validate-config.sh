@@ -7,6 +7,10 @@
 
 set -e
 
+# Vault configuration — general-purpose Vault on this node
+export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
+export VAULT_TOKEN="${VAULT_TOKEN:-root}"
+
 CONFIG_FILE="${1:-$(dirname "$0")/nats.conf}"
 AUTH_FILE="$(dirname "$CONFIG_FILE")/auth.conf"
 
