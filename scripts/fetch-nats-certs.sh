@@ -46,6 +46,12 @@ done
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+if ! vault kv get "${VAULT_PATH}" >/dev/null 2>&1; then
+    echo "[nats-init] ERROR: Secret not found at ${VAULT_PATH}"
+    echo "[nats-init] Run 'make setup-creds' first (with Vault running and VAULT_TOKEN set)."
+    exit 2
+fi
+
 vault kv get -field=cert "${VAULT_PATH}" > "${TMP_DIR}/server-cert.pem"
 vault kv get -field=key  "${VAULT_PATH}" > "${TMP_DIR}/server-key.pem"
 vault kv get -field=ca   "${VAULT_PATH}" > "${TMP_DIR}/ca.pem"
