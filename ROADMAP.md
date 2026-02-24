@@ -66,7 +66,7 @@
   * Rollback runbook: `docs/ops/deploy-rollback.md`
   * Verification report: `docs/ops/phase2-verification.md`
 
-### **Phase 3: Reliability Patterns**
+### **Phase 3: Reliability Patterns** [Complete]
 
 **Goal:** Implement the core reliability patterns for message handling before business logic is written.
 
@@ -77,9 +77,9 @@
     4. Codify default tuning values (`MaxAckPending`, TTLs, etc.) in a central config.
 
 * **Acceptance Criteria:**
-  * `[ ]` A "poison pill" message is correctly moved to the DLQ.
-  * `[ ]` A consumer correctly applies backpressure under load.
-  * `[ ]` An idempotency check correctly discards a duplicate event.
+  * `[X]` A "poison pill" message is correctly moved to the DLQ.
+  * `[X]` A consumer correctly applies backpressure under load.
+  * `[X]` An idempotency check correctly discards a duplicate event.
 
 ### **Phase 4: Audit & Foundational Observability**
 

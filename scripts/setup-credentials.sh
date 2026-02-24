@@ -250,6 +250,14 @@ authorization {
 
     # Engine service
     # Responsibilities: Process events, evaluate rules, publish commands
+    # Phase 3 additions:
+    #   publish  \$JS.API.>     — JetStream API (stream/consumer setup, pull requests, KV)
+    #   publish  \$JS.ACK.>     — Message acknowledgements to JetStream
+    #   publish  \$KV.idempotency.> — NATS KV put (\$KV.<bucket>.<key> subjects, not under \$JS.API)
+    #   publish  dlq.>          — DLQ forwarder routes dead-lettered messages (ADR-0022)
+    #   subscribe _INBOX.>      — Reply-to subjects for JetStream API responses
+    #   subscribe \$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.HA_EVENTS.engine_processor
+    #                           — max-delivery advisory triggers DLQ routing (ADR-0022)
     {
       nkey: "${PUBKEYS[engine]}"
       permissions: {
@@ -257,12 +265,18 @@ authorization {
           allow: [
             "ruby_engine.commands.>",
             "ruby_engine.audit.>",
-            "ruby_engine.metrics.>"
+            "ruby_engine.metrics.>",
+            "\$JS.API.>",
+            "\$JS.ACK.>",
+            "\$KV.idempotency.>",
+            "dlq.>"
           ]
         }
         subscribe: {
           allow: [
-            "ha.events.>"
+            "ha.events.>",
+            "_INBOX.>",
+            "\$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.HA_EVENTS.engine_processor"
           ]
         }
       }
