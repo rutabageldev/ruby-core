@@ -46,7 +46,7 @@ export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
 export VAULT_TOKEN="${VAULT_TOKEN:-root}"
 
 # Services that need NKEYs
-SERVICES=("gateway" "engine" "notifier" "presence" "admin")
+SERVICES=("gateway" "engine" "notifier" "presence" "admin" "audit-sink")
 
 # Color output
 RED='\033[0;31m'

@@ -99,6 +99,7 @@ PUBKEY_ENGINE=$(fetch_pubkey engine)
 PUBKEY_NOTIFIER=$(fetch_pubkey notifier)
 PUBKEY_PRESENCE=$(fetch_pubkey presence)
 PUBKEY_ADMIN=$(fetch_pubkey admin)
+PUBKEY_AUDIT_SINK=$(fetch_pubkey audit-sink)
 
 echo "[nats-init] Generating auth.conf..."
 
@@ -107,6 +108,7 @@ cat > "${TMP_DIR}/auth.conf" <<EOF
 # Source: Vault NKEY public keys (ADR-0015, ADR-0017)
 #
 # Subject naming follows ADR-0027: {source}.{class}.{type}[.{id}][.{action}]
+# Exception: audit subjects use audit.{source}.{type} to avoid overlap with dlq.>
 # Classes: events, commands, audit, metrics, logs
 
 authorization {
@@ -129,7 +131,7 @@ authorization {
         publish: {
           allow: [
             "ha.events.>",
-            "ruby_gateway.audit.>",
+            "audit.ruby_gateway.>",
             "ruby_gateway.metrics.>"
           ]
         }
@@ -157,7 +159,7 @@ authorization {
         publish: {
           allow: [
             "ruby_engine.commands.>",
-            "ruby_engine.audit.>",
+            "audit.ruby_engine.>",
             "ruby_engine.metrics.>",
             "\$JS.API.>",
             "\$JS.ACK.>",
@@ -182,7 +184,7 @@ authorization {
       permissions: {
         publish: {
           allow: [
-            "ruby_notifier.audit.>",
+            "audit.ruby_notifier.>",
             "ruby_notifier.metrics.>"
           ]
         }
@@ -202,13 +204,33 @@ authorization {
         publish: {
           allow: [
             "ruby_presence.events.>",
-            "ruby_presence.audit.>",
+            "audit.ruby_presence.>",
             "ruby_presence.metrics.>"
           ]
         }
         subscribe: {
           allow: [
             "unifi.events.>"
+          ]
+        }
+      }
+    },
+
+    # Audit-Sink service
+    # Responsibilities: Consume all *.audit.> events from AUDIT_EVENTS stream, archive to NDJSON file
+    # Principle of least privilege: no publish to business subjects; only JetStream API/ACK
+    {
+      nkey: "${PUBKEY_AUDIT_SINK}"
+      permissions: {
+        publish: {
+          allow: [
+            "\$JS.API.>",
+            "\$JS.ACK.>"
+          ]
+        }
+        subscribe: {
+          allow: [
+            "_INBOX.>"
           ]
         }
       }

@@ -6,7 +6,7 @@ package idempotency
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -63,7 +63,10 @@ func (h *hybridStore) Mark(id string) error {
 		return err
 	}
 	if err := h.kv.Mark(id); err != nil {
-		log.Printf("idempotency: kv mark failed for %q (non-fatal, race window acknowledged): %v", id, err)
+		slog.Warn("idempotency: kv mark failed (non-fatal, race window acknowledged)",
+			slog.String("id", id),
+			slog.String("error", err.Error()),
+		)
 	}
 	return nil
 }

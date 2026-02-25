@@ -35,6 +35,28 @@ func EnsureDLQStream(js nats.JetStreamContext) error {
 	})
 }
 
+// EnsureAuditStream creates the AUDIT_EVENTS JetStream stream if it does not already exist.
+// The stream captures all audit.> subjects published by any service (ADR-0019).
+// Messages are retained for DefaultAuditMaxAge (72h) to survive a prolonged audit-sink outage.
+//
+// Stream name: AUDIT_EVENTS (consistent with the HA_EVENTS and DLQ naming convention).
+// ADR-0019 refers to this conceptually as "audit.events"; this implementation uses
+// AUDIT_EVENTS to align with the SCREAMING_SNAKE_CASE convention established for other streams.
+//
+// Subject format: audit.{source}.{type} (e.g. audit.ruby_engine.event_processed).
+// This inverts the standard ADR-0027 {source}.{class}.{type} order for the audit class.
+// The inversion is necessary: a leading-wildcard filter *.audit.> overlaps with the
+// reserved dlq.> namespace, causing NATS to reject the stream. Using audit.> avoids this.
+func EnsureAuditStream(js nats.JetStreamContext) error {
+	return ensureStream(js, &nats.StreamConfig{
+		Name:      "AUDIT_EVENTS",
+		Subjects:  []string{"audit.>"},
+		Storage:   nats.FileStorage,
+		Retention: nats.LimitsPolicy,
+		MaxAge:    config.DefaultAuditMaxAge,
+	})
+}
+
 // ensureStream creates a stream only if it does not already exist. Idempotent.
 func ensureStream(js nats.JetStreamContext, cfg *nats.StreamConfig) error {
 	_, err := js.StreamInfo(cfg.Name)

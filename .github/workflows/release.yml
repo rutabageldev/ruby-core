@@ -36,6 +36,7 @@ jobs:
         service:
           - gateway
           - engine
+          - audit-sink
           # Add more services as they are implemented
           # - notifier
           # - presence

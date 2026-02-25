@@ -109,6 +109,35 @@ services:
       - VAULT_NKEY_PATH=secret/data/ruby-core/nats/engine
       - VAULT_TLS_PATH=secret/data/ruby-core/tls/engine
 
+  # ==========================================================================
+  # Audit-Sink Service (profile: services)
+  # ==========================================================================
+  # ADR-0019: Consumes *.audit.> events from AUDIT_EVENTS stream, archives to NDJSON file.
+  audit-sink:
+    profiles: [services]
+    build:
+      context: ../..
+      dockerfile: services/audit-sink/Dockerfile
+    container_name: ruby-core-dev-audit-sink
+    restart: unless-stopped
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - ENVIRONMENT=development
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-root}
+      - NATS_URL=tls://nats:4222
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=secret/data/ruby-core/nats/audit-sink
+      - VAULT_TLS_PATH=secret/data/ruby-core/tls/audit-sink
+      - AUDIT_DATA_DIR=/data/audit
+    volumes:
+      - ruby-core-dev-audit-data:/data/audit
+
 # ==========================================================================
 # Networks
 # ==========================================================================
@@ -134,4 +163,9 @@ volumes:
   # Certs live here instead of in the repo tree (deploy/base/nats/certs/).
   # Cleaned up with: docker compose down -v
   nats-certs:
+    driver: local
+  # Audit event archive (NDJSON). Append-only; not bind-mounted in dev since
+  # the data does not need to persist across `docker compose down -v`.
+  # Production uses a host bind mount for durable storage and backups.
+  ruby-core-dev-audit-data:
     driver: local

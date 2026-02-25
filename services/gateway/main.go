@@ -1,12 +1,13 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
+	"github.com/primaryrutabaga/ruby-core/pkg/logging"
 )
 
 var (
@@ -15,34 +16,42 @@ var (
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
-	log.SetPrefix("[gateway] ")
+	logger := logging.NewLogger("gateway")
+	// Set as the process default so that package-level slog calls (e.g. in pkg/boot)
+	// also emit structured JSON without needing a logger parameter.
+	slog.SetDefault(logger)
 
+	// LoadConfig uses stdlib log.Fatalf internally — it is called before any
+	// business logic and its fatal path is a pre-flight config check, not an
+	// operational error. All other fatal paths below use structured logging.
 	cfg := boot.LoadConfig("gateway")
 
-	log.Printf("starting gateway service version=%s commit=%s", version, commitSHA)
+	logger.Info("starting gateway", slog.String("version", version), slog.String("commit", commitSHA))
 
 	seed, err := boot.FetchNATSSeed(cfg.VaultAddr, cfg.VaultToken, cfg.VaultNKEYPath)
 	if err != nil {
-		log.Fatalf("vault: %v", err)
+		logger.Error("vault: fetch NATS seed failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
-	log.Printf("vault: fetched NATS seed from %s", cfg.VaultNKEYPath)
+	logger.Info("vault: fetched NATS seed", slog.String("path", cfg.VaultNKEYPath))
 
 	tlsMat, err := boot.FetchNATSTLS(cfg.VaultAddr, cfg.VaultToken, cfg.VaultTLSPath)
 	if err != nil {
-		log.Fatalf("vault: %v", err)
+		logger.Error("vault: fetch TLS material failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
-	log.Printf("vault: fetched TLS material from %s", cfg.VaultTLSPath)
+	logger.Info("vault: fetched TLS material", slog.String("path", cfg.VaultTLSPath))
 
 	nc, err := boot.ConnectNATS(cfg, "ruby-core-gateway", seed, tlsMat)
 	if err != nil {
-		log.Fatalf("nats: %v", err)
+		logger.Error("nats: connect failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 	defer nc.Close()
-	log.Printf("connected to NATS at %s", cfg.NATSUrl)
+	logger.Info("connected to NATS", slog.String("url", cfg.NATSUrl))
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
-	log.Printf("shutting down")
+	logger.Info("shutting down")
 }

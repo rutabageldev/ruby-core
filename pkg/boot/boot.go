@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -231,7 +232,11 @@ func withRetry(fn func() error) error {
 			return nil
 		}
 		if i < len(delays) {
-			log.Printf("vault: retry %d/%d after error: %v", i+1, len(delays), err)
+			slog.Info("vault: retrying after error",
+				slog.Int("attempt", i+1),
+				slog.Int("max", len(delays)),
+				slog.String("error", err.Error()),
+			)
 			time.Sleep(delays[i])
 		}
 	}

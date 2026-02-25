@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -24,31 +24,63 @@ const (
 	resultSkip                     // duplicate message; ack without processing
 )
 
+// Recorder is the interface implemented by audit.Publisher.
+// Defining it here keeps the consumer decoupled from the audit package (ADR-0019).
+// Inject a NoopRecorder in tests; inject *audit.Publisher in production.
+type Recorder interface {
+	Record(correlationID, causationID, action, natsSubject, outcome string)
+}
+
+// NoopRecorder is a Recorder that does nothing. Use in tests or when audit is disabled.
+type NoopRecorder struct{}
+
+func (NoopRecorder) Record(_, _, _, _, _ string) {}
+
 // Consumer runs a pull-based JetStream worker pool for the engine (ADR-0024).
 type Consumer struct {
 	sub       *nats.Subscription
 	idStore   idempotency.Store
 	process   func(data []byte) error
+	audit     Recorder
+	log       *slog.Logger
 	workerN   int
 	batchSize int
 	backOff   []time.Duration // NAK delay schedule; mirrors consumer BackOff config
 }
 
+// logger returns c.log if set, otherwise slog.Default().
+// This allows Consumer structs constructed directly in tests (without a logger) to
+// still produce output without panicking on a nil *slog.Logger.
+func (c *Consumer) logger() *slog.Logger {
+	if c.log != nil {
+		return c.log
+	}
+	return slog.Default()
+}
+
 // NewConsumer constructs a Consumer. Returns an error if batchSize > workerN.
+// Pass a NoopRecorder for audit if audit publishing is not required.
 func NewConsumer(
 	sub *nats.Subscription,
 	idStore idempotency.Store,
 	process func(data []byte) error,
 	workerN, batchSize int,
 	backOff []time.Duration,
+	log *slog.Logger,
+	audit Recorder,
 ) (*Consumer, error) {
 	if batchSize > workerN {
 		return nil, fmt.Errorf("engine: batchSize (%d) must not exceed workerN (%d)", batchSize, workerN)
+	}
+	if audit == nil {
+		audit = NoopRecorder{}
 	}
 	return &Consumer{
 		sub:       sub,
 		idStore:   idStore,
 		process:   process,
+		audit:     audit,
+		log:       log,
 		workerN:   workerN,
 		batchSize: batchSize,
 		backOff:   backOff,
@@ -104,19 +136,25 @@ func (c *Consumer) Run(ctx context.Context) error {
 }
 
 // handle processes a single message: checks idempotency, calls process, then acks/naks.
+// Structured log entries include correlationid and causationid from the CloudEvent payload.
 func (c *Consumer) handle(msg *nats.Msg) {
 	meta, err := msg.Metadata()
 	if err != nil {
-		log.Printf("engine: metadata error: %v", err)
+		c.logger().Error("engine: metadata error", slog.String("error", err.Error()))
 		_ = msg.Nak()
 		return
 	}
 
 	eventID := extractEventID(msg.Header, msg.Data, meta)
+	correlationID, causationID := extractCorrelationFields(msg.Data)
 
 	result, err := c.decide(eventID, msg.Data)
 	if err != nil {
-		log.Printf("engine: decide error for %s: %v", eventID, err)
+		c.logger().Error("engine: decide error",
+			slog.String("eventid", eventID),
+			slog.String("correlationid", correlationID),
+			slog.String("error", err.Error()),
+		)
 		_ = msg.Nak()
 		return
 	}
@@ -124,18 +162,30 @@ func (c *Consumer) handle(msg *nats.Msg) {
 	switch result {
 	case resultAck:
 		if err := c.idStore.Mark(eventID); err != nil {
-			log.Printf("engine: idempotency mark error for %s: %v", eventID, err)
+			c.logger().Warn("engine: idempotency mark error",
+				slog.String("eventid", eventID),
+				slog.String("correlationid", correlationID),
+				slog.String("error", err.Error()),
+			)
 		}
+		c.audit.Record(correlationID, causationID, "event.processed", msg.Subject, "success")
+		c.logger().Info("engine: event processed",
+			slog.String("eventid", eventID),
+			slog.String("correlationid", correlationID),
+			slog.String("subject", msg.Subject),
+		)
 		_ = msg.Ack()
+
 	case resultNak:
-		// Use NakWithDelay so the NATS server honours the configured backoff schedule.
-		// Plain Nak() triggers immediate redelivery regardless of BackOff in ConsumerConfig.
+		c.audit.Record(correlationID, causationID, "event.failed", msg.Subject, "failure")
 		if d := nakDelay(c.backOff, meta.NumDelivered); d > 0 {
 			_ = msg.NakWithDelay(d)
 		} else {
 			_ = msg.Nak() // final attempt: no delay, let advisory fire promptly
 		}
+
 	case resultSkip:
+		c.audit.Record(correlationID, causationID, "event.discarded", msg.Subject, "duplicate")
 		_ = msg.Ack() // ack duplicates to remove from pending
 	}
 }
@@ -148,11 +198,16 @@ func (c *Consumer) decide(eventID string, data []byte) (handleResult, error) {
 		return resultNak, fmt.Errorf("idempotency check: %w", err)
 	}
 	if seen {
-		log.Printf("engine: duplicate event %q, discarding", eventID)
+		c.logger().Info("engine: duplicate event, discarding",
+			slog.String("eventid", eventID),
+		)
 		return resultSkip, nil
 	}
 	if err := c.process(data); err != nil {
-		log.Printf("engine: process error for %q: %v (will nak)", eventID, err)
+		c.logger().Warn("engine: process error, will nak",
+			slog.String("eventid", eventID),
+			slog.String("error", err.Error()),
+		)
 		return resultNak, nil
 	}
 	return resultAck, nil
@@ -174,6 +229,18 @@ func extractEventID(headers nats.Header, data []byte, meta *nats.MsgMetadata) st
 	}
 	// 3. Stream sequence — always unique within the stream (handles at-least-once redelivery)
 	return fmt.Sprintf("%s.%d", meta.Stream, meta.Sequence.Stream)
+}
+
+// extractCorrelationFields extracts the correlationid and causationid extensions from
+// a CloudEvent payload in a single JSON pass. Returns empty strings for non-CloudEvent
+// or malformed payloads; callers must treat empty as "unavailable" rather than an error.
+func extractCorrelationFields(data []byte) (correlationID, causationID string) {
+	var ce struct {
+		CorrelationID string `json:"correlationid"`
+		CausationID   string `json:"causationid"`
+	}
+	_ = json.Unmarshal(data, &ce)
+	return ce.CorrelationID, ce.CausationID
 }
 
 // ---------------------------------------------------------------------------
@@ -199,13 +266,22 @@ type DLQForwarder struct {
 	js       nats.JetStreamContext
 	sub      *nats.Subscription
 	msgCh    chan *nats.Msg
+	log      *slog.Logger
 	stream   string // e.g. "HA_EVENTS"
 	consumer string // e.g. "engine_processor"
 }
 
+// logger returns f.log if set, otherwise slog.Default().
+func (f *DLQForwarder) logger() *slog.Logger {
+	if f.log != nil {
+		return f.log
+	}
+	return slog.Default()
+}
+
 // NewDLQForwarder subscribes to the max-delivery advisory for the given stream/consumer
 // and returns a DLQForwarder ready to be started with Run.
-func NewDLQForwarder(nc *nats.Conn, js nats.JetStreamContext, stream, consumer string) (*DLQForwarder, error) {
+func NewDLQForwarder(nc *nats.Conn, js nats.JetStreamContext, stream, consumer string, log *slog.Logger) (*DLQForwarder, error) {
 	advisorySubj := fmt.Sprintf("$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.%s.%s", stream, consumer)
 	msgCh := make(chan *nats.Msg, 64)
 	sub, err := nc.ChanSubscribe(advisorySubj, msgCh)
@@ -216,6 +292,7 @@ func NewDLQForwarder(nc *nats.Conn, js nats.JetStreamContext, stream, consumer s
 		js:       js,
 		sub:      sub,
 		msgCh:    msgCh,
+		log:      log,
 		stream:   stream,
 		consumer: consumer,
 	}, nil
@@ -245,28 +322,43 @@ func (f *DLQForwarder) Run(ctx context.Context) error {
 func (f *DLQForwarder) handleAdvisory(msg *nats.Msg) {
 	var adv maxDeliverAdvisory
 	if err := json.Unmarshal(msg.Data, &adv); err != nil {
-		log.Printf("engine: dlq: unmarshal advisory: %v", err)
+		f.logger().Error("engine: dlq: unmarshal advisory", slog.String("error", err.Error()))
 		return
 	}
 
 	orig, err := f.js.GetMsg(f.stream, adv.StreamSeq)
 	if err != nil {
-		log.Printf("engine: dlq: get original msg stream=%s seq=%d: %v (message dropped from DLQ)",
-			f.stream, adv.StreamSeq, err)
+		f.logger().Error("engine: dlq: get original message, dropped from DLQ",
+			slog.String("stream", f.stream),
+			slog.Uint64("seq", adv.StreamSeq),
+			slog.String("error", err.Error()),
+		)
 		return
 	}
 
 	// BuildDLQSubject requires lowercase tokens (ADR-0027).
 	dlqSubj, err := natsx.BuildDLQSubject(strings.ToLower(f.stream), f.consumer)
 	if err != nil {
-		log.Printf("engine: dlq: build subject stream=%s consumer=%s: %v", f.stream, f.consumer, err)
+		f.logger().Error("engine: dlq: build subject",
+			slog.String("stream", f.stream),
+			slog.String("consumer", f.consumer),
+			slog.String("error", err.Error()),
+		)
 		return
 	}
 
 	if _, err := f.js.Publish(dlqSubj, orig.Data); err != nil {
-		log.Printf("engine: dlq: publish seq=%d to %s: %v", adv.StreamSeq, dlqSubj, err)
+		f.logger().Error("engine: dlq: publish failed",
+			slog.Uint64("seq", adv.StreamSeq),
+			slog.String("subject", dlqSubj),
+			slog.String("error", err.Error()),
+		)
 		return
 	}
-	log.Printf("engine: dlq: routed stream=%s seq=%d to %s (deliveries=%d)",
-		f.stream, adv.StreamSeq, dlqSubj, adv.Deliveries)
+	f.logger().Info("engine: dlq: routed",
+		slog.String("stream", f.stream),
+		slog.Uint64("seq", adv.StreamSeq),
+		slog.String("subject", dlqSubj),
+		slog.Int("deliveries", adv.Deliveries),
+	)
 }

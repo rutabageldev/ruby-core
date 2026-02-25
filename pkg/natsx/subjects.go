@@ -1,6 +1,9 @@
 package natsx
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Standard NATS classes allowed in subject naming convention.
 var AllowedClasses = map[string]struct{}{
@@ -58,6 +61,33 @@ func BuildSubject(source, class, typ, id, action string) (string, error) {
 	}
 
 	return subject, nil
+}
+
+// SubjectToken normalises s to a valid ADR-0027 subject token by converting to lowercase
+// and replacing hyphens with underscores. It does not strip other invalid characters;
+// callers should verify the result with IsValidToken if the input is not controlled.
+//
+// Use this when constructing subjects from service or connection names that may contain
+// hyphens (e.g., normalising "ruby-core-engine" to "ruby_engine" for use as a source token).
+func SubjectToken(s string) string {
+	return strings.ToLower(strings.ReplaceAll(s, "-", "_"))
+}
+
+// BuildAuditSubject constructs an audit subject: audit.{source}.{type}.
+//
+// Audit subjects use an inverted namespace (class first) rather than the standard
+// {source}.{class}.{type} format defined in ADR-0027. The inversion is required to
+// avoid JetStream stream subject overlap: a leading-wildcard filter *.audit.> conflicts
+// with the reserved dlq.> namespace. Using audit.> as the stream filter has no conflicts.
+// The audit-sink consumer and all audit ACLs follow this audit.{source}.{type} format.
+func BuildAuditSubject(source, typ string) (string, error) {
+	if !IsValidToken(source) {
+		return "", fmt.Errorf("invalid source token: %w", ErrInvalidToken)
+	}
+	if !IsValidToken(typ) {
+		return "", fmt.Errorf("invalid type token: %w", ErrInvalidToken)
+	}
+	return "audit." + source + "." + typ, nil
 }
 
 // BuildDLQSubject constructs a standard subject name for a Dead-Letter Queue.

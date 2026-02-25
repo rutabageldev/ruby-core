@@ -1,5 +1,7 @@
-// Package config provides centralized tuning defaults for Phase 3 reliability patterns.
-// All values are documented in ADR-0022 (DLQ), ADR-0024 (backpressure), and ADR-0025 (idempotency).
+// Package config provides centralized tuning defaults for Phase 3 reliability patterns
+// and Phase 4 audit infrastructure.
+// All values are documented in ADR-0022 (DLQ), ADR-0024 (backpressure), ADR-0025 (idempotency),
+// and ADR-0019 (audit trail).
 package config
 
 import "time"
@@ -31,6 +33,23 @@ const (
 	// DefaultDLQMaxAge is the retention window for messages in the DLQ stream.
 	// This is a starting default; tune as DLQ monitoring tooling matures (ADR-0022).
 	DefaultDLQMaxAge = 7 * 24 * time.Hour
+
+	// DefaultAuditMaxAge is the minimum retention for the AUDIT_EVENTS stream.
+	// Must survive a prolonged audit-sink outage before messages are discarded (ADR-0019).
+	DefaultAuditMaxAge = 72 * time.Hour
+
+	// Audit-sink consumer defaults — lower throughput than the engine consumer
+	// because audit events are emitted only on critical actions (low volume).
+
+	// DefaultAuditSinkWorkerCount is the worker pool size for the audit-sink consumer.
+	DefaultAuditSinkWorkerCount = 5
+
+	// DefaultAuditSinkFetchBatch is the fetch batch size for the audit-sink consumer.
+	// Must not exceed DefaultAuditSinkWorkerCount.
+	DefaultAuditSinkFetchBatch = 5
+
+	// DefaultAuditSinkMaxAckPending caps outstanding unacknowledged audit messages.
+	DefaultAuditSinkMaxAckPending = 32
 )
 
 // DefaultBackOff is the JetStream consumer redelivery backoff schedule.

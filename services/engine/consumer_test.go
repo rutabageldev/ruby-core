@@ -175,14 +175,14 @@ func TestExtractEventID_FallbackOnEmptyCloudEventID(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewConsumer_FetchBatchExceedsWorkerN(t *testing.T) {
-	_, err := NewConsumer(nil, newMockStore(), func([]byte) error { return nil }, 10, 11, nil)
+	_, err := NewConsumer(nil, newMockStore(), func([]byte) error { return nil }, 10, 11, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error when batchSize > workerN, got nil")
 	}
 }
 
 func TestNewConsumer_ValidConfig(t *testing.T) {
-	c, err := NewConsumer(nil, newMockStore(), func([]byte) error { return nil }, 20, 20, nil)
+	c, err := NewConsumer(nil, newMockStore(), func([]byte) error { return nil }, 20, 20, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

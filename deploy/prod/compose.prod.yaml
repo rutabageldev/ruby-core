@@ -116,6 +116,42 @@ services:
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_ENGINE:-secret/data/ruby-core/nats/engine}
       - VAULT_TLS_PATH=${VAULT_TLS_PATH_ENGINE:-secret/data/ruby-core/tls/engine}
 
+  # ==========================================================================
+  # Audit-Sink Service
+  # ==========================================================================
+  # ADR-0019: Consumes *.audit.> events from AUDIT_EVENTS stream, archives to NDJSON file.
+  # Runs as root in container (see Dockerfile comment) to write to the host bind mount.
+  # Host path: /var/lib/ruby-core/audit — include in automated backup schedule.
+  audit-sink:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-audit-sink:${VERSION:-v0.1.0}
+    container_name: ruby-core-prod-audit-sink
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - ENVIRONMENT=production
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - VAULT_ALLOW_HTTP=true
+      - NATS_URL=${NATS_URL:-tls://nats:4222}
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_AUDIT_SINK:-secret/data/ruby-core/nats/audit-sink}
+      - VAULT_TLS_PATH=${VAULT_TLS_PATH_AUDIT_SINK:-secret/data/ruby-core/tls/audit-sink}
+      - AUDIT_DATA_DIR=/data/audit
+    volumes:
+      # HOST BIND MOUNT — include /var/lib/ruby-core/audit in automated backups (ADR-0019).
+      # Ensure this directory exists and is writable before first deploy:
+      #   mkdir -p /var/lib/ruby-core/audit
+      - /var/lib/ruby-core/audit:/data/audit
+
 # ==========================================================================
 # Networks
 # ==========================================================================

@@ -91,9 +91,9 @@
     3. **Logging:** Implement structured (JSON) logging in all services. Ensure all logs include `correlationid` when available (per ADR-0004).
 
 * **Acceptance Criteria:**
-  * `[ ]` A critical action correctly produces a message in the audit log.
-  * `[ ]` The JetStream restore procedure is documented and validated.
-  * `[ ]` Logs are structured and contain correlation IDs, enabling basic distributed debugging.
+  * `[X]` A critical action correctly produces a message in the audit log.
+  * `[X]` The JetStream restore procedure is documented and validated.
+  * `[X]` Logs are structured and contain correlation IDs, enabling basic distributed debugging.
 
 ### **Phase 5: Core Feature Implementation**
 

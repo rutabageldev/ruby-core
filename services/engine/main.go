@@ -3,15 +3,17 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/audit"
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
 	"github.com/primaryrutabaga/ruby-core/pkg/config"
 	"github.com/primaryrutabaga/ruby-core/pkg/idempotency"
+	"github.com/primaryrutabaga/ruby-core/pkg/logging"
 	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
 )
 
@@ -21,73 +23,109 @@ var (
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
-	log.SetPrefix("[engine] ")
+	logger := logging.NewLogger("engine")
+	// Set as the process default so that package-level slog calls (e.g. in pkg/boot,
+	// pkg/idempotency) also emit structured JSON without needing a logger parameter.
+	slog.SetDefault(logger)
 
+	// LoadConfig uses stdlib log.Fatalf internally — it is called before any
+	// business logic and its fatal path is a pre-flight config check, not an
+	// operational error. All other fatal paths below use structured logging.
 	cfg := boot.LoadConfig("engine")
 
-	log.Printf("starting engine service version=%s commit=%s", version, commitSHA)
+	logger.Info("starting engine", slog.String("version", version), slog.String("commit", commitSHA))
 
 	seed, err := boot.FetchNATSSeed(cfg.VaultAddr, cfg.VaultToken, cfg.VaultNKEYPath)
 	if err != nil {
-		log.Fatalf("vault: %v", err)
+		logger.Error("vault: fetch NATS seed failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
-	log.Printf("vault: fetched NATS seed from %s", cfg.VaultNKEYPath)
+	logger.Info("vault: fetched NATS seed", slog.String("path", cfg.VaultNKEYPath))
 
 	tlsMat, err := boot.FetchNATSTLS(cfg.VaultAddr, cfg.VaultToken, cfg.VaultTLSPath)
 	if err != nil {
-		log.Fatalf("vault: %v", err)
+		logger.Error("vault: fetch TLS material failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
-	log.Printf("vault: fetched TLS material from %s", cfg.VaultTLSPath)
+	logger.Info("vault: fetched TLS material", slog.String("path", cfg.VaultTLSPath))
 
 	nc, err := boot.ConnectNATS(cfg, "ruby-core-engine", seed, tlsMat)
 	if err != nil {
-		log.Fatalf("nats: %v", err)
+		logger.Error("nats: connect failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 	defer nc.Close()
-	log.Printf("connected to NATS at %s", cfg.NATSUrl)
+	logger.Info("connected to NATS", slog.String("url", cfg.NATSUrl))
 
 	// --- Phase 3: JetStream setup ---
 
 	js, err := nc.JetStream()
 	if err != nil {
-		log.Fatalf("nats: jetstream: %v", err)
+		logger.Error("nats: jetstream context failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	if err := natsx.EnsureHAEventsStream(js); err != nil {
-		log.Fatalf("nats: ensure HA_EVENTS stream: %v", err)
+		logger.Error("nats: ensure HA_EVENTS stream failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
-	log.Printf("nats: HA_EVENTS stream ready")
+	logger.Info("nats: HA_EVENTS stream ready")
 
 	if err := natsx.EnsureDLQStream(js); err != nil {
-		log.Fatalf("nats: ensure DLQ stream: %v", err)
+		logger.Error("nats: ensure DLQ stream failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
-	log.Printf("nats: DLQ stream ready")
+	logger.Info("nats: DLQ stream ready")
+
+	// --- Phase 4: Audit stream ---
+
+	if err := natsx.EnsureAuditStream(js); err != nil {
+		logger.Error("nats: ensure AUDIT_EVENTS stream failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Info("nats: AUDIT_EVENTS stream ready")
+
+	// --- Phase 3: Idempotency ---
 
 	kv, err := idempotency.CreateOrBindKVBucket(js, "idempotency", config.DefaultIdempotencyTTL)
 	if err != nil {
-		log.Fatalf("nats: idempotency KV bucket: %v", err)
+		logger.Error("nats: idempotency KV bucket failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 	idStore := idempotency.NewHybridStore(kv, config.DefaultIdempotencyTTL)
 	defer func() { _ = idStore.Close() }()
-	log.Printf("idempotency: hybrid store ready (TTL=%s)", config.DefaultIdempotencyTTL)
+	logger.Info("idempotency: hybrid store ready", slog.Duration("ttl", config.DefaultIdempotencyTTL))
+
+	// --- Phase 4: Audit publisher ---
+
+	auditPub := audit.NewPublisher(nc, "ruby_engine", logger)
+	defer auditPub.Close()
+	logger.Info("audit: publisher ready")
+
+	// --- Consumer ---
 
 	consumerCfg := natsx.DefaultPullConsumerConfig("HA_EVENTS", "engine_processor", "ha.events.>")
 	sub, err := natsx.EnsurePullConsumer(js, consumerCfg)
 	if err != nil {
-		log.Fatalf("nats: ensure pull consumer: %v", err)
+		logger.Error("nats: ensure pull consumer failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
-	log.Printf("nats: pull consumer engine_processor ready (MaxAckPending=%d, AckWait=%s)",
-		consumerCfg.MaxAckPending, consumerCfg.AckWait)
+	logger.Info("nats: pull consumer ready",
+		slog.String("consumer", "engine_processor"),
+		slog.Int("max_ack_pending", consumerCfg.MaxAckPending),
+		slog.Duration("ack_wait", consumerCfg.AckWait),
+	)
 
-	consumer, err := NewConsumer(sub, idStore, processEvent, consumerCfg.WorkerCount, consumerCfg.FetchBatch, consumerCfg.BackOff)
+	consumer, err := NewConsumer(sub, idStore, processEvent, consumerCfg.WorkerCount, consumerCfg.FetchBatch, consumerCfg.BackOff, logger, auditPub)
 	if err != nil {
-		log.Fatalf("engine: consumer init: %v", err)
+		logger.Error("consumer init failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
-	dlqFwd, err := NewDLQForwarder(nc, js, "HA_EVENTS", "engine_processor")
+	dlqFwd, err := NewDLQForwarder(nc, js, "HA_EVENTS", "engine_processor", logger)
 	if err != nil {
-		log.Fatalf("engine: dlq forwarder init: %v", err)
+		logger.Error("dlq forwarder init failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	// --- Graceful shutdown ---
@@ -98,7 +136,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		<-sig
-		log.Printf("shutting down")
+		logger.Info("shutting down")
 		cancel()
 	}()
 
@@ -108,20 +146,22 @@ func main() {
 	go func() {
 		defer wg.Done()
 		if err := consumer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("consumer exited with error: %v", err)
+			logger.Error("consumer exited with error", slog.String("error", err.Error()))
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		if err := dlqFwd.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("dlq forwarder exited with error: %v", err)
+			logger.Error("dlq forwarder exited with error", slog.String("error", err.Error()))
 		}
 	}()
 
-	log.Printf("consumer and DLQ forwarder started (workers=%d, batch=%d)",
-		consumerCfg.WorkerCount, consumerCfg.FetchBatch)
+	logger.Info("consumer and DLQ forwarder started",
+		slog.Int("workers", consumerCfg.WorkerCount),
+		slog.Int("batch", consumerCfg.FetchBatch),
+	)
 	wg.Wait()
-	log.Printf("engine stopped")
+	logger.Info("engine stopped")
 }
 
 // processEvent is the Phase 3 stub message processor.
@@ -136,6 +176,8 @@ func processEvent(data []byte) error {
 	if forceFail {
 		return errors.New("ENGINE_FORCE_FAIL: forced failure for DLQ verification")
 	}
-	log.Printf("event received (%d bytes) — Phase 5 TODO: implement rule engine", len(data))
+	slog.Info("event received — Phase 5 TODO: implement rule engine",
+		slog.Int("bytes", len(data)),
+	)
 	return nil
 }
