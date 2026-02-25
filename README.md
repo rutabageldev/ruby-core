@@ -13,7 +13,8 @@ Environments:
 - dev: bind mounts + hot reload
 - prod: immutable images + pinned tags
 
-See deploy/ for docker compose stacks.
+See `docs/architecture.md` for a full component and container overview.
+See `deploy/` for docker compose stacks.
 
 ## Devcontainer
 
