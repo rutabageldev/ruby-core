@@ -46,9 +46,7 @@ services:
       - /var/lib/ruby-core/nats:/data/jetstream
       # NATS configuration
       - ../base/nats/nats.conf:/etc/nats/nats.conf:ro
-      # Generated authorization config (from scripts/setup-credentials.sh)
-      - ../base/nats/auth.conf:/etc/nats/auth.conf:ro
-      # TLS certificates (fetched from Vault by nats-init)
+      # TLS certificates and auth.conf (fetched/generated from Vault by nats-init)
       - nats-certs:/etc/nats/certs:ro
     command: ["-c", "/etc/nats/nats.conf"]
     healthcheck:
