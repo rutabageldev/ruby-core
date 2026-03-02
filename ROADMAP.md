@@ -124,7 +124,23 @@
   * `[ ]` `git commit` enforces all defined quality checks.
   * `[ ]` No PR can be merged without passing all unit and integration tests.
 
-### **Phase 7: Full-Stack Observability**
+### **Phase 7: Staging Environment & Deploy Validation**
+
+**Goal:** Eliminate manual back-and-forth during releases by automatically validating deployability before prod.
+
+* **Key Tasks:**
+    1. Add `deploy/staging/compose.staging.yaml` (same images as prod, separate container names/ports, shared Vault).
+    2. Add a GitHub Actions workflow triggered on `v*` tags that deploys to the node over SSH, runs a smoke test script (health checks + synthetic NATS event through the full pipeline), and blocks the release from being marked "latest" on failure.
+    3. Gate `make deploy-prod` on a passing staging run (GitHub environment protection rule).
+
+* **Acceptance Criteria:**
+  * `[ ]` Pushing a version tag auto-deploys to staging and runs smoke tests.
+  * `[ ]` A broken deploy (e.g. missing rule files, bad ACLs) fails in staging before reaching prod.
+  * `[ ]` `make deploy-prod` requires a green staging run.
+
+---
+
+### **Phase 8: Full-Stack Observability**
 
 **Goal:** Complete the observability stack with distributed tracing and metrics.
 

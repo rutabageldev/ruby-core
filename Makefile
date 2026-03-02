@@ -34,7 +34,7 @@ else
 endif
 
 # Stability test configuration
-STABILITY_TIMEOUT ?= 300
+STABILITY_TIMEOUT ?= 60
 STABILITY_POLL    ?= 15
 
 # =============================================================================
