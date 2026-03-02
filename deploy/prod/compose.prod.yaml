@@ -65,6 +65,8 @@ services:
   # ==========================================================================
   # Gateway Service
   # ==========================================================================
+  # ADR-0020: Port NOT published to host — all HTTP access goes through Traefik.
+  # Traefik validates JWTs before forwarding requests to the gateway.
   gateway:
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-gateway:${VERSION:-v0.1.0}
     container_name: ruby-core-prod-gateway
@@ -77,6 +79,7 @@ services:
     networks:
       - default
       - vault
+      - traefik_proxy
     depends_on:
       nats:
         condition: service_healthy
@@ -91,6 +94,16 @@ services:
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_GATEWAY:-secret/data/ruby-core/nats/gateway}
       - VAULT_TLS_PATH=${VAULT_TLS_PATH_GATEWAY:-secret/data/ruby-core/tls/gateway}
+      - HTTP_ADDR=:8080
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_proxy"
+      - "traefik.http.routers.ruby-gateway.rule=Host(`${GATEWAY_HOST:-ruby-gateway.internal}`) && PathPrefix(`/`)"
+      - "traefik.http.routers.ruby-gateway.entrypoints=websecure"
+      - "traefik.http.routers.ruby-gateway.tls=true"
+      - "traefik.http.routers.ruby-gateway.middlewares=ruby-gateway-auth"
+      - "traefik.http.middlewares.ruby-gateway-auth.forwardauth.address=${TRAEFIK_FORWARD_AUTH_URL:-http://traefik-auth:4181}"
+      - "traefik.http.services.ruby-gateway.loadbalancer.server.port=8080"
 
   # ==========================================================================
   # Engine Service
@@ -112,6 +125,10 @@ services:
         condition: service_healthy
     volumes:
       - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+      # Rule files: must exist at /etc/ruby-core/rules in the image or as a bind mount.
+      # Production images are built with rules baked in (see Makefile build args).
+      # For rule updates without a full rebuild, bind-mount this directory.
+      - ${RULES_DIR:-/etc/ruby-core/rules}:/etc/ruby-core/rules:ro
     environment:
       - ENVIRONMENT=production
       - VAULT_ADDR=https://vault:8200
@@ -121,6 +138,74 @@ services:
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_ENGINE:-secret/data/ruby-core/nats/engine}
       - VAULT_TLS_PATH=${VAULT_TLS_PATH_ENGINE:-secret/data/ruby-core/tls/engine}
+      - RULES_DIR=/etc/ruby-core/rules
+
+  # ==========================================================================
+  # Notifier Service
+  # ==========================================================================
+  notifier:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-notifier:${VERSION:-v0.1.0}
+    container_name: ruby-core-prod-notifier
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - ENVIRONMENT=production
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - NATS_URL=${NATS_URL:-tls://nats:4222}
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_NOTIFIER:-secret/data/ruby-core/nats/notifier}
+      - VAULT_TLS_PATH=${VAULT_TLS_PATH_NOTIFIER:-secret/data/ruby-core/tls/notifier}
+
+  # ==========================================================================
+  # Presence Service
+  # ==========================================================================
+  # Multi-source presence fusion with WiFi corroboration and debounce.
+  presence:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-presence:${VERSION:-v0.1.0}
+    container_name: ruby-core-prod-presence
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - ENVIRONMENT=production
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - NATS_URL=${NATS_URL:-tls://nats:4222}
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_PRESENCE:-secret/data/ruby-core/nats/presence}
+      - VAULT_TLS_PATH=${VAULT_TLS_PATH_PRESENCE:-secret/data/ruby-core/tls/presence}
+      - VAULT_HA_PATH=secret/data/ruby-core/ha
+      - PRESENCE_PERSON_ID=katie
+      - PRESENCE_PHONE_ENTITY=phone.katie
+      - PRESENCE_WIFI_ENTITY=network.phone.katie
+      - PRESENCE_TRUSTED_WIFI=RubyGues,RubyNet,RIoT
+      - PRESENCE_DEBOUNCE_SECONDS=120
 
   # ==========================================================================
   # Audit-Sink Service
@@ -167,6 +252,10 @@ networks:
   vault:
     external: true
     name: vault_default
+  # Traefik proxy network (ADR-0020). Create with: docker network create traefik_proxy
+  traefik_proxy:
+    external: true
+    name: traefik_proxy
 
 # ==========================================================================
 # Volumes

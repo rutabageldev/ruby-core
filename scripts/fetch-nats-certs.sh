@@ -124,7 +124,13 @@ authorization {
 
   users: [
     # Gateway service
-    # Responsibilities: Ingest events from Home Assistant, execute commands, publish audit
+    # Responsibilities: Ingest HA events, publish to NATS, reconcile state on reconnect
+    # Phase 5 additions:
+    #   publish  \$JS.API.>         — JetStream API (KV create/bind, stream queries)
+    #   publish  \$JS.ACK.>         — Message acknowledgements
+    #   publish  \$KV.gateway_state.> — Gateway reconciler state (single-writer, ADR-0002)
+    #   subscribe _INBOX.>          — Reply-to subjects for JetStream API responses
+    #   subscribe \$KV.config.>     — Read compiled rule config (passlist + critical entities)
     {
       nkey: "${PUBKEY_GATEWAY}"
       permissions: {
@@ -132,12 +138,18 @@ authorization {
           allow: [
             "ha.events.>",
             "audit.ruby_gateway.>",
-            "ruby_gateway.metrics.>"
+            "ruby_gateway.metrics.>",
+            "gateway.health",
+            "\$JS.API.>",
+            "\$JS.ACK.>",
+            "\$KV.gateway_state.>"
           ]
         }
         subscribe: {
           allow: [
-            "ruby_engine.commands.>"
+            "ruby_engine.commands.>",
+            "_INBOX.>",
+            "\$KV.config.>"
           ]
         }
       }
@@ -148,11 +160,14 @@ authorization {
     # Phase 3 additions:
     #   publish  \$JS.API.>     — JetStream API (stream/consumer setup, pull requests, KV)
     #   publish  \$JS.ACK.>     — Message acknowledgements to JetStream
-    #   publish  \$KV.idempotency.> — NATS KV put (\$KV.<bucket>.<key> subjects, not under \$JS.API)
+    #   publish  \$KV.idempotency.> — Idempotency KV bucket (single-writer, ADR-0002)
     #   publish  dlq.>          — DLQ forwarder routes dead-lettered messages (ADR-0022)
     #   subscribe _INBOX.>      — Reply-to subjects for JetStream API responses
     #   subscribe \$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.HA_EVENTS.engine_processor
     #                           — max-delivery advisory triggers DLQ routing (ADR-0022)
+    # Phase 5 additions:
+    #   publish  \$KV.config.>    — Compiled rule config for gateway (single-writer, ADR-0002)
+    #   publish  \$KV.presence.>  — Presence processor state (single-writer, ADR-0002)
     {
       nkey: "${PUBKEY_ENGINE}"
       permissions: {
@@ -164,6 +179,8 @@ authorization {
             "\$JS.API.>",
             "\$JS.ACK.>",
             "\$KV.idempotency.>",
+            "\$KV.config.>",
+            "\$KV.presence.>",
             "dlq.>"
           ]
         }
@@ -178,26 +195,33 @@ authorization {
     },
 
     # Notifier service
-    # Responsibilities: Send notifications based on commands
+    # Responsibilities: Receive notify commands from COMMANDS stream, dispatch push notifications via HA REST API
+    # Phase 5 additions:
+    #   publish  \$JS.API.>         — JetStream API (consumer create/fetch/bind)
+    #   publish  \$JS.ACK.>         — Message acknowledgements
     {
       nkey: "${PUBKEY_NOTIFIER}"
       permissions: {
         publish: {
           allow: [
             "audit.ruby_notifier.>",
-            "ruby_notifier.metrics.>"
+            "ruby_notifier.metrics.>",
+            "\$JS.API.>",
+            "\$JS.ACK.>"
           ]
         }
         subscribe: {
           allow: [
-            "ruby_engine.commands.notification.>"
+            "ruby_engine.commands.notify.>",
+            "_INBOX.>"
           ]
         }
       }
     },
 
     # Presence service
-    # Responsibilities: Track presence based on network events
+    # Responsibilities: Multi-source presence fusion; subscribes to HA phone events,
+    #   publishes clean presence state events and audit trail.
     {
       nkey: "${PUBKEY_PRESENCE}"
       permissions: {
@@ -205,12 +229,19 @@ authorization {
           allow: [
             "ruby_presence.events.>",
             "audit.ruby_presence.>",
-            "ruby_presence.metrics.>"
+            "ruby_presence.metrics.>",
+            "\$JS.API.>",
+            "\$JS.ACK.>",
+            "\$KV.presence.>",
+            "_INBOX.>"
           ]
         }
         subscribe: {
           allow: [
-            "unifi.events.>"
+            "ha.events.phone.>",
+            "_INBOX.>",
+            "\$JS.API.>",
+            "\$JS.ACK.>"
           ]
         }
       }

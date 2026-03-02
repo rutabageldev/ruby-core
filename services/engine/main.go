@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"github.com/primaryrutabaga/ruby-core/pkg/idempotency"
 	"github.com/primaryrutabaga/ruby-core/pkg/logging"
 	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
+	engineconfig "github.com/primaryrutabaga/ruby-core/services/engine/config"
+	"github.com/primaryrutabaga/ruby-core/services/engine/processors/presence_notify"
 )
 
 var (
@@ -85,6 +88,18 @@ func main() {
 	}
 	logger.Info("nats: AUDIT_EVENTS stream ready")
 
+	if err := natsx.EnsureCommandsStream(js); err != nil {
+		logger.Error("nats: ensure COMMANDS stream failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Info("nats: COMMANDS stream ready")
+
+	if err := natsx.EnsurePresenceStream(js); err != nil {
+		logger.Error("nats: ensure PRESENCE stream failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Info("nats: PRESENCE stream ready")
+
 	// --- Phase 3: Idempotency ---
 
 	kv, err := idempotency.CreateOrBindKVBucket(js, "idempotency", config.DefaultIdempotencyTTL)
@@ -102,6 +117,45 @@ func main() {
 	defer auditPub.Close()
 	logger.Info("audit: publisher ready")
 
+	// --- Phase 5: Load rules and publish compiled config to NATS KV ---
+
+	ruleCfg, err := engineconfig.Load()
+	if err != nil {
+		logger.Error("config: rule loading failed — cannot start without valid rules", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Info("config: rules loaded",
+		slog.Int("critical_entities", len(ruleCfg.CriticalEntities)),
+		slog.Int("passlist_domains", len(ruleCfg.Passlist)),
+	)
+
+	configKV, err := natsx.EnsureConfigKV(js)
+	if err != nil {
+		logger.Error("nats: ensure config KV bucket failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Info("nats: config KV bucket ready")
+
+	passlistJSON, err := json.Marshal(ruleCfg.Passlist)
+	if err != nil {
+		logger.Error("config: marshal passlist", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	criticalJSON, err := json.Marshal(ruleCfg.CriticalEntities)
+	if err != nil {
+		logger.Error("config: marshal critical entities", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if _, err := configKV.Put(natsx.KVKeyConfigPasslist, passlistJSON); err != nil {
+		logger.Error("nats: publish passlist to config KV", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	if _, err := configKV.Put(natsx.KVKeyConfigCriticalEntities, criticalJSON); err != nil {
+		logger.Error("nats: publish critical entities to config KV", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Info("config: passlist and critical entities published to NATS KV")
+
 	// --- Consumer ---
 
 	consumerCfg := natsx.DefaultPullConsumerConfig("HA_EVENTS", "engine_processor", "ha.events.>")
@@ -116,7 +170,21 @@ func main() {
 		slog.Duration("ack_wait", consumerCfg.AckWait),
 	)
 
-	consumer, err := NewConsumer(sub, idStore, processEvent, consumerCfg.WorkerCount, consumerCfg.FetchBatch, consumerCfg.BackOff, logger, auditPub)
+	host := NewProcessorHost(logger)
+	host.Register(presence_notify.New(logger))
+	if err := host.Initialize(ruleCfg, nc, js); err != nil {
+		logger.Error("processor host: init failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer host.Shutdown()
+
+	processFn := host.Process
+	if forceFail {
+		logger.Warn("ENGINE_FORCE_FAIL is set — all events will be rejected; do not use in production")
+		processFn = forceFailProcess
+	}
+
+	consumer, err := NewConsumer(sub, idStore, processFn, consumerCfg.WorkerCount, consumerCfg.FetchBatch, consumerCfg.BackOff, logger, auditPub)
 	if err != nil {
 		logger.Error("consumer init failed", slog.String("error", err.Error()))
 		os.Exit(1)
@@ -125,6 +193,24 @@ func main() {
 	dlqFwd, err := NewDLQForwarder(nc, js, "HA_EVENTS", "engine_processor", logger)
 	if err != nil {
 		logger.Error("dlq forwarder init failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	// --- PRESENCE consumer (shares processor host) ---
+
+	presenceCfg := natsx.DefaultPullConsumerConfig("PRESENCE", "engine_presence_processor", "ruby_presence.events.>")
+	presenceSub, err := natsx.EnsurePullConsumer(js, presenceCfg)
+	if err != nil {
+		logger.Error("nats: ensure presence pull consumer failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	logger.Info("nats: presence pull consumer ready",
+		slog.String("consumer", "engine_presence_processor"),
+	)
+
+	presenceConsumer, err := NewConsumer(presenceSub, idStore, processFn, presenceCfg.WorkerCount, presenceCfg.FetchBatch, presenceCfg.BackOff, logger, auditPub)
+	if err != nil {
+		logger.Error("presence consumer init failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 
@@ -141,7 +227,7 @@ func main() {
 	}()
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 
 	go func() {
 		defer wg.Done()
@@ -155,6 +241,12 @@ func main() {
 			logger.Error("dlq forwarder exited with error", slog.String("error", err.Error()))
 		}
 	}()
+	go func() {
+		defer wg.Done()
+		if err := presenceConsumer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("presence consumer exited with error", slog.String("error", err.Error()))
+		}
+	}()
 
 	logger.Info("consumer and DLQ forwarder started",
 		slog.Int("workers", consumerCfg.WorkerCount),
@@ -164,20 +256,14 @@ func main() {
 	logger.Info("engine stopped")
 }
 
-// processEvent is the Phase 3 stub message processor.
-// It logs the raw payload and returns nil.
-//
-// ENGINE_FORCE_FAIL: if set to "true" at startup, every message fails with an error.
+// ENGINE_FORCE_FAIL: if set to "true" at startup, every event is rejected with
+// an error, triggering NAK and DLQ routing.
 // This is a manual testing hook for DLQ verification (docs/ops/phase3-verification.md).
 // It must never be set in production or added to .env.example.
 var forceFail = os.Getenv("ENGINE_FORCE_FAIL") == "true"
 
-func processEvent(data []byte) error {
-	if forceFail {
-		return errors.New("ENGINE_FORCE_FAIL: forced failure for DLQ verification")
-	}
-	slog.Info("event received — Phase 5 TODO: implement rule engine",
-		slog.Int("bytes", len(data)),
-	)
-	return nil
+// forceFailProcess wraps a process func so every call returns an error.
+// Used only when ENGINE_FORCE_FAIL=true.
+func forceFailProcess(_ string, _ []byte) error {
+	return errors.New("ENGINE_FORCE_FAIL: forced failure for DLQ verification")
 }

@@ -8,11 +8,11 @@ RUN go mod download
 COPY . .
 ARG VERSION=dev
 ARG COMMIT_SHA=unknown
-RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commitSHA=${COMMIT_SHA}" -o /notifier ./services/notifier
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commitSHA=${COMMIT_SHA}" -o /presence ./services/presence
 
 # Runtime stage
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY --from=build /notifier /notifier
+COPY --from=build /presence /presence
 
-ENTRYPOINT ["/notifier"]
+ENTRYPOINT ["/presence"]
