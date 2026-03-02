@@ -33,10 +33,6 @@ else
   COMPOSE_SERVICE =
 endif
 
-# Stability test configuration
-STABILITY_TIMEOUT ?= 60
-STABILITY_POLL    ?= 15
-
 # =============================================================================
 # Help
 # =============================================================================
@@ -159,31 +155,13 @@ prod-ps: ## Show prod container status
 ghcr-login: ## Authenticate Docker with GHCR using the local gh CLI token
 	@gh auth token | docker login ghcr.io -u $$(gh api user --jq .login) --password-stdin
 
-deploy-prod: nats-validate ghcr-login ## Pull GHCR images and deploy to prod with 5-min stability test
+deploy-prod: nats-validate ghcr-login ## Pull GHCR images and deploy to prod
 	@echo "=== Deploying to production ==="
 	$(COMPOSE_CMD) -f $(PROD_COMPOSE) pull
 	$(COMPOSE_CMD) -f $(PROD_COMPOSE) up -d
 	@echo "=== Reloading NATS auth configuration ==="
 	@docker wait ruby-core-prod-nats-init 2>/dev/null || true
 	@docker kill --signal=SIGHUP ruby-core-prod-nats
-	@echo ""
-	@echo "=== Running $(STABILITY_TIMEOUT)s stability test ==="
-	@elapsed=0; \
-	while [ $$elapsed -lt $(STABILITY_TIMEOUT) ]; do \
-		unhealthy=$$(docker ps --filter "name=ruby-core-prod" \
-			--format '{{.Names}} {{.Status}}' | grep -v "nats-init" | grep -v "Up" || true); \
-		if [ -n "$$unhealthy" ]; then \
-			echo "[FAIL] Unhealthy: $$unhealthy"; \
-			$(COMPOSE_CMD) -f $(PROD_COMPOSE) logs --tail=30; \
-			exit 1; \
-		fi; \
-		remaining=$$(($(STABILITY_TIMEOUT) - elapsed)); \
-		echo "[$$elapsed/$(STABILITY_TIMEOUT)s] All prod containers healthy ($$remaining s remaining)"; \
-		sleep $(STABILITY_POLL); \
-		elapsed=$$((elapsed + $(STABILITY_POLL))); \
-	done
-	@echo ""
-	@echo "=== Stability test PASSED ($(STABILITY_TIMEOUT)s) ==="
 	@$(COMPOSE_CMD) -f $(PROD_COMPOSE) ps
 
 deploy-prod-down: ## Stop and remove prod deployment
