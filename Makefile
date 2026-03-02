@@ -156,7 +156,10 @@ prod-ps: ## Show prod container status
 # Production Deployment
 # =============================================================================
 
-deploy-prod: nats-validate ## Pull GHCR images and deploy to prod with 5-min stability test
+ghcr-login: ## Authenticate Docker with GHCR using the local gh CLI token
+	@gh auth token | docker login ghcr.io -u $$(gh api user --jq .login) --password-stdin
+
+deploy-prod: nats-validate ghcr-login ## Pull GHCR images and deploy to prod with 5-min stability test
 	@echo "=== Deploying to production ==="
 	$(COMPOSE_CMD) -f $(PROD_COMPOSE) pull
 	$(COMPOSE_CMD) -f $(PROD_COMPOSE) up -d
