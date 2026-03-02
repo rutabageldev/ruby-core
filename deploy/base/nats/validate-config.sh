@@ -7,9 +7,19 @@
 
 set -e
 
-# Vault configuration — general-purpose Vault on this node
-export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
-export VAULT_TOKEN="${VAULT_TOKEN:-root}"
+# Vault configuration — foundation Vault (TLS-only since foundation Phase 5)
+export VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
+export VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
+
+# Load VAULT_TOKEN from prod .env if not already set in the caller's environment.
+# The prod .env holds the scoped ruby-core token; do not default to "root" (stale dev token).
+if [ -z "${VAULT_TOKEN:-}" ]; then
+    _PROD_ENV="$(dirname "$0")/../../prod/.env"
+    if [ -f "${_PROD_ENV}" ]; then
+        VAULT_TOKEN=$(grep '^VAULT_TOKEN=' "${_PROD_ENV}" | cut -d= -f2-)
+        export VAULT_TOKEN
+    fi
+fi
 
 CONFIG_FILE="${1:-$(dirname "$0")/nats.conf}"
 
