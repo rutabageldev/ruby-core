@@ -106,9 +106,9 @@
     4. Implement one complete, real automation.
 
 * **Acceptance Criteria:**
-  * `[ ]` Any exposed API on the `gateway` is protected by Traefik.
-  * `[ ]` The `gateway` can connect to HA, process events, and reconcile state.
-  * `[ ]` The `engine` can load a YAML rule and execute a simple automation.
+  * `[X]` Any exposed API on the `gateway` is protected by Traefik.
+  * `[X]` The `gateway` can connect to HA, process events, and reconcile state.
+  * `[X]` The `engine` can load a YAML rule and execute a simple automation.
 
 ### **Phase 6: Full Developer Experience & CI Polish**
 

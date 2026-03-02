@@ -40,7 +40,7 @@ func (NoopRecorder) Record(_, _, _, _, _ string) {}
 type Consumer struct {
 	sub       *nats.Subscription
 	idStore   idempotency.Store
-	process   func(data []byte) error
+	process   func(subject string, data []byte) error
 	audit     Recorder
 	log       *slog.Logger
 	workerN   int
@@ -63,7 +63,7 @@ func (c *Consumer) logger() *slog.Logger {
 func NewConsumer(
 	sub *nats.Subscription,
 	idStore idempotency.Store,
-	process func(data []byte) error,
+	process func(subject string, data []byte) error,
 	workerN, batchSize int,
 	backOff []time.Duration,
 	log *slog.Logger,
@@ -148,7 +148,7 @@ func (c *Consumer) handle(msg *nats.Msg) {
 	eventID := extractEventID(msg.Header, msg.Data, meta)
 	correlationID, causationID := extractCorrelationFields(msg.Data)
 
-	result, err := c.decide(eventID, msg.Data)
+	result, err := c.decide(msg.Subject, eventID, msg.Data)
 	if err != nil {
 		c.logger().Error("engine: decide error",
 			slog.String("eventid", eventID),
@@ -192,7 +192,7 @@ func (c *Consumer) handle(msg *nats.Msg) {
 
 // decide evaluates idempotency and calls the process function.
 // It is a pure decision function, separated from NATS types to enable unit testing.
-func (c *Consumer) decide(eventID string, data []byte) (handleResult, error) {
+func (c *Consumer) decide(subject, eventID string, data []byte) (handleResult, error) {
 	seen, err := c.idStore.Seen(eventID)
 	if err != nil {
 		return resultNak, fmt.Errorf("idempotency check: %w", err)
@@ -203,7 +203,7 @@ func (c *Consumer) decide(eventID string, data []byte) (handleResult, error) {
 		)
 		return resultSkip, nil
 	}
-	if err := c.process(data); err != nil {
+	if err := c.process(subject, data); err != nil {
 		c.logger().Warn("engine: process error, will nak",
 			slog.String("eventid", eventID),
 			slog.String("error", err.Error()),

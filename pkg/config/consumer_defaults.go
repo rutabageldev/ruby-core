@@ -38,6 +38,10 @@ const (
 	// Must survive a prolonged audit-sink outage before messages are discarded (ADR-0019).
 	DefaultAuditMaxAge = 72 * time.Hour
 
+	// DefaultCommandsMaxAge is the retention window for the COMMANDS stream.
+	// Stale command messages (push notifications) are not worth replaying after this window.
+	DefaultCommandsMaxAge = 1 * time.Hour
+
 	// Audit-sink consumer defaults — lower throughput than the engine consumer
 	// because audit events are emitted only on critical actions (low volume).
 

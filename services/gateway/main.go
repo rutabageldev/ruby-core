@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
 	"github.com/primaryrutabaga/ruby-core/pkg/logging"
+	"github.com/primaryrutabaga/ruby-core/services/gateway/app"
 )
 
 var (
@@ -50,8 +52,44 @@ func main() {
 	defer nc.Close()
 	logger.Info("connected to NATS", slog.String("url", cfg.NATSUrl))
 
+	// Fetch Home Assistant credentials from Vault.
+	// Non-fatal: if the secret is absent the gateway starts in degraded mode
+	// (health endpoint up, HA WebSocket client disabled) and logs a warning.
+	haVaultPath := os.Getenv("VAULT_HA_PATH")
+	if haVaultPath == "" {
+		haVaultPath = "secret/data/ruby-core/ha"
+	}
+	haCfg, err := boot.FetchHAConfig(cfg.VaultAddr, cfg.VaultToken, haVaultPath)
+	if err != nil {
+		logger.Warn("vault: HA config unavailable — starting in degraded mode (no HA WebSocket)",
+			slog.String("vault_path", haVaultPath),
+			slog.String("error", err.Error()),
+		)
+		haCfg = &boot.HAConfig{} // empty: HA client will not connect
+	} else {
+		logger.Info("vault: fetched HA config", slog.String("ha_url", haCfg.URL))
+	}
+
+	gateway, err := app.New(haCfg.URL, haCfg.Token, nc, logger)
+	if err != nil {
+		logger.Error("gateway: init failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
-	logger.Info("shutting down")
+	go func() {
+		<-sig
+		logger.Info("shutting down")
+		cancel()
+	}()
+
+	httpAddr := os.Getenv("HTTP_ADDR")
+	if httpAddr == "" {
+		httpAddr = ":8080"
+	}
+	gateway.Run(ctx, httpAddr)
 }

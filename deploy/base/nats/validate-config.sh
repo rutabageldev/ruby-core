@@ -40,7 +40,7 @@ fi
 # Validate that all NKEY public keys are present in Vault (source of truth).
 if command -v vault >/dev/null 2>&1; then
     echo "Checking NKEY public keys in Vault..."
-    SERVICES="gateway engine notifier presence admin"
+    SERVICES="gateway engine notifier presence admin audit-sink"
     for service in $SERVICES; do
         if vault kv get -field=public_key "secret/ruby-core/nats/${service}" >/dev/null 2>&1; then
             echo "[OK] NKEY public key found in Vault for ${service}"

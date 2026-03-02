@@ -1,0 +1,47 @@
+schemaVersion: "1.0"
+
+# phone.katie events must flow through the gateway passlist.
+# Critical entity triggers reconciliation on gateway reconnect.
+passlist:
+  phone:
+    - state
+
+critical_entities:
+  - phone.katie
+
+rules:
+  - name: katie_arrives
+    trigger:
+      source: ruby_presence     # from the presence service
+      type: state
+      id: katie
+      attributes:
+        - state
+    conditions:
+      - type: state_transition
+        field: state
+        value: home
+    actions:
+      - type: notify
+        params:
+          title: "Welcome home"
+          message: "Katie just arrived home."
+          device: phone_michael
+
+  - name: katie_leaves
+    trigger:
+      source: ruby_presence
+      type: state
+      id: katie
+      attributes:
+        - state
+    conditions:
+      - type: state_transition
+        field: state
+        value: away
+    actions:
+      - type: notify
+        params:
+          title: "Just left"
+          message: "Katie just left home."
+          device: phone_michael

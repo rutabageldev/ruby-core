@@ -64,6 +64,8 @@ services:
   # Activated with: docker compose --profile services up -d
   # ADR-0015: All secrets from Vault (no cert volume mounts)
   # ADR-0018: mTLS via Vault-sourced client certificates
+  # ADR-0020: Dev publishes port to localhost for convenience (no Traefik required).
+  #           Production enforces Traefik-only access (no host port, traefik_proxy network).
   gateway:
     profiles: [services]
     build:
@@ -74,6 +76,9 @@ services:
     networks:
       - default
       - vault
+    ports:
+      # localhost only — direct access for dev. In prod this port is not published.
+      - "127.0.0.1:8090:8080"
     depends_on:
       nats:
         condition: service_healthy
@@ -88,6 +93,7 @@ services:
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=secret/data/ruby-core/nats/gateway
       - VAULT_TLS_PATH=secret/data/ruby-core/tls/gateway
+      - HTTP_ADDR=:8080
 
   # ==========================================================================
   # Engine Service (profile: services)
@@ -107,6 +113,8 @@ services:
         condition: service_healthy
     volumes:
       - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+      # Rule files (YAML): loaded at startup, published to NATS KV (ADR-0006)
+      - ../../configs/rules:/etc/ruby-core/rules:ro
     environment:
       - ENVIRONMENT=development
       - VAULT_ADDR=https://vault:8200
@@ -116,6 +124,72 @@ services:
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=secret/data/ruby-core/nats/engine
       - VAULT_TLS_PATH=secret/data/ruby-core/tls/engine
+      - RULES_DIR=/etc/ruby-core/rules
+
+  # ==========================================================================
+  # Notifier Service (profile: services)
+  # ==========================================================================
+  # ADR-0020: Dispatches push notifications via HA mobile_app REST API.
+  notifier:
+    profiles: [services]
+    build:
+      context: ../..
+      dockerfile: services/notifier/Dockerfile
+    container_name: ruby-core-dev-notifier
+    restart: unless-stopped
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - ENVIRONMENT=development
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN:-root}
+      - NATS_URL=tls://nats:4222
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=secret/data/ruby-core/nats/notifier
+      - VAULT_TLS_PATH=secret/data/ruby-core/tls/notifier
+
+  # ==========================================================================
+  # Presence Service (profile: services)
+  # ==========================================================================
+  # Multi-source presence fusion with WiFi corroboration and debounce.
+  # Subscribes to ha.events.phone.katie; publishes ruby_presence.events.state.katie.
+  presence:
+    profiles: [services]
+    build:
+      context: ../..
+      dockerfile: services/presence/Dockerfile
+    container_name: ruby-core-dev-presence
+    restart: unless-stopped
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - ENVIRONMENT=development
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN:-root}
+      - NATS_URL=tls://nats:4222
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=secret/data/ruby-core/nats/presence
+      - VAULT_TLS_PATH=secret/data/ruby-core/tls/presence
+      - VAULT_HA_PATH=secret/data/ruby-core/ha
+      - PRESENCE_PERSON_ID=katie
+      - PRESENCE_PHONE_ENTITY=phone.katie
+      - PRESENCE_WIFI_ENTITY=network.phone.katie
+      - PRESENCE_TRUSTED_WIFI=RubyGues,RubyNet,RIoT
+      - PRESENCE_DEBOUNCE_SECONDS=120
 
   # ==========================================================================
   # Audit-Sink Service (profile: services)

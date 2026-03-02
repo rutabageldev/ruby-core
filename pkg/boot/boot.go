@@ -222,6 +222,49 @@ func ConnectNATS(cfg Config, name, seed string, tlsMat *TLSMaterial) (*nats.Conn
 	return nc, nil
 }
 
+// HAConfig holds credentials for connecting to Home Assistant.
+type HAConfig struct {
+	URL   string // e.g. "http://homeassistant:8123"
+	Token string // HA long-lived access token
+}
+
+// FetchHAConfig retrieves the Home Assistant URL and access token from Vault
+// at the given path (e.g. "secret/data/ruby-core/ha").
+// Returns a fatal-worthy error if credentials are missing; callers must treat
+// the result as fatal if the service cannot operate without HA access.
+func FetchHAConfig(addr, token, path string) (*HAConfig, error) {
+	client, err := newVaultClient(addr, token)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg *HAConfig
+	err = withRetry(func() error {
+		secret, fetchErr := client.Logical().Read(path)
+		if fetchErr != nil {
+			return fmt.Errorf("read %s: %w", path, fetchErr)
+		}
+		if secret == nil || secret.Data == nil {
+			return fmt.Errorf("no data at %s", path)
+		}
+		data, ok := secret.Data["data"].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected data format at %s", path)
+		}
+		haURL, ok := data["url"].(string)
+		if !ok || haURL == "" {
+			return fmt.Errorf("missing url in %s", path)
+		}
+		haToken, ok := data["token"].(string)
+		if !ok || haToken == "" {
+			return fmt.Errorf("missing token in %s", path)
+		}
+		cfg = &HAConfig{URL: haURL, Token: haToken}
+		return nil
+	})
+	return cfg, err
+}
+
 // withRetry retries fn up to 3 times with exponential backoff (1s, 2s, 4s).
 func withRetry(fn func() error) error {
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}

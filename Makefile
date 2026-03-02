@@ -127,8 +127,8 @@ dev-ps: ## Show dev container status
 dev-services-up: ## Build and start gateway+engine in dev (requires infra running)
 	$(COMPOSE_CMD) -f $(DEV_COMPOSE) --profile services up -d --build $(COMPOSE_SERVICE)
 
-dev-services-down: ## Stop gateway+engine in dev
-	$(COMPOSE_CMD) -f $(DEV_COMPOSE) --profile services stop gateway engine
+dev-services-down: ## Stop gateway+engine+notifier+presence in dev
+	$(COMPOSE_CMD) -f $(DEV_COMPOSE) --profile services stop gateway engine notifier presence
 
 dev-verify: ## Verify gateway+engine connect via Vault-sourced mTLS
 	@scripts/verify-tls-stack.sh

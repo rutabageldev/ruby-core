@@ -3,6 +3,7 @@ package natsx
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/nats-io/nats.go"
 
@@ -54,6 +55,32 @@ func EnsureAuditStream(js nats.JetStreamContext) error {
 		Storage:   nats.FileStorage,
 		Retention: nats.LimitsPolicy,
 		MaxAge:    config.DefaultAuditMaxAge,
+	})
+}
+
+// EnsureCommandsStream creates the COMMANDS JetStream stream if it does not already exist.
+// The stream captures all ruby_engine.commands.> subjects published by the engine.
+// Messages are retained for 1 hour — stale notifications are not worth replaying.
+func EnsureCommandsStream(js nats.JetStreamContext) error {
+	return ensureStream(js, &nats.StreamConfig{
+		Name:      "COMMANDS",
+		Subjects:  []string{"ruby_engine.commands.>"},
+		Storage:   nats.FileStorage,
+		Retention: nats.LimitsPolicy,
+		MaxAge:    config.DefaultCommandsMaxAge,
+	})
+}
+
+// EnsurePresenceStream creates the PRESENCE JetStream stream if it does not already exist.
+// The stream captures all ruby_presence.events.> subjects published by the presence service.
+// Messages are retained for 24 hours.
+func EnsurePresenceStream(js nats.JetStreamContext) error {
+	return ensureStream(js, &nats.StreamConfig{
+		Name:      "PRESENCE",
+		Subjects:  []string{"ruby_presence.events.>"},
+		Storage:   nats.FileStorage,
+		Retention: nats.LimitsPolicy,
+		MaxAge:    24 * time.Hour,
 	})
 }
 
