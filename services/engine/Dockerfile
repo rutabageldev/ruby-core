@@ -14,5 +14,8 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION} -X main.co
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=build /engine /engine
+# Rule files are baked into the image. Rule changes require a new image build
+# (version bump + redeploy). Override at runtime via RULES_DIR + bind mount if needed.
+COPY configs/rules/ /etc/ruby-core/rules/
 
 ENTRYPOINT ["/engine"]

@@ -6,10 +6,10 @@
 # build
 bin/
 dist/
-gateway
-engine
-notifier
-presence
+/gateway
+/engine
+/notifier
+/presence
 
 # editor
 .vscode/

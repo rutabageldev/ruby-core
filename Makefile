@@ -163,6 +163,9 @@ deploy-prod: nats-validate ghcr-login ## Pull GHCR images and deploy to prod wit
 	@echo "=== Deploying to production ==="
 	$(COMPOSE_CMD) -f $(PROD_COMPOSE) pull
 	$(COMPOSE_CMD) -f $(PROD_COMPOSE) up -d
+	@echo "=== Reloading NATS auth configuration ==="
+	@docker wait ruby-core-prod-nats-init 2>/dev/null || true
+	@docker kill --signal=SIGHUP ruby-core-prod-nats
 	@echo ""
 	@echo "=== Running $(STABILITY_TIMEOUT)s stability test ==="
 	@elapsed=0; \
