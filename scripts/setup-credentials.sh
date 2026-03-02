@@ -27,7 +27,8 @@
 #   ./scripts/setup-credentials.sh
 #
 # Environment variables:
-#   VAULT_ADDR    - Vault address (default: http://127.0.0.1:8200)
+#   VAULT_ADDR    - Vault address (default: https://127.0.0.1:8200)
+#   VAULT_CACERT  - Path to Vault CA cert (default: /opt/foundation/vault/tls/vault-ca.crt)
 #   VAULT_TOKEN   - Vault token (default: root)
 #   FORCE_REGEN   - Set to "true" to regenerate all credentials
 #
@@ -42,7 +43,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Vault configuration — points to the general-purpose Vault on this node
-export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
+export VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
+export VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
 export VAULT_TOKEN="${VAULT_TOKEN:-root}"
 
 # Services that need NKEYs

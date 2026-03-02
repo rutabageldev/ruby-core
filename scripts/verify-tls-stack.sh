@@ -30,14 +30,17 @@ SERVICES=("gateway" "engine")
 CONTAINER_PREFIX="ruby-core-dev"
 
 # Vault configuration — general-purpose Vault on this node
-export VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
-export VAULT_TOKEN="${VAULT_TOKEN:-root}"
+# VAULT_ADDR and VAULT_CACERT are needed for the host-side `vault status` preflight check.
+# VAULT_TOKEN is intentionally NOT exported here: vault status is unauthenticated, and
+# exporting it would override the value in deploy/dev/.env for docker compose.
+export VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
+export VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
 
-# Expected log messages (from services/gateway/main.go and services/engine/main.go)
+# Expected log messages (slog JSON format, from services/gateway/main.go and services/engine/main.go)
 EXPECTED_LOGS=(
-    "vault: fetched NATS seed from"
-    "vault: fetched TLS material from"
-    "connected to NATS at"
+    "vault: fetched NATS seed"
+    "vault: fetched TLS material"
+    "connected to NATS"
 )
 
 # Color output

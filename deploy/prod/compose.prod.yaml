@@ -19,8 +19,10 @@ services:
     volumes:
       - nats-certs:/certs
       - ../../scripts/fetch-nats-certs.sh:/scripts/fetch-nats-certs.sh:ro
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
     environment:
-      - VAULT_ADDR=http://vault:8200
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN}
     networks:
       - vault
@@ -78,11 +80,13 @@ services:
     depends_on:
       nats:
         condition: service_healthy
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
     environment:
       - ENVIRONMENT=production
-      - VAULT_ADDR=http://vault:8200
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN}
-      - VAULT_ALLOW_HTTP=true
       - NATS_URL=${NATS_URL:-tls://nats:4222}
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_GATEWAY:-secret/data/ruby-core/nats/gateway}
@@ -106,11 +110,13 @@ services:
     depends_on:
       nats:
         condition: service_healthy
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
     environment:
       - ENVIRONMENT=production
-      - VAULT_ADDR=http://vault:8200
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN}
-      - VAULT_ALLOW_HTTP=true
       - NATS_URL=${NATS_URL:-tls://nats:4222}
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_ENGINE:-secret/data/ruby-core/nats/engine}
@@ -138,9 +144,9 @@ services:
         condition: service_healthy
     environment:
       - ENVIRONMENT=production
-      - VAULT_ADDR=http://vault:8200
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN}
-      - VAULT_ALLOW_HTTP=true
       - NATS_URL=${NATS_URL:-tls://nats:4222}
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_AUDIT_SINK:-secret/data/ruby-core/nats/audit-sink}
@@ -151,6 +157,7 @@ services:
       # Ensure this directory exists and is writable before first deploy:
       #   mkdir -p /var/lib/ruby-core/audit
       - /var/lib/ruby-core/audit:/data/audit
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
 
 # ==========================================================================
 # Networks
