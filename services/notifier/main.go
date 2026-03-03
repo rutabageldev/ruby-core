@@ -99,6 +99,7 @@ func main() {
 	}()
 
 	logger.Info("notifier running")
+	select {} // test: deadlock for rollback verification (v0.3.5-rc.1)
 	runConsumer(ctx, sub, h, consumerCfg.FetchBatch, logger)
 	logger.Info("notifier stopped")
 }
