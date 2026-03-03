@@ -96,4 +96,8 @@ if (set +o pipefail
 fi
 
 echo "ERROR: smoke test FAILED — no audit confirmation for ${SMOKE_ID} within ${SMOKE_TIMEOUT}s" >&2
+# Purge the unconsumed smoke message from COMMANDS so the rollback notifier
+# doesn't process it and send a spurious "successful" notification.
+nats stream purge "${NATS_OPTS[@]}" COMMANDS \
+  --subject "ruby_engine.commands.notify.${SMOKE_ID}" -f 2>/dev/null || true
 exit 1
