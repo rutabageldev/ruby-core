@@ -110,7 +110,7 @@
   * `[X]` The `gateway` can connect to HA, process events, and reconcile state.
   * `[X]` The `engine` can load a YAML rule and execute a simple automation.
 
-### **Phase 6: Post-Deploy Smoke Test & Auto-Rollback**
+### **Phase 6: Post-Deploy Smoke Test & Auto-Rollback** [Complete]
 
 **Goal:** Eliminate silent broken deploys by running a full end-to-end pipeline check immediately after every `make deploy-prod`, rolling back automatically on failure and pushing a phone notification either way.
 
