@@ -155,14 +155,8 @@ prod-ps: ## Show prod container status
 ghcr-login: ## Authenticate Docker with GHCR using the local gh CLI token
 	@gh auth token | docker login ghcr.io -u $$(gh api user --jq .login) --password-stdin
 
-deploy-prod: nats-validate ghcr-login ## Pull GHCR images and deploy to prod
-	@echo "=== Deploying to production ==="
-	$(COMPOSE_CMD) -f $(PROD_COMPOSE) pull
-	$(COMPOSE_CMD) -f $(PROD_COMPOSE) up -d
-	@echo "=== Reloading NATS auth configuration ==="
-	@docker wait ruby-core-prod-nats-init 2>/dev/null || true
-	@docker kill --signal=SIGHUP ruby-core-prod-nats
-	@$(COMPOSE_CMD) -f $(PROD_COMPOSE) ps
+deploy-prod: nats-validate ghcr-login ## Pull GHCR images and deploy to prod with smoke test + auto-rollback
+	@scripts/deploy-prod.sh
 
 deploy-prod-down: ## Stop and remove prod deployment
 	$(COMPOSE_CMD) -f $(PROD_COMPOSE) down

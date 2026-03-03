@@ -10,6 +10,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/audit"
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
 	"github.com/primaryrutabaga/ruby-core/pkg/logging"
 	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
@@ -82,7 +83,10 @@ func main() {
 	}
 	logger.Info("nats: pull consumer ready", slog.String("consumer", "notifier_processor"))
 
-	h := newHandler(haCfg.URL, haCfg.Token, logger)
+	auditPub := audit.NewPublisher(nc, "ruby_notifier", logger)
+	defer auditPub.Close()
+
+	h := newHandler(haCfg.URL, haCfg.Token, auditPub, logger)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

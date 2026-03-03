@@ -110,7 +110,23 @@
   * `[X]` The `gateway` can connect to HA, process events, and reconcile state.
   * `[X]` The `engine` can load a YAML rule and execute a simple automation.
 
-### **Phase 6: Full Developer Experience & CI Polish**
+### **Phase 6: Post-Deploy Smoke Test & Auto-Rollback**
+
+**Goal:** Eliminate silent broken deploys by running a full end-to-end pipeline check immediately after every `make deploy-prod`, rolling back automatically on failure and pushing a phone notification either way.
+
+* **Key Tasks:**
+    1. Write `scripts/smoke-test.sh $VERSION` — publishes a synthetic `ha.events.phone.katie {state:home}` event to prod NATS, then polls the PRESENCE and COMMANDS JetStream streams for the expected messages within a 10-second timeout each. Accepts an optional `ROLLBACK_FROM` env var so the notification can read "vX.X.X failed, rollback to vY.Y.Y was successful".
+    2. Extend `deploy-prod` in the Makefile to: (a) capture the currently-running version before pulling (from the running container image label, written to `.last-deployed-version`); (b) run `smoke-test.sh $VERSION` after the NATS SIGHUP; (c) on smoke test failure, re-deploy the previous version and re-run the smoke test as a rollback validation, then exit non-zero.
+    3. On smoke test **pass**: push HA notification "Deployment of ruby-core vX.X.X successful at HH:MM" to `mobile_app_phone_michael`.
+    4. On smoke test **fail + rollback pass**: push "ruby-core vX.X.X failed — rollback to vY.Y.Y successful at HH:MM".
+    5. On smoke test **fail + rollback fail**: push "ruby-core vX.X.X failed — rollback to vY.Y.Y also failed. Manual intervention required." and exit non-zero loudly.
+
+* **Acceptance Criteria:**
+  * `[X]` A successful `make deploy-prod` sends a push notification to Michael's phone confirming the version and time.
+  * `[ ]` Deploying a broken image (e.g. bad ACLs, missing rule) triggers automatic rollback and a failure notification.
+  * `[ ]` `make deploy-prod` exits non-zero if rollback is also required, making CI-friendliness possible in Phase 8.
+
+### **Phase 7: Full Developer Experience & CI Polish**
 
 **Goal:** Fully build out the CI pipeline and enhance the developer experience to improve velocity and safety.
 
@@ -124,13 +140,13 @@
   * `[ ]` `git commit` enforces all defined quality checks.
   * `[ ]` No PR can be merged without passing all unit and integration tests.
 
-### **Phase 7: Staging Environment & Deploy Validation**
+### **Phase 8: Staging Environment & Deploy Validation**
 
 **Goal:** Eliminate manual back-and-forth during releases by automatically validating deployability before prod.
 
 * **Key Tasks:**
     1. Add `deploy/staging/compose.staging.yaml` (same images as prod, separate container names/ports, shared Vault).
-    2. Add a GitHub Actions workflow triggered on `v*` tags that deploys to the node over SSH, runs a smoke test script (health checks + synthetic NATS event through the full pipeline), and blocks the release from being marked "latest" on failure.
+    2. Add a GitHub Actions workflow triggered on `v*` tags that deploys to the node over SSH, runs `scripts/smoke-test.sh` (from Phase 6) against staging, and blocks the release from being marked "latest" on failure.
     3. Gate `make deploy-prod` on a passing staging run (GitHub environment protection rule).
 
 * **Acceptance Criteria:**
@@ -140,7 +156,7 @@
 
 ---
 
-### **Phase 8: Full-Stack Observability**
+### **Phase 9: Full-Stack Observability**
 
 **Goal:** Complete the observability stack with distributed tracing and metrics.
 

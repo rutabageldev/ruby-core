@@ -24,3 +24,6 @@ dist/
 
 # dev tooling
 **/tmp/
+
+# deployment state
+.last-deployed-version

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/audit"
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 )
 
@@ -25,14 +26,16 @@ type handler struct {
 	haURL   string
 	haToken string
 	client  *http.Client
+	rec     *audit.Publisher
 	log     *slog.Logger
 }
 
-func newHandler(haURL, haToken string, log *slog.Logger) *handler {
+func newHandler(haURL, haToken string, rec *audit.Publisher, log *slog.Logger) *handler {
 	return &handler{
 		haURL:   haURL,
 		haToken: haToken,
 		client:  &http.Client{Timeout: 10 * time.Second},
+		rec:     rec,
 		log:     log,
 	}
 }
@@ -74,7 +77,7 @@ func (h *handler) process(subject string, data []byte) error {
 		return nil // ack: nothing useful to retry until HA is configured
 	}
 
-	if err := h.sendNotification(title, message, device, evt); err != nil {
+	if err := h.sendNotification(subject, title, message, device, evt); err != nil {
 		// Non-nil error will trigger NAK + backoff redelivery in the consumer.
 		return err
 	}
@@ -82,7 +85,7 @@ func (h *handler) process(subject string, data []byte) error {
 }
 
 // sendNotification POSTs to HA's mobile_app notify service.
-func (h *handler) sendNotification(title, message, device string, cause schemas.CloudEvent) error {
+func (h *handler) sendNotification(subject, title, message, device string, cause schemas.CloudEvent) error {
 	// HA service name: "mobile_app_{device}" — underscores, lowercase.
 	svcName := "mobile_app_" + strings.ToLower(strings.ReplaceAll(device, "-", "_"))
 	apiURL := strings.TrimRight(h.haURL, "/") + "/api/services/notify/" + svcName
@@ -129,5 +132,14 @@ func (h *handler) sendNotification(title, message, device string, cause schemas.
 		slog.String("title", title),
 		slog.String("correlationid", cause.CorrelationID),
 	)
+
+	// Publish audit event so the smoke test can confirm delivery via NATS.
+	// correlationid falls back to cause.ID so the smoke test's SMOKE_ID is always present.
+	corrID := cause.CorrelationID
+	if corrID == "" {
+		corrID = cause.ID
+	}
+	h.rec.Record(corrID, cause.ID, "notification_sent", subject, "success")
+
 	return nil
 }
