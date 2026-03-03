@@ -123,8 +123,8 @@
 
 * **Acceptance Criteria:**
   * `[X]` A successful `make deploy-prod` sends a push notification to Michael's phone confirming the version and time.
-  * `[ ]` Deploying a broken image (e.g. bad ACLs, missing rule) triggers automatic rollback and a failure notification.
-  * `[ ]` `make deploy-prod` exits non-zero if rollback is also required, making CI-friendliness possible in Phase 8.
+  * `[X]` Deploying a broken image (e.g. bad ACLs, missing rule) triggers automatic rollback and a failure notification.
+  * `[X]` `make deploy-prod` exits non-zero if rollback is also required, making CI-friendliness possible in Phase 8.
 
 ### **Phase 7: Full Developer Experience & CI Polish**
 
