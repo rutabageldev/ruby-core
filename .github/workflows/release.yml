@@ -88,27 +88,21 @@ jobs:
   # ==========================================================================
   deploy-staging:
     name: Deploy to Staging
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-and-push
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: read
 
     steps:
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+      - name: Checkout tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.ref_name }}
 
       - name: Deploy staging and run smoke test
         run: |
-          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cd /opt/ruby-core \
-             && git fetch --tags \
-             && git checkout ${{ github.ref_name }} \
-             && VERSION=${{ github.ref_name }} ./scripts/deploy-staging.sh ${{ github.ref_name }}"
+          VERSION=${{ github.ref_name }} ./scripts/deploy-staging.sh ${{ github.ref_name }}
 
   # ==========================================================================
   # Create GitHub Release
