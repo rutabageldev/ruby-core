@@ -146,8 +146,22 @@ ensure_vault_running() {
 enable_kv_engine() {
     log_info "Ensuring KV secrets engine is enabled..."
 
-    # Check if secret/ path exists (dev mode usually has it)
-    if vault secrets list | grep -q "^secret/"; then
+    # vault secrets list requires sys/mounts read access (root-level permission).
+    # The ruby-core-writer token only has secret/data/ruby-core/* access, so this
+    # check will fail with 403 when called with a scoped token.
+    # Gracefully skip: if we can't list mounts, assume secret/ is already enabled
+    # (any subsequent kv put will fail with a clear error if it isn't).
+    local mounts_output
+    if ! mounts_output=$(vault secrets list 2>&1); then
+        if echo "$mounts_output" | grep -q "permission denied"; then
+            log_info "Cannot list secrets engines (scoped token — no sys/mounts access). Assuming secret/ already enabled."
+            return 0
+        fi
+        log_error "Unexpected error listing secrets engines: ${mounts_output}"
+        exit 1
+    fi
+
+    if echo "$mounts_output" | grep -q "^secret/"; then
         log_success "KV secrets engine already enabled at secret/"
     else
         log_info "Enabling KV secrets engine..."
