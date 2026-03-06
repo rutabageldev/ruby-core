@@ -180,9 +180,11 @@ deploy-prod-down: ## Stop and remove prod deployment
 # =============================================================================
 
 setup-staging-creds: ## Generate staging credentials in Vault (secret/ruby-core-staging/*)
-	VAULT_SECRET_PREFIX=secret/ruby-core-staging \
-	EXTRA_NATS_SANS=ruby-core-staging-nats \
-	./scripts/setup-credentials.sh
+	@( . deploy/dev/.env && \
+	   VAULT_TOKEN="$$VAULT_TOKEN_RUBY_CORE_WRITER" \
+	   VAULT_SECRET_PREFIX=secret/ruby-core-staging \
+	   EXTRA_NATS_SANS=ruby-core-staging-nats \
+	   ./scripts/setup-credentials.sh )
 
 staging-up: ## Start staging stack (requires deploy/staging/.env with VAULT_TOKEN)
 	$(COMPOSE_CMD) -f $(STAGING_COMPOSE) up -d $(COMPOSE_SERVICE)
@@ -234,10 +236,10 @@ docker-nuke: ## Remove ALL ruby-core containers, images, and volumes (use with c
 # =============================================================================
 
 setup-creds: ## Generate and store credentials (NKEYs + TLS) in Vault
-	@scripts/setup-credentials.sh
+	@( . deploy/dev/.env && VAULT_TOKEN="$$VAULT_TOKEN_RUBY_CORE_WRITER" scripts/setup-credentials.sh )
 
 setup-creds-force: ## Regenerate ALL credentials (overwrites existing)
-	@FORCE_REGEN=true scripts/setup-credentials.sh
+	@( . deploy/dev/.env && VAULT_TOKEN="$$VAULT_TOKEN_RUBY_CORE_WRITER" FORCE_REGEN=true scripts/setup-credentials.sh )
 
 # =============================================================================
 # Validation
