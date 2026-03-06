@@ -3,9 +3,10 @@
 #
 # Usage: make help
 
-.PHONY: help build test fmt lint clean \
+.PHONY: help build test test-fast test-integration fmt lint clean \
         dev-up dev-down dev-restart dev-logs dev-ps \
         dev-services-up dev-services-down dev-verify \
+        dev-air-up dev-air-down \
         prod-up prod-down prod-restart prod-logs prod-ps \
         deploy-prod deploy-prod-down \
         docker-ps docker-images docker-volumes docker-clean \
@@ -20,6 +21,7 @@
 
 # Compose files
 DEV_COMPOSE  := deploy/dev/compose.dev.yaml
+AIR_COMPOSE  := deploy/dev/compose.air.yaml
 PROD_COMPOSE := deploy/prod/compose.prod.yaml
 
 # Optional service filter (e.g., make dev-up SERVICE=nats)
@@ -43,7 +45,7 @@ help: ## Show this help message
 	@echo "Usage: make [target] [SERVICE=<service>]"
 	@echo ""
 	@echo "Build & Test:"
-	@grep -E '^(build|test|fmt|lint|clean):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
+	@grep -E '^(build|test|test-fast|test-integration|fmt|lint|clean):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Development Environment:"
 	@grep -E '^dev-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
@@ -63,7 +65,8 @@ help: ## Show this help message
 	@echo "Examples:"
 	@echo "  make dev-up              # Start dev NATS"
 	@echo "  make dev-up SERVICE=nats # Start only NATS in dev"
-	@echo "  make dev-services-up     # Build and start gateway+engine"
+	@echo "  make dev-services-up     # Build and start services (prod-like images)"
+	@echo "  make dev-air-up          # Build and start services with air live-reload"
 	@echo "  make deploy-prod         # Pull images and deploy to prod with stability test"
 	@echo "  make setup-creds         # Generate/sync credentials from Vault"
 
@@ -74,8 +77,14 @@ help: ## Show this help message
 build: ## Build all Go packages
 	go build ./...
 
-test: ## Run all tests
-	go test ./...
+test: ## Run all tests (fast unit tests; use test-integration for integration tests)
+	go test -tags=fast -race ./...
+
+test-fast: ## Run fast unit tests (same as test; for explicit pre-commit parity)
+	go test -tags=fast -race ./...
+
+test-integration: ## Run integration tests (requires Docker for testcontainers)
+	go test -tags=integration -race ./...
 
 fmt: ## Format code with gofumpt (if installed)
 	@if command -v gofumpt >/dev/null 2>&1; then \
@@ -84,14 +93,8 @@ fmt: ## Format code with gofumpt (if installed)
 		echo "gofumpt not installed. Install with: go install mvdan.cc/gofumpt@latest"; \
 	fi
 
-lint: ## Run linter (Phase 6 - not yet enabled)
-	@echo "Linting is scheduled for Phase 6."
-	@echo "To run manually: golangci-lint run ./..."
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		echo ""; \
-		echo "golangci-lint is installed. Running..."; \
-		golangci-lint run ./...; \
-	fi
+lint: ## Run golangci-lint (enforced per ADR-0011/ADR-0013)
+	golangci-lint run ./...
 
 clean: ## Remove build artifacts
 	go clean ./...
@@ -128,6 +131,12 @@ dev-services-down: ## Stop gateway+engine+notifier+presence in dev
 
 dev-verify: ## Verify gateway+engine connect via Vault-sourced mTLS
 	@scripts/verify-tls-stack.sh
+
+dev-air-up: ## Start services with air live-reload (run make dev-up first for NATS)
+	$(COMPOSE_CMD) -f $(DEV_COMPOSE) -f $(AIR_COMPOSE) --profile services up -d --build $(COMPOSE_SERVICE)
+
+dev-air-down: ## Stop air live-reload services
+	$(COMPOSE_CMD) -f $(DEV_COMPOSE) -f $(AIR_COMPOSE) --profile services stop $(COMPOSE_SERVICE)
 
 # =============================================================================
 # Production Environment

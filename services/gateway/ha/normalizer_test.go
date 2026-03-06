@@ -1,3 +1,5 @@
+//go:build fast
+
 package ha_test
 
 import (

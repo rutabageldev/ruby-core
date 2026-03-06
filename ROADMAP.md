@@ -95,7 +95,7 @@
   * `[X]` The JetStream restore procedure is documented and validated.
   * `[X]` Logs are structured and contain correlation IDs, enabling basic distributed debugging.
 
-### **Phase 5: Core Feature Implementation**
+### **Phase 5: Core Feature Implementation** [Complete]
 
 **Goal:** Build the primary business logic of the `gateway` and `engine` services.
 
@@ -136,9 +136,9 @@
     3. **CI Polish:** Expand the CI pipeline to run the full comprehensive test gates, including **integration tests**, on all pull requests (ADR-0013).
 
 * **Acceptance Criteria:**
-  * `[ ]` A productive live-reload environment is available.
-  * `[ ]` `git commit` enforces all defined quality checks.
-  * `[ ]` No PR can be merged without passing all unit and integration tests.
+  * `[X]` A productive live-reload environment is available.
+  * `[X]` `git commit` enforces all defined quality checks.
+  * `[X]` No PR can be merged without passing all unit and integration tests.
 
 ### **Phase 8: Staging Environment & Deploy Validation**
 

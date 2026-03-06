@@ -1,0 +1,68 @@
+# Air live-reload overlay for development (ADR-0010)
+#
+# Usage:
+#   make dev-up       # Start NATS (required first)
+#   make dev-air-up   # Build + start all services with live-reload
+#
+# This overlay extends compose.dev.yaml. Docker Compose merges service
+# definitions, so only the keys that differ from the base are listed here.
+# Volumes are appended (not replaced); env vars and networks are inherited.
+#
+# Each service's source is bind-mounted read-only at /workspace. Air
+# compiles the binary under /tmp/air-<service>/ (writable inside the
+# container) and restarts the process on every *.go change.
+#
+# Dev Dockerfiles (Dockerfile.dev) are separate from production Dockerfiles
+# to ensure production images remain minimal and air-free (ADR-0010).
+
+services:
+  gateway:
+    build:
+      context: ../..
+      dockerfile: services/gateway/Dockerfile.dev
+    volumes:
+      - ../..:/workspace:ro
+      - go-pkg-cache:/root/go/pkg
+    command: ["-c", "services/gateway/.air.toml"]
+
+  engine:
+    build:
+      context: ../..
+      dockerfile: services/engine/Dockerfile.dev
+    volumes:
+      - ../..:/workspace:ro
+      - go-pkg-cache:/root/go/pkg
+    command: ["-c", "services/engine/.air.toml"]
+
+  notifier:
+    build:
+      context: ../..
+      dockerfile: services/notifier/Dockerfile.dev
+    volumes:
+      - ../..:/workspace:ro
+      - go-pkg-cache:/root/go/pkg
+    command: ["-c", "services/notifier/.air.toml"]
+
+  presence:
+    build:
+      context: ../..
+      dockerfile: services/presence/Dockerfile.dev
+    volumes:
+      - ../..:/workspace:ro
+      - go-pkg-cache:/root/go/pkg
+    command: ["-c", "services/presence/.air.toml"]
+
+  audit-sink:
+    build:
+      context: ../..
+      dockerfile: services/audit-sink/Dockerfile.dev
+    volumes:
+      - ../..:/workspace:ro
+      - go-pkg-cache:/root/go/pkg
+    command: ["-c", "services/audit-sink/.air.toml"]
+
+volumes:
+  # Shared Go module cache — persists across air rebuilds and container restarts.
+  # Avoids re-downloading dependencies on every source change.
+  go-pkg-cache:
+    driver: local

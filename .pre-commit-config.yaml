@@ -1,5 +1,5 @@
 # Pre-commit hooks for Ruby Core
-# Phase 1: Lint + Format Baseline (golangci-lint) and Secrets (gitleaks) per ADR-0011
+# Phase 7 complete: Lint, Secrets, non-Go linters, go mod tidy, fast unit tests (ADR-0011)
 
 repos:
   # ==========================================================================
@@ -81,21 +81,21 @@ repos:
         types: [shell]
         args: [--severity=warning]
 
-# ==========================================================================
-# Future additions (Phase 6):
-# ==========================================================================
-# - repo: local
-#   hooks:
-#     - id: go-mod-tidy
-#       name: go mod tidy
-#       entry: go mod tidy
-#       language: system
-#       files: go\.(mod|sum)$
-#       pass_filenames: false
-#
-#     - id: go-test-fast
-#       name: fast unit tests
-#       entry: go test -tags=fast ./...
-#       language: system
-#       types: [go]
-#       pass_filenames: false
+  # ==========================================================================
+  # Go - local hooks (go mod tidy + fast unit tests)
+  # ==========================================================================
+  - repo: local
+    hooks:
+      - id: go-mod-tidy
+        name: go mod tidy
+        entry: go mod tidy
+        language: system
+        files: go\.(mod|sum)$
+        pass_filenames: false
+
+      - id: go-test-fast
+        name: fast unit tests
+        entry: go test -tags=fast ./...
+        language: system
+        types: [go]
+        pass_filenames: false

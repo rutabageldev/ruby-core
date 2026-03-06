@@ -1,0 +1,9 @@
+# Dev-only image for live-reload via air (ADR-0010)
+# Used exclusively by deploy/dev/compose.air.yaml.
+# Production images use services/gateway/Dockerfile (distroless, no air).
+FROM golang:1.25.6
+
+RUN go install github.com/air-verse/air@latest
+
+WORKDIR /workspace
+ENTRYPOINT ["air"]

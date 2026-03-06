@@ -1,6 +1,10 @@
 # Ruby Core CI Pipeline
-# Phase 1: Minimal CI gate per ADR-0013
+# Phase 7: Full CI gate per ADR-0013
 # Runs on all PRs targeting main branch
+#
+# Stage layout (ADR-0013 "Comprehensive Gate"):
+#   Stage 1 (parallel, no deps): lint | security | unit-tests
+#   Stage 2 (needs: unit-tests, parallel): integration-tests | docker-build
 
 name: CI
 
@@ -19,10 +23,56 @@ concurrency:
 
 jobs:
   # ==========================================================================
-  # Build and Test
+  # Stage 1a: Static Analysis & Linting (ADR-0011, ADR-0013)
+  # Runs golangci-lint (includes gofumpt formatter enforcement)
   # ==========================================================================
-  build-and-test:
-    name: Build & Test
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.25.6'
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3d4a48bdc3e6e8c # v6
+        with:
+          version: v2.8.0
+          args: --timeout=5m
+
+  # ==========================================================================
+  # Stage 1b: Security Scanning (Defense in Depth, ADR-0013)
+  # Runs independently in parallel with lint and unit-tests
+  # ==========================================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0  # Full history for gitleaks
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # ==========================================================================
+  # Stage 1c: Unit Tests (ADR-0012, ADR-0013)
+  # Runs in parallel with lint/security for fast feedback.
+  # Executes the full fast unit test suite (//go:build fast).
+  # ==========================================================================
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -41,17 +91,9 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
-      # Phase 1: Basic checks only
-      # Phase 6 will add: gofumpt check, golangci-lint, integration tests
-      # Note: gitleaks runs in a separate security job below
+      - name: Run unit tests
+        run: go test -tags=fast -race -coverprofile=coverage.out ./...
 
-      - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out ./...
-
-      - name: Build
-        run: go build -v ./...
-
-      # Upload coverage for visibility (optional)
       - name: Upload coverage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
@@ -61,20 +103,55 @@ jobs:
           retention-days: 7
 
   # ==========================================================================
-  # Security Scanning (Defense in Depth)
+  # Stage 2a: Integration Tests (ADR-0012, ADR-0013)
+  # Runs after unit tests pass. Uses testcontainers (Docker-in-Docker) for
+  # a real NATS JetStream server. Only runs on non-draft PRs (ADR-0013 policy).
   # ==========================================================================
-  security:
-    name: Security Scan
+  integration-tests:
+    name: Integration Tests
     runs-on: ubuntu-latest
+    needs: unit-tests
+    if: github.event.pull_request.draft == false || github.event_name == 'push'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0  # Full history for gitleaks
 
-      - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_CONFIG: .gitleaks.toml
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.25.6'
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run integration tests
+        run: go test -tags=integration -race -v -timeout=120s ./...
+
+  # ==========================================================================
+  # Stage 2b: Docker Build Verification (ADR-0013)
+  # Runs after unit tests pass, in parallel with integration tests.
+  # Verifies all service Dockerfiles build successfully (no push).
+  # ==========================================================================
+  docker-build:
+    name: Docker Build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [gateway, engine, notifier, presence, audit-sink]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Build ${{ matrix.service }} image
+        run: |
+          docker build \
+            --build-arg VERSION=ci-${GITHUB_SHA::7} \
+            --build-arg COMMIT_SHA=${GITHUB_SHA} \
+            -f services/${{ matrix.service }}/Dockerfile \
+            .

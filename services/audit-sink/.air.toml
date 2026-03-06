@@ -1,0 +1,23 @@
+root = "."
+tmp_dir = "/tmp/air-audit-sink"
+
+[build]
+  cmd = "go build -o /tmp/air-audit-sink/main ./services/audit-sink"
+  bin = "/tmp/air-audit-sink/main"
+  include_ext = ["go"]
+  exclude_dir = ["vendor", "testdata", ".git", "deploy", "scripts"]
+  delay = 1000
+  kill_delay = "500ms"
+  rerun = false
+
+[log]
+  time = true
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  clean_on_exit = true

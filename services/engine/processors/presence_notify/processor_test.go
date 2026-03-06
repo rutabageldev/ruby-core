@@ -1,3 +1,5 @@
+//go:build fast
+
 package presence_notify_test
 
 import (
