@@ -179,10 +179,10 @@ deploy-prod-down: ## Stop and remove prod deployment
 # Staging Environment
 # =============================================================================
 
-setup-staging-creds: ## Generate staging credentials in Vault (secret/ruby-core-staging/*)
+setup-staging-creds: ## Generate staging credentials in Vault (secret/ruby-core/staging/*)
 	@( . deploy/dev/.env && \
 	   VAULT_TOKEN="$$VAULT_TOKEN_RUBY_CORE_WRITER" \
-	   VAULT_SECRET_PREFIX=secret/ruby-core-staging \
+	   VAULT_SECRET_PREFIX=secret/ruby-core/staging \
 	   EXTRA_NATS_SANS=ruby-core-staging-nats \
 	   ./scripts/setup-credentials.sh )
 

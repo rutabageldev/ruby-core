@@ -48,7 +48,7 @@ export VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
 export VAULT_TOKEN="${VAULT_TOKEN:-root}"
 
 # Vault secret path prefix — override for staging:
-#   VAULT_SECRET_PREFIX=secret/ruby-core-staging ./scripts/setup-credentials.sh
+#   VAULT_SECRET_PREFIX=secret/ruby-core/staging ./scripts/setup-credentials.sh
 VAULT_SECRET_PREFIX="${VAULT_SECRET_PREFIX:-secret/ruby-core}"
 
 # Extra NATS server TLS SANs appended to the base list — set for staging:
