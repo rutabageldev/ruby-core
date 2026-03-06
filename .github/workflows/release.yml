@@ -95,13 +95,11 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout tag
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          ref: ${{ github.ref_name }}
-
       - name: Deploy staging and run smoke test
         run: |
+          cd /opt/ruby-core
+          git fetch --tags
+          git checkout ${{ github.ref_name }}
           VERSION=${{ github.ref_name }} ./scripts/deploy-staging.sh ${{ github.ref_name }}
 
   # ==========================================================================
