@@ -9,8 +9,9 @@
         dev-air-up dev-air-down \
         prod-up prod-down prod-restart prod-logs prod-ps \
         deploy-prod deploy-prod-down \
+        staging-up staging-down deploy-staging \
         docker-ps docker-images docker-volumes docker-clean \
-        setup-creds setup-creds-force nats-validate
+        setup-creds setup-creds-force setup-staging-creds nats-validate
 
 # Default target
 .DEFAULT_GOAL := help
@@ -20,9 +21,10 @@
 # =============================================================================
 
 # Compose files
-DEV_COMPOSE  := deploy/dev/compose.dev.yaml
-AIR_COMPOSE  := deploy/dev/compose.air.yaml
-PROD_COMPOSE := deploy/prod/compose.prod.yaml
+DEV_COMPOSE     := deploy/dev/compose.dev.yaml
+AIR_COMPOSE     := deploy/dev/compose.air.yaml
+PROD_COMPOSE    := deploy/prod/compose.prod.yaml
+STAGING_COMPOSE := deploy/staging/compose.staging.yaml
 
 # Optional service filter (e.g., make dev-up SERVICE=nats)
 SERVICE ?=
@@ -51,12 +53,15 @@ help: ## Show this help message
 	@grep -E '^dev-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Production Environment:"
-	@grep -E '^(prod-|deploy-).*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
+	@grep -E '^(prod-|deploy-prod).*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Staging Environment:"
+	@grep -E '^(staging-|deploy-staging).*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Docker:"
 	@grep -E '^docker-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
-	@echo "Setup:"
+	@echo "Setup & Credentials:"
 	@grep -E '^setup-.*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-22s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Validation:"
@@ -169,6 +174,24 @@ deploy-prod: nats-validate ghcr-login ## Pull GHCR images and deploy to prod wit
 
 deploy-prod-down: ## Stop and remove prod deployment
 	$(COMPOSE_CMD) -f $(PROD_COMPOSE) down
+
+# =============================================================================
+# Staging Environment
+# =============================================================================
+
+setup-staging-creds: ## Generate staging credentials in Vault (secret/ruby-core-staging/*)
+	VAULT_SECRET_PREFIX=secret/ruby-core-staging \
+	EXTRA_NATS_SANS=ruby-core-staging-nats \
+	./scripts/setup-credentials.sh
+
+staging-up: ## Start staging stack (requires deploy/staging/.env with VAULT_TOKEN)
+	$(COMPOSE_CMD) -f $(STAGING_COMPOSE) up -d $(COMPOSE_SERVICE)
+
+staging-down: ## Stop staging stack and remove volumes
+	$(COMPOSE_CMD) -f $(STAGING_COMPOSE) down -v
+
+deploy-staging: ## Pull images, start staging, run smoke test, tear down (requires VERSION=)
+	@VERSION="$(VERSION)" ./scripts/deploy-staging.sh "$(VERSION)"
 
 # =============================================================================
 # Docker Utilities

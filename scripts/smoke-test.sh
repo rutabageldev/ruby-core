@@ -22,6 +22,8 @@ ROLLBACK_FROM="${ROLLBACK_FROM:-}"
 SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-30}"
 VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
 VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
+NATS_SERVER="${NATS_SERVER:-tls://127.0.0.1:4223}"
+VAULT_SECRET_PREFIX="${VAULT_SECRET_PREFIX:-secret/ruby-core}"
 
 if [ -z "${VAULT_TOKEN:-}" ]; then
   echo "ERROR: VAULT_TOKEN is required" >&2
@@ -38,15 +40,15 @@ _vault() {
 
 echo "  [smoke] fetching admin credentials from Vault"
 
-if ! _vault kv get -field=seed secret/ruby-core/nats/admin > "$TMPDIR/seed.nk" 2>&1; then
+if ! _vault kv get -field=seed "${VAULT_SECRET_PREFIX}/nats/admin" > "$TMPDIR/seed.nk" 2>&1; then
   echo "ERROR: cannot fetch admin NKEY seed from Vault (check VAULT_TOKEN and Vault availability)" >&2
   exit 1
 fi
 chmod 600 "$TMPDIR/seed.nk"
 
-_vault kv get -field=cert secret/ruby-core/tls/admin > "$TMPDIR/client.crt"
-_vault kv get -field=key  secret/ruby-core/tls/admin > "$TMPDIR/client.key"
-_vault kv get -field=ca   secret/ruby-core/tls/admin > "$TMPDIR/ca.crt"
+_vault kv get -field=cert "${VAULT_SECRET_PREFIX}/tls/admin" > "$TMPDIR/client.crt"
+_vault kv get -field=key  "${VAULT_SECRET_PREFIX}/tls/admin" > "$TMPDIR/client.key"
+_vault kv get -field=ca   "${VAULT_SECRET_PREFIX}/tls/admin" > "$TMPDIR/ca.crt"
 chmod 600 "$TMPDIR/client.key"
 
 # Millisecond-unique smoke ID so grep matches only this run's audit event.
@@ -62,7 +64,7 @@ else
 fi
 
 NATS_OPTS=(
-  --server  "tls://127.0.0.1:4223"
+  --server  "$NATS_SERVER"
   --tlscert "$TMPDIR/client.crt"
   --tlskey  "$TMPDIR/client.key"
   --tlsca   "$TMPDIR/ca.crt"

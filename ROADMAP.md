@@ -150,9 +150,9 @@
     3. Gate `make deploy-prod` on a passing staging run (GitHub environment protection rule).
 
 * **Acceptance Criteria:**
-  * `[ ]` Pushing a version tag auto-deploys to staging and runs smoke tests.
-  * `[ ]` A broken deploy (e.g. missing rule files, bad ACLs) fails in staging before reaching prod.
-  * `[ ]` `make deploy-prod` requires a green staging run.
+  * `[X]` Pushing a version tag auto-deploys to staging and runs smoke tests.
+  * `[X]` A broken deploy (e.g. missing rule files, bad ACLs) fails in staging before reaching prod.
+  * `[X]` `make deploy-prod` requires a green staging run.
 
 ---
 

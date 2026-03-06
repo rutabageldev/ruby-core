@@ -47,6 +47,14 @@ export VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
 export VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
 export VAULT_TOKEN="${VAULT_TOKEN:-root}"
 
+# Vault secret path prefix — override for staging:
+#   VAULT_SECRET_PREFIX=secret/ruby-core-staging ./scripts/setup-credentials.sh
+VAULT_SECRET_PREFIX="${VAULT_SECRET_PREFIX:-secret/ruby-core}"
+
+# Extra NATS server TLS SANs appended to the base list — set for staging:
+#   EXTRA_NATS_SANS=ruby-core-staging-nats ./scripts/setup-credentials.sh
+EXTRA_NATS_SANS="${EXTRA_NATS_SANS:-}"
+
 # Services that need NKEYs
 SERVICES=("gateway" "engine" "notifier" "presence" "admin" "audit-sink")
 
@@ -156,7 +164,7 @@ generate_nkeys() {
     log_info "Processing NKEYs for services..."
 
     for service in "${SERVICES[@]}"; do
-        local vault_path="secret/ruby-core/nats/${service}"
+        local vault_path="${VAULT_SECRET_PREFIX}/nats/${service}"
 
         # Check if key exists in Vault
         local existing_pubkey=""
@@ -193,7 +201,7 @@ generate_nkeys() {
                 service="${service}" \
                 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-            log_success "  ${service}: new key stored in Vault at ${vault_path}"
+            log_success "  ${service}: new key stored in Vault at ${vault_path} (prefix: ${VAULT_SECRET_PREFIX})"
         else
             log_info "  ${service}: using existing key from Vault (use FORCE_REGEN=true to regenerate)"
         fi
@@ -211,13 +219,13 @@ generate_tls_certs() {
     if [[ "${FORCE_REGEN:-false}" != "true" ]]; then
         local all_in_vault=true
         # Check server cert
-        if ! vault kv get "secret/ruby-core/tls/nats-server" &> /dev/null; then
+        if ! vault kv get "${VAULT_SECRET_PREFIX}/tls/nats-server" &> /dev/null; then
             all_in_vault=false
         fi
         # Check client certs
         if [[ "${all_in_vault}" == "true" ]]; then
             for service in "${SERVICES[@]}"; do
-                if ! vault kv get "secret/ruby-core/tls/${service}" &> /dev/null; then
+                if ! vault kv get "${VAULT_SECRET_PREFIX}/tls/${service}" &> /dev/null; then
                     all_in_vault=false
                     break
                 fi
@@ -248,8 +256,9 @@ generate_tls_certs() {
     log_info "  Generating NATS server certificate..."
     (
         cd "${tmp_dir}"
+        # shellcheck disable=SC2086  # EXTRA_NATS_SANS is intentionally word-split
         mkcert -cert-file server-cert.pem -key-file server-key.pem \
-            localhost 127.0.0.1 ::1 nats ruby-core-dev-nats ruby-core-prod-nats
+            localhost 127.0.0.1 ::1 nats ruby-core-dev-nats ruby-core-prod-nats ${EXTRA_NATS_SANS}
     )
     log_success "  Server certificate generated"
 
@@ -265,19 +274,19 @@ generate_tls_certs() {
     ca_content=$(cat "${tmp_dir}/ca.pem")
 
     # Store server cert in Vault
-    vault kv put "secret/ruby-core/tls/nats-server" \
+    vault kv put "${VAULT_SECRET_PREFIX}/tls/nats-server" \
         cert="${server_cert_content}" \
         key="${server_key_content}" \
         ca="${ca_content}" \
         service="nats-server" \
         created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    log_success "  Server certificate stored in Vault at secret/ruby-core/tls/nats-server"
+    log_success "  Server certificate stored in Vault at ${VAULT_SECRET_PREFIX}/tls/nats-server"
 
     # Generate client certificates and store in Vault
     log_info "  Generating client certificates..."
 
     for service in "${SERVICES[@]}"; do
-        local vault_path="secret/ruby-core/tls/${service}"
+        local vault_path="${VAULT_SECRET_PREFIX}/tls/${service}"
 
         # Generate client cert
         (
@@ -317,25 +326,25 @@ validate_setup() {
     local errors=0
 
     # Check NATS server certs exist in Vault
-    if vault kv get "secret/ruby-core/tls/nats-server" &> /dev/null; then
-        log_success "Server certificate found in Vault at secret/ruby-core/tls/nats-server"
+    if vault kv get "${VAULT_SECRET_PREFIX}/tls/nats-server" &> /dev/null; then
+        log_success "Server certificate found in Vault at ${VAULT_SECRET_PREFIX}/tls/nats-server"
     else
-        log_error "Missing server certificate in Vault: secret/ruby-core/tls/nats-server"
+        log_error "Missing server certificate in Vault: ${VAULT_SECRET_PREFIX}/tls/nats-server"
         errors=$((errors + 1))
     fi
 
     # Check all NKEY seeds are in Vault
     for service in "${SERVICES[@]}"; do
-        if ! vault kv get "secret/ruby-core/nats/${service}" &> /dev/null; then
-            log_error "Missing NKEY seed in Vault: secret/ruby-core/nats/${service}"
+        if ! vault kv get "${VAULT_SECRET_PREFIX}/nats/${service}" &> /dev/null; then
+            log_error "Missing NKEY seed in Vault: ${VAULT_SECRET_PREFIX}/nats/${service}"
             errors=$((errors + 1))
         fi
     done
 
     # Check all client certs are in Vault
     for service in "${SERVICES[@]}"; do
-        if ! vault kv get "secret/ruby-core/tls/${service}" &> /dev/null; then
-            log_error "Missing client cert in Vault: secret/ruby-core/tls/${service}"
+        if ! vault kv get "${VAULT_SECRET_PREFIX}/tls/${service}" &> /dev/null; then
+            log_error "Missing client cert in Vault: ${VAULT_SECRET_PREFIX}/tls/${service}"
             errors=$((errors + 1))
         fi
     done
@@ -367,17 +376,17 @@ print_summary() {
     echo "                       Credentials Setup Complete"
     echo "============================================================================="
     echo ""
-    echo "Secrets in Vault (${VAULT_ADDR}):"
+    echo "Secrets in Vault (${VAULT_ADDR}) under prefix: ${VAULT_SECRET_PREFIX}"
     echo ""
     echo "  NKEY Seeds:"
     for service in "${SERVICES[@]}"; do
-        echo "    secret/ruby-core/nats/${service}"
+        echo "    ${VAULT_SECRET_PREFIX}/nats/${service}"
     done
     echo ""
     echo "  TLS Certificates:"
-    echo "    secret/ruby-core/tls/nats-server  (NATS server cert)"
+    echo "    ${VAULT_SECRET_PREFIX}/tls/nats-server  (NATS server cert)"
     for service in "${SERVICES[@]}"; do
-        echo "    secret/ruby-core/tls/${service}"
+        echo "    ${VAULT_SECRET_PREFIX}/tls/${service}"
     done
     echo ""
     echo "Next steps:"
@@ -407,8 +416,10 @@ main() {
     echo ""
     echo "Note: auth.conf is generated at container startup by nats-init from Vault."
     echo ""
-    echo "Vault Address: ${VAULT_ADDR}"
-    echo "Force Regen:   ${FORCE_REGEN:-false}"
+    echo "Vault Address:  ${VAULT_ADDR}"
+    echo "Secret Prefix:  ${VAULT_SECRET_PREFIX}"
+    echo "Extra SANs:     ${EXTRA_NATS_SANS:-(none)}"
+    echo "Force Regen:    ${FORCE_REGEN:-false}"
     echo ""
 
     check_prerequisites

@@ -19,8 +19,8 @@
 set -eu
 
 CERTS_DIR="${CERTS_DIR:-/certs}"
-TLS_PATH="secret/ruby-core/tls/nats-server"
-NKEY_BASE="secret/ruby-core/nats"
+TLS_PATH="${TLS_PATH:-secret/ruby-core/tls/nats-server}"
+NKEY_BASE="${NKEY_BASE:-secret/ruby-core/nats}"
 MAX_RETRIES=5
 RETRY_DELAY=2
 

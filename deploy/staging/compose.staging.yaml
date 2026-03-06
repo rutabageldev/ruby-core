@@ -1,0 +1,255 @@
+# Ruby Core Staging Environment
+# Phase 8: Staging stack for pre-release smoke testing (ADR-0013)
+#
+# Mirrors compose.prod.yaml with staging-specific overrides:
+#   - Container names: ruby-core-staging-*
+#   - NATS ports: 4224 (client), 8224 (monitor) — coexists with prod (4223/8223)
+#   - Vault prefix: secret/ruby-core-staging/* (separate staging credentials)
+#   - JetStream + audit: named volumes (ephemeral; removed by deploy-staging.sh on down -v)
+#   - No Traefik labels (staging gateway is not publicly routed)
+#
+# Prerequisites:
+#   make setup-staging-creds   # generate secret/ruby-core-staging/* in Vault
+#   cp deploy/staging/.env.example deploy/staging/.env  # fill in VAULT_TOKEN
+#
+# Usage:
+#   make staging-up            # start stack
+#   make staging-down          # stop and remove volumes
+#   make deploy-staging VERSION=v0.3.4   # pull + start + smoke test + tear down
+
+services:
+  # ==========================================================================
+  # NATS Certificate Init (fetches staging server certs from Vault)
+  # ==========================================================================
+  nats-init:
+    image: hashicorp/vault:1.15
+    container_name: ruby-core-staging-nats-init
+    restart: "no"
+    entrypoint: ["/bin/sh"]
+    command: ["/scripts/fetch-nats-certs.sh"]
+    volumes:
+      - nats-certs:/certs
+      - ../../scripts/fetch-nats-certs.sh:/scripts/fetch-nats-certs.sh:ro
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      # Staging Vault paths (override fetch-nats-certs.sh defaults)
+      - TLS_PATH=secret/ruby-core-staging/tls/nats-server
+      - NKEY_BASE=secret/ruby-core-staging/nats
+    networks:
+      - vault
+
+  # ==========================================================================
+  # NATS JetStream Message Broker (Staging)
+  # ==========================================================================
+  nats:
+    image: nats:2.10-alpine
+    container_name: ruby-core-staging-nats
+    restart: unless-stopped
+    depends_on:
+      nats-init:
+        condition: service_completed_successfully
+    ports:
+      # Staging client port — offset from prod (4223) to allow coexistence
+      - "127.0.0.1:4224:4222"
+      # Staging HTTP monitor — offset from prod (8223)
+      - "127.0.0.1:8224:8222"
+    volumes:
+      # Staging JetStream: named volume (ephemeral; removed on `down -v`)
+      - staging-nats-data:/data/jetstream
+      - ../base/nats/nats.conf:/etc/nats/nats.conf:ro
+      - nats-certs:/etc/nats/certs:ro
+    command: ["-c", "/etc/nats/nats.conf"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ==========================================================================
+  # Gateway Service (Staging)
+  # ==========================================================================
+  gateway:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-gateway:${VERSION}
+    container_name: ruby-core-staging-gateway
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - ENVIRONMENT=production
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - NATS_URL=tls://nats:4222
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=secret/data/ruby-core-staging/nats/gateway
+      - VAULT_TLS_PATH=secret/data/ruby-core-staging/tls/gateway
+      - HTTP_ADDR=:8080
+    # No Traefik labels — staging gateway is not publicly routed
+
+  # ==========================================================================
+  # Engine Service (Staging)
+  # ==========================================================================
+  engine:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-engine:${VERSION}
+    container_name: ruby-core-staging-engine
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - ENVIRONMENT=production
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - NATS_URL=tls://nats:4222
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=secret/data/ruby-core-staging/nats/engine
+      - VAULT_TLS_PATH=secret/data/ruby-core-staging/tls/engine
+      - RULES_DIR=/etc/ruby-core/rules
+
+  # ==========================================================================
+  # Notifier Service (Staging)
+  # ==========================================================================
+  notifier:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-notifier:${VERSION}
+    container_name: ruby-core-staging-notifier
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - ENVIRONMENT=production
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - NATS_URL=tls://nats:4222
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=secret/data/ruby-core-staging/nats/notifier
+      - VAULT_TLS_PATH=secret/data/ruby-core-staging/tls/notifier
+      # Uses prod HA credentials — staging smoke test sends a real push notification
+      - VAULT_HA_PATH=secret/data/ruby-core/ha
+
+  # ==========================================================================
+  # Presence Service (Staging)
+  # ==========================================================================
+  presence:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-presence:${VERSION}
+    container_name: ruby-core-staging-presence
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - ENVIRONMENT=production
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - NATS_URL=tls://nats:4222
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=secret/data/ruby-core-staging/nats/presence
+      - VAULT_TLS_PATH=secret/data/ruby-core-staging/tls/presence
+      - VAULT_HA_PATH=secret/data/ruby-core/ha
+      - PRESENCE_PERSON_ID=katie
+      - PRESENCE_PHONE_ENTITY=phone.katie
+      - PRESENCE_WIFI_ENTITY=network.phone.katie
+      - PRESENCE_TRUSTED_WIFI=RubyGues,RubyNet,RIoT
+      - PRESENCE_DEBOUNCE_SECONDS=120
+
+  # ==========================================================================
+  # Audit-Sink Service (Staging)
+  # ==========================================================================
+  audit-sink:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-audit-sink:${VERSION}
+    container_name: ruby-core-staging-audit-sink
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - default
+      - vault
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - ENVIRONMENT=production
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - NATS_URL=tls://nats:4222
+      - NATS_REQUIRE_MTLS=true
+      - VAULT_NKEY_PATH=secret/data/ruby-core-staging/nats/audit-sink
+      - VAULT_TLS_PATH=secret/data/ruby-core-staging/tls/audit-sink
+      - AUDIT_DATA_DIR=/data/audit
+    volumes:
+      # Staging audit: named volume (ephemeral; removed on `down -v`)
+      - staging-audit-data:/data/audit
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  default:
+    name: ruby-core-staging
+  vault:
+    external: true
+    name: vault_default
+
+# ==========================================================================
+# Volumes
+# ==========================================================================
+# Named volumes (ephemeral — removed by `docker compose down -v` after smoke test)
+volumes:
+  nats-certs:
+    driver: local
+  staging-nats-data:
+    driver: local
+  staging-audit-data:
+    driver: local
