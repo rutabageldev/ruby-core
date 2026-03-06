@@ -36,3 +36,4 @@ This document tracks the key architectural decisions for Ruby Core. All foundati
 * ADR-0025: Idempotency Tracking Store/TTL
 * ADR-0026: Clock Skew Tolerance
 * ADR-0027: Subject Naming Convention
+* ADR-0028: Observability Stack Placement (consume from Foundation)

@@ -126,7 +126,7 @@
   * `[X]` Deploying a broken image (e.g. bad ACLs, missing rule) triggers automatic rollback and a failure notification.
   * `[X]` `make deploy-prod` exits non-zero if rollback is also required, making CI-friendliness possible in Phase 8.
 
-### **Phase 7: Full Developer Experience & CI Polish**
+### **Phase 7: Full Developer Experience & CI Polish**  [Complete]
 
 **Goal:** Fully build out the CI pipeline and enhance the developer experience to improve velocity and safety.
 
@@ -140,7 +140,7 @@
   * `[X]` `git commit` enforces all defined quality checks.
   * `[X]` No PR can be merged without passing all unit and integration tests.
 
-### **Phase 8: Staging Environment & Deploy Validation**
+### **Phase 8: Staging Environment & Deploy Validation** [Complete]
 
 **Goal:** Eliminate manual back-and-forth during releases by automatically validating deployability before prod.
 
@@ -161,8 +161,8 @@
 **Goal:** Complete the observability stack with distributed tracing and metrics.
 
 * **Key Tasks:**
-    1. Deploy the OTel Collector, Jaeger, Prometheus, and Loki.
-    2. Fully instrument services with **distributed traces** and **application-level metrics**, exporting via OTLP to the collector (ADR-0004).
+    1. **Consume centralized observability from Foundation** (ADR-0028). Foundation deploys OTel Collector, Jaeger, Prometheus, and Loki; Ruby Core does not deploy its own stack.
+    2. Fully instrument services with **distributed traces** and **application-level metrics**, exporting via OTLP to the Foundation collector (ADR-0004).
 
 * **Acceptance Criteria:**
   * `[ ]` A distributed trace can be viewed in Jaeger for a complete automation flow.
