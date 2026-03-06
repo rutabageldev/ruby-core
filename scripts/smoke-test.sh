@@ -10,6 +10,7 @@
 #   VAULT_ADDR     (default: https://127.0.0.1:8200)
 #   VAULT_CACERT   (default: /opt/foundation/vault/tls/vault-ca.crt)
 #   ROLLBACK_FROM  (optional) If set, message reads "vX.X.X failed — rollback to VERSION successful"
+#   SMOKE_CONTEXT  (optional) Set to "staging" for staging validation notification
 #   SMOKE_TIMEOUT  (default: 30) Seconds to wait for audit confirmation
 #
 # Exit codes:
@@ -19,6 +20,7 @@ set -euo pipefail
 
 VERSION="${1:?Usage: smoke-test.sh VERSION}"
 ROLLBACK_FROM="${ROLLBACK_FROM:-}"
+SMOKE_CONTEXT="${SMOKE_CONTEXT:-}"
 SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-30}"
 VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
 VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
@@ -54,10 +56,13 @@ chmod 600 "$TMPDIR/client.key"
 # Millisecond-unique smoke ID so grep matches only this run's audit event.
 SMOKE_ID="smoke-$(date +%s%3N)"
 
-# Build notification message based on whether this is a normal deploy or rollback.
+# Build notification message based on context.
 if [ -n "$ROLLBACK_FROM" ]; then
   TITLE="Deployment failed"
   MSG="ruby-core ${ROLLBACK_FROM} failed — rollback to ${VERSION} successful at $(date +%H:%M)"
+elif [ "$SMOKE_CONTEXT" = "staging" ]; then
+  TITLE="Staging validated"
+  MSG="ruby-core ${VERSION} validated in staging at $(date +%H:%M)"
 else
   TITLE="Deployment successful"
   MSG="ruby-core ${VERSION} deployed at $(date +%H:%M)"

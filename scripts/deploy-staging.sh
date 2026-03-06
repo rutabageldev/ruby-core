@@ -90,6 +90,7 @@ VAULT_ADDR="$VAULT_ADDR" \
 VAULT_CACERT="$VAULT_CACERT" \
 NATS_SERVER="tls://127.0.0.1:4224" \
 VAULT_SECRET_PREFIX="secret/ruby-core/staging" \
+SMOKE_CONTEXT="staging" \
   "$SCRIPT_DIR/smoke-test.sh" "$VERSION" || smoke_exit=$?
 
 if [ "$smoke_exit" -eq 0 ]; then

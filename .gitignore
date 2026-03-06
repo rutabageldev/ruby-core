@@ -27,3 +27,13 @@ dist/
 
 # deployment state
 .last-deployed-version
+
+# GitHub Actions runner artifacts (runner lives at ~/actions-runner, not in repo)
+_runner-work/
+_diag/
+externals/
+run-helper.sh
+run-helper.sh.template
+run-helper.cmd.template
+runsvc.sh
+safe_sleep.sh
