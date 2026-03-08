@@ -1,6 +1,6 @@
 # ADR-0028 - Consume Centralized Observability from Foundation
 
-* **Status:** Proposed
+* **Status:** Accepted
 * **Date:** 2026-02-23
 
 ## Context
@@ -15,7 +15,7 @@ Foundation's roadmap (Phase 6: Observability stack) explicitly plans a **central
 
 We will **consume a centralized observability stack from Foundation** rather than deploying a dedicated observability stack within Ruby Core.
 
-1. **Stack ownership:** The OTel Collector, Prometheus, Loki, and trace backend (Jaeger or Tempo) are deployed and operated by Foundation, in `observability/` (or equivalent), reachable via a shared network (e.g. `vault_default` or a dedicated `observability` network that Ruby Core joins).
+1. **Stack ownership:** The OTel Collector, Prometheus, Loki, and trace backend (Jaeger or Tempo) are deployed and operated by Foundation, in `observability/` (or equivalent), reachable via a dedicated `vault-observability` network (following the per-service-group network pattern established in Foundation Phase 10) that Ruby Core joins.
 
 2. **Ruby Core responsibilities:**
    * Instrument all services with distributed traces and application-level metrics per ADR-0004.

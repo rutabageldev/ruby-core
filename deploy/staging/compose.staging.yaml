@@ -15,7 +15,7 @@
 # Usage:
 #   make staging-up            # start stack
 #   make staging-down          # stop and remove volumes
-#   make deploy-staging VERSION=v0.3.4   # pull + start + smoke test + tear down
+#   make deploy-staging VERSION=v0.4.5   # pull + start + smoke test + tear down
 
 services:
   # ==========================================================================
@@ -39,7 +39,7 @@ services:
       - TLS_PATH=secret/ruby-core/staging/tls/nats-server
       - NKEY_BASE=secret/ruby-core/staging/nats
     networks:
-      - vault
+      - vault-ruby-core-staging
 
   # ==========================================================================
   # NATS JetStream Message Broker (Staging)
@@ -83,7 +83,7 @@ services:
       - ALL
     networks:
       - default
-      - vault
+      - vault-ruby-core-staging
     depends_on:
       nats:
         condition: service_healthy
@@ -115,7 +115,7 @@ services:
       - ALL
     networks:
       - default
-      - vault
+      - vault-ruby-core-staging
     depends_on:
       nats:
         condition: service_healthy
@@ -146,7 +146,7 @@ services:
       - ALL
     networks:
       - default
-      - vault
+      - vault-ruby-core-staging
     depends_on:
       nats:
         condition: service_healthy
@@ -178,7 +178,7 @@ services:
       - ALL
     networks:
       - default
-      - vault
+      - vault-ruby-core-staging
     depends_on:
       nats:
         condition: service_healthy
@@ -213,7 +213,7 @@ services:
       - ALL
     networks:
       - default
-      - vault
+      - vault-ruby-core-staging
     depends_on:
       nats:
         condition: service_healthy
@@ -238,9 +238,9 @@ services:
 networks:
   default:
     name: ruby-core-staging
-  vault:
+  vault-ruby-core-staging:
     external: true
-    name: vault_default
+    name: vault-ruby-core-staging
 
 # ==========================================================================
 # Volumes
