@@ -25,7 +25,7 @@ services:
       - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN}
     networks:
-      - vault
+      - vault-ruby-core-prod
 
   # ==========================================================================
   # NATS JetStream Message Broker (Production)
@@ -68,7 +68,7 @@ services:
   # ADR-0020: Port NOT published to host — all HTTP access goes through Traefik.
   # Traefik validates JWTs before forwarding requests to the gateway.
   gateway:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-gateway:${VERSION:-v0.3.4}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-gateway:${VERSION:-v0.4.5}
     container_name: ruby-core-prod-gateway
     restart: unless-stopped
     read_only: true
@@ -78,7 +78,7 @@ services:
       - ALL
     networks:
       - default
-      - vault
+      - vault-ruby-core-prod
       - traefik_proxy
     depends_on:
       nats:
@@ -109,7 +109,7 @@ services:
   # Engine Service
   # ==========================================================================
   engine:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-engine:${VERSION:-v0.3.4}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-engine:${VERSION:-v0.4.5}
     container_name: ruby-core-prod-engine
     restart: unless-stopped
     read_only: true
@@ -119,7 +119,7 @@ services:
       - ALL
     networks:
       - default
-      - vault
+      - vault-ruby-core-prod
     depends_on:
       nats:
         condition: service_healthy
@@ -140,7 +140,7 @@ services:
   # Notifier Service
   # ==========================================================================
   notifier:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-notifier:${VERSION:-v0.3.4}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-notifier:${VERSION:-v0.4.5}
     container_name: ruby-core-prod-notifier
     restart: unless-stopped
     read_only: true
@@ -150,7 +150,7 @@ services:
       - ALL
     networks:
       - default
-      - vault
+      - vault-ruby-core-prod
     depends_on:
       nats:
         condition: service_healthy
@@ -171,7 +171,7 @@ services:
   # ==========================================================================
   # Multi-source presence fusion with WiFi corroboration and debounce.
   presence:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-presence:${VERSION:-v0.3.4}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-presence:${VERSION:-v0.4.5}
     container_name: ruby-core-prod-presence
     restart: unless-stopped
     read_only: true
@@ -181,7 +181,7 @@ services:
       - ALL
     networks:
       - default
-      - vault
+      - vault-ruby-core-prod
     depends_on:
       nats:
         condition: service_healthy
@@ -210,7 +210,7 @@ services:
   # Runs as root in container (see Dockerfile comment) to write to the host bind mount.
   # Host path: /var/lib/ruby-core/audit — include in automated backup schedule.
   audit-sink:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-audit-sink:${VERSION:-v0.3.4}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-audit-sink:${VERSION:-v0.4.5}
     container_name: ruby-core-prod-audit-sink
     restart: unless-stopped
     security_opt:
@@ -219,7 +219,7 @@ services:
       - ALL
     networks:
       - default
-      - vault
+      - vault-ruby-core-prod
     depends_on:
       nats:
         condition: service_healthy
@@ -245,9 +245,9 @@ services:
 # ==========================================================================
 networks:
   default:
-  vault:
+  vault-ruby-core-prod:
     external: true
-    name: vault_default
+    name: vault-ruby-core-prod
   # Traefik proxy network (ADR-0020). Create with: docker network create traefik_proxy
   traefik_proxy:
     external: true

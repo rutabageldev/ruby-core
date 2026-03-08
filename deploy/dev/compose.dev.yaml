@@ -25,7 +25,7 @@ services:
       - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN:-root}
     networks:
-      - vault
+      - vault-ruby-core-dev
 
   # ==========================================================================
   # NATS JetStream Message Broker
@@ -75,7 +75,7 @@ services:
     restart: unless-stopped
     networks:
       - default
-      - vault
+      - vault-ruby-core-dev
     ports:
       # localhost only — direct access for dev. In prod this port is not published.
       - "127.0.0.1:8090:8080"
@@ -107,7 +107,7 @@ services:
     restart: unless-stopped
     networks:
       - default
-      - vault
+      - vault-ruby-core-dev
     depends_on:
       nats:
         condition: service_healthy
@@ -139,7 +139,7 @@ services:
     restart: unless-stopped
     networks:
       - default
-      - vault
+      - vault-ruby-core-dev
     depends_on:
       nats:
         condition: service_healthy
@@ -169,7 +169,7 @@ services:
     restart: unless-stopped
     networks:
       - default
-      - vault
+      - vault-ruby-core-dev
     depends_on:
       nats:
         condition: service_healthy
@@ -204,7 +204,7 @@ services:
     restart: unless-stopped
     networks:
       - default
-      - vault
+      - vault-ruby-core-dev
     depends_on:
       nats:
         condition: service_healthy
@@ -227,9 +227,9 @@ services:
 # ==========================================================================
 networks:
   default:
-  vault:
+  vault-ruby-core-dev:
     external: true
-    name: vault_default
+    name: vault-ruby-core-dev
 
 # ==========================================================================
 # Named Volumes
