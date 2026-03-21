@@ -4,7 +4,7 @@
 * **Date:** 2026-02-23
 * **Project:** ruby-core
 * **Related ADRs:** ADR-0004, ADR-0028
-* **Linked Plan:** none yet
+* **Linked Plan:** [docs/plans/PLAN-0009-full-stack-observability.md](../plans/PLAN-0009-full-stack-observability.md)
 
 ---
 
