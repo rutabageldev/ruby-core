@@ -11,9 +11,11 @@ For security and forensic purposes, we require a high-integrity, tamper-resistan
 
 We will implement a security audit trail using a dedicated, durable **NATS JetStream stream** as a decoupled buffer, with a separate "audit sink" service for long-term archival.
 
-1. **Audit Stream:** A dedicated JetStream stream named `audit.events` **MUST** be created. This stream will be configured for high durability and a long retention policy.
+1. **Audit Stream:** A dedicated JetStream stream named `AUDIT_EVENTS` **MUST** be created, configured to capture subjects matching `audit.>`. This stream will be configured for high durability with a minimum 72-hour retention policy.
 
-2. **Audit Event Schema:** All audit records **MUST** be published as CloudEvents to the `audit.events` stream with a dedicated type (e.g., `dev.rubocore.audit.v1`). The event's `data` payload **MUST** contain, at a minimum:
+   > **Implementation note:** The stream was initially drafted as `audit.events`. It was renamed to `AUDIT_EVENTS` (uppercase, consistent with all other stream names in this codebase) and the subject filter was changed from `audit.events.*` to `audit.>`. The `audit.` subject prefix was chosen over a wildcard-middle pattern (e.g., `*.audit.*`) to avoid NATS static subject-overlap conflicts with the `DLQ` stream. Subject format: `audit.{source}.{event_type}` (e.g., `audit.ruby_notifier.notification_sent`).
+
+2. **Audit Event Schema:** All audit records **MUST** be published as CloudEvents to the `AUDIT_EVENTS` stream with a dedicated type (e.g., `dev.rubocore.audit.v1`). The event's `data` payload **MUST** contain, at a minimum:
     * The full `correlationid` and `causationid` from the event chain.
     * The authenticated identity of the actor performing the action (e.g., the service's NKEY public key).
     * The full details of the command or decision being audited (the "intent").
@@ -24,8 +26,8 @@ We will implement a security audit trail using a dedicated, durable **NATS JetSt
     * A dedicated "audit sink" service will be the sole consumer of this stream, responsible for archiving events to secure, long-term storage (e.g., a write-once object store or a SIEM).
 
 4. **Retention and Backpressure Policy:**
-    * **Stream Retention:** The `audit.events` stream **MUST** be configured with a retention policy sufficient to survive a prolonged archival service outage (e.g., a minimum of 72 hours), after which messages may be discarded by the server.
-    * **Backpressure:** The act of auditing is decoupled from the primary action. Publishing to the `audit.events` stream **MUST NOT** block the execution of the primary action. If the NATS stream is unavailable or full, the primary action should still complete successfully, and the failure to publish the audit event must be logged and generate a high-priority alert.
+    * **Stream Retention:** The `AUDIT_EVENTS` stream **MUST** be configured with a retention policy sufficient to survive a prolonged archival service outage (e.g., a minimum of 72 hours), after which messages may be discarded by the server.
+    * **Backpressure:** The act of auditing is decoupled from the primary action. Publishing to the `AUDIT_EVENTS` stream **MUST NOT** block the execution of the primary action. If the NATS stream is unavailable or full, the primary action should still complete successfully, and the failure to publish the audit event must be logged and generate a high-priority alert.
 
 ## Consequences
 
