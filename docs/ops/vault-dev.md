@@ -182,6 +182,6 @@ vault secrets enable -path=secret kv-v2
 
 ## References
 
-- [ADR-0015: Secrets and Configuration Management](../../ADRs/0015-secrets-config-management.md)
+- [ADR-0015: Secrets and Configuration Management](../adr/0015-secrets-config-management.md)
 - [Vault Documentation](https://developer.hashicorp.com/vault/docs)
 - [NATS NKEY Authentication](https://docs.nats.io/running-a-nats-service/configuration/securing_nats/auth_intro/nkey_auth)

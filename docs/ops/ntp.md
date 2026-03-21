@@ -221,6 +221,6 @@ For production, consider monitoring NTP status:
 
 ## References
 
-- [ADR-0026: Clock Skew Tolerance](../../ADRs/0026-clock-skew-tolerance.md)
+- [ADR-0026: Clock Skew Tolerance](../adr/0026-clock-skew-tolerance.md)
 - [chrony documentation](https://chrony.tuxfamily.org/documentation.html)
 - [systemd-timesyncd](https://www.freedesktop.org/software/systemd/man/systemd-timesyncd.service.html)

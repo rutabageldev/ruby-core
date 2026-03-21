@@ -332,5 +332,5 @@ the absence of an errgroup-style supervisory structure — deferred to a future 
 - Replace `[ ]` with `[X]` and add the date when each criterion passes.
 - Placeholder values in `configs/rules/katie_presence.yaml` (`phone.katie`, `phone_michael`)
   must be updated to match your own HA entity and notify device before AC-3 can produce real push notifications.
-- See `ADRs/0008-gateway-health-and-reconciliation.md` and
-  `ADRs/0009-gateway-responsibilities.md` for architectural context.
+- See `docs/adr/0008-gateway-health-and-reconciliation.md` and
+  `docs/adr/0009-gateway-responsibilities.md` for architectural context.
