@@ -187,6 +187,7 @@ authorization {
         subscribe: {
           allow: [
             "ha.events.>",
+            "gateway.health",
             "_INBOX.>",
             "\$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.HA_EVENTS.engine_processor"
           ]
