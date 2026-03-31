@@ -12,6 +12,7 @@ import (
 	goNats "github.com/nats-io/nats.go"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
+	"github.com/primaryrutabaga/ruby-core/services/gateway/ada"
 	"github.com/primaryrutabaga/ruby-core/services/gateway/ha"
 	gatewayNats "github.com/primaryrutabaga/ruby-core/services/gateway/nats"
 )
@@ -20,6 +21,7 @@ const healthInterval = 15 * time.Second
 
 // App holds all gateway runtime components.
 type App struct {
+	nc        *goNats.Conn
 	client    *ha.Client
 	publisher *gatewayNats.Publisher
 	log       *slog.Logger
@@ -62,7 +64,7 @@ func New(haURL, haToken string, nc *goNats.Conn, log *slog.Logger) (*App, error)
 		log.Warn("gateway: no HA URL configured — WebSocket client disabled (degraded mode)")
 	}
 
-	return &App{client: client, publisher: publisher, log: log}, nil
+	return &App{nc: nc, client: client, publisher: publisher, log: log}, nil
 }
 
 // Run starts the HTTP server, HA WebSocket client loop, and health heartbeat
@@ -91,6 +93,7 @@ func (a *App) runHTTP(ctx context.Context, addr string) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
+	mux.Handle("/ada/events", ada.New(a.nc, a.log))
 
 	srv := &http.Server{
 		Addr:         addr,

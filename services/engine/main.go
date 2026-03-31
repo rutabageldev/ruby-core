@@ -19,6 +19,8 @@ import (
 	"github.com/primaryrutabaga/ruby-core/pkg/logging"
 	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
 	engineconfig "github.com/primaryrutabaga/ruby-core/services/engine/config"
+	"github.com/primaryrutabaga/ruby-core/services/engine/processors/ada"
+	adastore "github.com/primaryrutabaga/ruby-core/services/engine/processors/ada/store"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processors/presence_notify"
 )
 
@@ -174,7 +176,7 @@ func main() {
 
 	host := NewProcessorHost(logger)
 	host.Register(presence_notify.New(logger))
-	// Step 11: host.Register(ada.New(logger)) added here when ada processor is created.
+	host.Register(ada.New(logger))
 
 	// --- Conditional Postgres boot (ADR-0029) ---
 	// If any registered processor implements StatefulProcessor and RequiresStorage,
@@ -195,9 +197,11 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Step 10: adastore.MigrateUp(context.Background(), pgCfg.DSN()) called here
-		// once the ada store package exists. Import:
-		//   adastore "github.com/primaryrutabaga/ruby-core/services/engine/processors/ada/store"
+		if err := adastore.MigrateUp(context.Background(), pgCfg.DSN()); err != nil {
+			logger.Error("postgres: ada migration failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		logger.Info("postgres: ada migrations applied")
 
 		pool, err = pgxpool.New(context.Background(), pgCfg.DSN())
 		if err != nil {
