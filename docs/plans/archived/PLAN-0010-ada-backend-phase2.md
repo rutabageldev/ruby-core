@@ -1,6 +1,6 @@
 # PLAN-0010 — Ada Backend Phase 2: Event Ingestion and Persistence
 
-* **Status:** Approved
+* **Status:** Complete
 * **Date:** 2026-03-31
 * **Project:** ruby-core
 * **Roadmap Item:** none (pre-roadmap; tracked via docs/plans/)
@@ -328,12 +328,16 @@ go test -tags=integration -race ./...
 
 ### Step 15 — [MANUAL] Deploy and validate end-to-end
 
-**Action:** This step is performed by the user after the commit is pushed and deployed.
+**Action:** This step is performed by the user after the branch is merged and a `v0.5.0` release tag is pushed.
 
-```bash
-make prod-restart SERVICE=gateway
-make prod-restart SERVICE=engine
-```
+The actual deployment path runs through the Phase 8 CI/CD pipeline:
+
+1. Merge the PR to `main`
+2. Push the `v0.5.0` tag to trigger `release.yml`
+3. CI: build-and-push → deploy-staging (staging smoke test, both notifier + ada checks) → create-release (gated on staging pass)
+4. Prod deploy: `bash scripts/deploy-prod.sh` (captures prev version, deploys, runs smoke test, auto-rolls back on failure)
+
+Before first deploy, ensure `secret/data/ruby-core/postgres` exists in Vault with fields: `host`, `port`, `dbname`, `user`, `password`.
 
 **Validation checklist:**
 
