@@ -130,6 +130,8 @@ services:
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=secret/data/ruby-core/staging/nats/engine
       - VAULT_TLS_PATH=secret/data/ruby-core/staging/tls/engine
+      - VAULT_PG_PATH=secret/data/ruby-core/staging/postgres
+      - VAULT_HA_PATH=secret/data/ruby-core/ha
       - RULES_DIR=/etc/ruby-core/rules
 
   # ==========================================================================
