@@ -28,7 +28,7 @@ import (
 // A separate *sql.DB is opened for the migration step only; the application
 // pool (*pgxpool.Pool) is not touched.
 func MigrateUp(_ context.Context, fs embed.FS, dir, dsn, tableName string) error {
-	db, err := sql.Open("pgx5", dsn)
+	db, err := sql.Open("pgx/v5", dsn)
 	if err != nil {
 		return fmt.Errorf("store: open migration db: %w", err)
 	}
