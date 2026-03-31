@@ -116,6 +116,7 @@ services:
     networks:
       - default
       - vault-ruby-core-staging
+      - postgres
     depends_on:
       nats:
         condition: service_healthy
@@ -243,6 +244,9 @@ networks:
   vault-ruby-core-staging:
     external: true
     name: vault-ruby-core-staging
+  postgres:
+    external: true
+    name: postgres
 
 # ==========================================================================
 # Volumes

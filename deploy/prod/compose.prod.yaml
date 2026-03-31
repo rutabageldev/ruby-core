@@ -120,6 +120,7 @@ services:
     networks:
       - default
       - vault-ruby-core-prod
+      - postgres
     depends_on:
       nats:
         condition: service_healthy
@@ -254,6 +255,9 @@ networks:
   traefik_proxy:
     external: true
     name: traefik_proxy
+  postgres:
+    external: true
+    name: postgres
 
 # ==========================================================================
 # Volumes
