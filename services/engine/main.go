@@ -10,6 +10,8 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/primaryrutabaga/ruby-core/pkg/audit"
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
 	"github.com/primaryrutabaga/ruby-core/pkg/config"
@@ -172,7 +174,52 @@ func main() {
 
 	host := NewProcessorHost(logger)
 	host.Register(presence_notify.New(logger))
-	if err := host.Initialize(ruleCfg, nc, js); err != nil {
+	// Step 11: host.Register(ada.New(logger)) added here when ada processor is created.
+
+	// --- Conditional Postgres boot (ADR-0029) ---
+	// If any registered processor implements StatefulProcessor and RequiresStorage,
+	// fetch Postgres credentials from Vault, run migrations, and connect the pool.
+	// Stateless-only deployments skip this block entirely.
+
+	var pool *pgxpool.Pool
+	var haCfg *boot.HAConfig
+
+	if host.RequiresStorage() {
+		pgVaultPath := os.Getenv("VAULT_PG_PATH")
+		if pgVaultPath == "" {
+			pgVaultPath = "secret/data/ruby-core/postgres"
+		}
+		pgCfg, err := boot.FetchPostgresConfig(cfg.VaultAddr, cfg.VaultToken, pgVaultPath)
+		if err != nil {
+			logger.Error("vault: fetch postgres config failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+
+		// Step 10: adastore.MigrateUp(context.Background(), pgCfg.DSN()) called here
+		// once the ada store package exists. Import:
+		//   adastore "github.com/primaryrutabaga/ruby-core/services/engine/processors/ada/store"
+
+		pool, err = pgxpool.New(context.Background(), pgCfg.DSN())
+		if err != nil {
+			logger.Error("postgres: connect failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		defer pool.Close()
+		logger.Info("connected to postgres", slog.String("host", pgCfg.Host))
+
+		haVaultPath := os.Getenv("VAULT_HA_PATH")
+		if haVaultPath == "" {
+			haVaultPath = "secret/data/ruby-core/ha"
+		}
+		haCfg, err = boot.FetchHAConfig(cfg.VaultAddr, cfg.VaultToken, haVaultPath)
+		if err != nil {
+			logger.Error("vault: fetch HA config failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		logger.Info("vault: fetched HA config", slog.String("ha_url", haCfg.URL))
+	}
+
+	if err := host.Initialize(ruleCfg, nc, js, pool, haCfg); err != nil {
 		logger.Error("processor host: init failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}

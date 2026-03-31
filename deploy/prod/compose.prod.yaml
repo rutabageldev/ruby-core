@@ -135,6 +135,8 @@ services:
       - VAULT_NKEY_PATH=${VAULT_NKEY_PATH_ENGINE:-secret/data/ruby-core/nats/engine}
       - VAULT_TLS_PATH=${VAULT_TLS_PATH_ENGINE:-secret/data/ruby-core/tls/engine}
       - RULES_DIR=/etc/ruby-core/rules
+      - VAULT_PG_PATH=secret/data/ruby-core/postgres
+      - VAULT_HA_PATH=secret/data/ruby-core/ha
 
   # ==========================================================================
   # Notifier Service

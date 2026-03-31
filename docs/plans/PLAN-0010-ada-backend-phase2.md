@@ -46,6 +46,7 @@ The following was verified against the current codebase on 2026-03-31:
 * `docs/adr/0029-stateful-processors.md` — **committed as part of this plan's Step 2**
 * `go.mod` has no `pgx`, `golang-migrate` entries (step 3 adds them)
 * Foundation Postgres: `foundation-postgres` container; init script creates `ruby_core` db + user
+* **Step 4 deviation:** `pkg/store.MigrateUp` accepts `dsn string` instead of `*pgxpool.Pool` — the golang-migrate pgx/v5 driver wraps `database/sql`, not pgxpool. Steps 7 and 10 pass `pgCfg.DSN()`. The pool is created separately for application queries from the same DSN.
 
 ---
 
@@ -144,9 +145,9 @@ if sp, ok := p.(processor.StatefulProcessor); ok && sp.RequiresStorage() {
 
 1. Register all processors first (including `ada.New(logger)` from step 11)
 2. If `host.RequiresStorage()`:
-   * Fetch Postgres config from Vault (`VAULT_PG_PATH` env, default `secret/data/ruby-core/postgres`)
-   * Connect `pgxpool.Pool` — fatal on failure
-   * Run `adastore.MigrateUp(ctx, pool)` — fatal on failure
+   * Fetch Postgres config from Vault (`VAULT_PG_PATH` env, default `secret/data/ruby-core/postgres`) → `pgCfg`
+   * Run `adastore.MigrateUp(ctx, pgCfg.DSN())` — fatal on failure (**DSN, not pool** — see Step 4 deviation note)
+   * Connect `pgxpool.New(ctx, pgCfg.DSN())` → `pool` for application use — fatal on failure
    * Log "postgres: ada schema ready"
 3. Fetch HA config from Vault (`VAULT_HA_PATH` env, default `secret/data/ruby-core/ha`) — fatal on failure
 4. Call `host.Initialize(ruleCfg, nc, js, pool, haCfg)`
@@ -232,7 +233,7 @@ Note: `HA_EVENTS` already captures `ha.events.>` — no stream changes required.
 * `queries/tummy.sql` — InsertTummySession, GetTodayTummyAggregates
 * `queries/config.sql` — GetConfig, UpsertConfig
 
-**Hand-written:** `store/migrate.go` with `//go:embed migrations/*.sql` and `MigrateUp(ctx, pool)` wrapping `pkgstore.MigrateUp` with `tableName="schema_migrations_ada"`.
+**Hand-written:** `store/migrate.go` with `//go:embed migrations/*.sql` and `MigrateUp(ctx context.Context, dsn string)` wrapping `pkgstore.MigrateUp(ctx, migrationsFS, "migrations", dsn, "schema_migrations_ada")`. (**DSN string, not pool** — see Step 4 deviation note.)
 
 Run `sqlc generate` from within `store/`. Commit all generated files (`db.go`, `models.go`, `querier.go`, plus any `*.sql.go` files).
 

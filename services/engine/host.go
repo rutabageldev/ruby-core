@@ -5,8 +5,10 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/boot"
 	"github.com/primaryrutabaga/ruby-core/services/engine/config"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processor"
 )
@@ -30,11 +32,37 @@ func (h *ProcessorHost) Register(p processor.Processor) {
 	h.processors = append(h.processors, p)
 }
 
-// Initialize calls Initialize on every registered processor with the provided
-// config and NATS resources. Returns the first error encountered.
-func (h *ProcessorHost) Initialize(ruleCfg *config.CompiledConfig, nc *nats.Conn, js nats.JetStreamContext) error {
-	cfg := processor.Config{RuleCfg: ruleCfg, NC: nc, JS: js}
+// RequiresStorage reports whether any registered processor implements
+// StatefulProcessor and returns true from RequiresStorage. Used by main.go
+// to determine whether to boot the Postgres connection pool before Initialize.
+func (h *ProcessorHost) RequiresStorage() bool {
 	for _, p := range h.processors {
+		if sp, ok := p.(processor.StatefulProcessor); ok && sp.RequiresStorage() {
+			return true
+		}
+	}
+	return false
+}
+
+// Initialize calls Initialize on every registered processor with the provided
+// config and resources. pool and ha are passed through to Config and are non-nil
+// only when at least one StatefulProcessor is registered (see RequiresStorage).
+//
+// Coupling note: HA config (ha) is currently fetched unconditionally whenever
+// any stateful processor is registered, even if a given processor only needs
+// Postgres and not HA. This is acceptable with a single stateful processor (ada).
+// If a future stateful processor requires Postgres but not HA, this method should
+// be extended to accept a richer options struct (or HA config should be fetched
+// per-processor in Initialize rather than centrally here). Don't refactor until
+// there is a second stateful processor to drive the design.
+func (h *ProcessorHost) Initialize(ruleCfg *config.CompiledConfig, nc *nats.Conn, js nats.JetStreamContext, pool *pgxpool.Pool, ha *boot.HAConfig) error {
+	cfg := processor.Config{RuleCfg: ruleCfg, NC: nc, JS: js, Pool: pool, HA: ha}
+	for _, p := range h.processors {
+		if sp, ok := p.(processor.StatefulProcessor); ok && sp.RequiresStorage() {
+			if cfg.Pool == nil {
+				return fmt.Errorf("host: processor %T requires storage but Config.Pool is nil", p)
+			}
+		}
 		if err := p.Initialize(cfg); err != nil {
 			return fmt.Errorf("host: processor init: %w", err)
 		}
