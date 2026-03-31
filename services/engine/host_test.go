@@ -37,7 +37,7 @@ func newHost(t *testing.T, procs ...*mockProcessor) *ProcessorHost {
 		h.Register(p)
 	}
 	// nil NC/JS is fine for tests: mock processors don't use them.
-	if err := h.Initialize(&config.CompiledConfig{}, nil, nil); err != nil {
+	if err := h.Initialize(&config.CompiledConfig{}, nil, nil, nil, nil); err != nil {
 		t.Fatalf("host.Initialize: %v", err)
 	}
 	return h
@@ -129,7 +129,7 @@ func TestHost_InitializeError(t *testing.T) {
 	}
 	h := NewProcessorHost(slog.Default())
 	h.Register(p)
-	if err := h.Initialize(&config.CompiledConfig{}, nil, nil); err == nil {
+	if err := h.Initialize(&config.CompiledConfig{}, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected error from processor init, got nil")
 	}
 }

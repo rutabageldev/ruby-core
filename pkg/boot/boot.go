@@ -265,6 +265,74 @@ func FetchHAConfig(addr, token, path string) (*HAConfig, error) {
 	return cfg, err
 }
 
+// PostgresConfig holds connection parameters for PostgreSQL.
+type PostgresConfig struct {
+	Host     string
+	Port     string
+	DBName   string
+	User     string
+	Password string
+}
+
+// DSN returns a pgx-compatible connection string.
+// sslmode=disable is intentional — TLS is handled at the network layer.
+func (c *PostgresConfig) DSN() string {
+	return fmt.Sprintf("host=%s port=%s dbname=%s user=%s password=%s sslmode=disable",
+		c.Host, c.Port, c.DBName, c.User, c.Password)
+}
+
+// FetchPostgresConfig retrieves PostgreSQL connection parameters from Vault
+// at the given path (e.g. "secret/data/ruby-core/postgres").
+// If path is empty, defaults to "secret/data/ruby-core/postgres".
+// Reads fields: host, port, dbname, user, password.
+func FetchPostgresConfig(addr, token, path string) (*PostgresConfig, error) {
+	if path == "" {
+		path = "secret/data/ruby-core/postgres"
+	}
+	client, err := newVaultClient(addr, token)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg *PostgresConfig
+	err = withRetry(func() error {
+		secret, fetchErr := client.Logical().Read(path)
+		if fetchErr != nil {
+			return fmt.Errorf("read %s: %w", path, fetchErr)
+		}
+		if secret == nil || secret.Data == nil {
+			return fmt.Errorf("no data at %s", path)
+		}
+		data, ok := secret.Data["data"].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected data format at %s", path)
+		}
+		host, ok := data["host"].(string)
+		if !ok || host == "" {
+			return fmt.Errorf("missing host in %s", path)
+		}
+		port, ok := data["port"].(string)
+		if !ok || port == "" {
+			return fmt.Errorf("missing port in %s", path)
+		}
+		dbname, ok := data["dbname"].(string)
+		if !ok || dbname == "" {
+			return fmt.Errorf("missing dbname in %s", path)
+		}
+		user, ok := data["user"].(string)
+		if !ok || user == "" {
+			return fmt.Errorf("missing user in %s", path)
+		}
+		password, ok := data["password"].(string)
+		if !ok || password == "" {
+			return fmt.Errorf("missing password in %s", path)
+		}
+		cfg = &PostgresConfig{Host: host, Port: port, DBName: dbname, User: user, Password: password}
+		return nil
+	})
+	return cfg, err
+}
+
 // withRetry retries fn up to 3 times with exponential backoff (1s, 2s, 4s).
 func withRetry(fn func() error) error {
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}

@@ -2,6 +2,8 @@
 
 Ingests Home Assistant state events via WebSocket and publishes them to the `HA_EVENTS` JetStream stream (`ha.events.>`). Normalizes raw HA payloads using a passlist compiled by the engine. Reconciles critical entity state on reconnect. Publishes a `gateway.health` heartbeat every 15 seconds (ADR-0008).
 
+Also exposes a `POST /ada/events` HTTP endpoint that accepts Ada baby tracking events from the dashboard and publishes them as CloudEvents to `HA_EVENTS` (`ha.events.ada.>`). See `services/gateway/ada/handler.go` for the event type → subject mapping.
+
 External access is routed through Traefik; the HTTP port is never published directly to the host (ADR-0020).
 
 ## Configuration
