@@ -97,6 +97,8 @@ if [ "$smoke_exit" -eq 0 ]; then
   echo "=== Staging smoke test PASSED for ${VERSION} ==="
 else
   echo "!!! Staging smoke test FAILED for ${VERSION} — Release will not be created." >&2
+  echo "=== Engine logs (last 50 lines) ===" >&2
+  docker logs ruby-core-staging-engine --tail 50 2>&1 >&2 || true
 fi
 
 # cleanup trap runs on exit
