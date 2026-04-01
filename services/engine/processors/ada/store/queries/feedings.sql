@@ -12,7 +12,16 @@ INSERT INTO feeding_segments (feeding_id, side, started_at, ended_at, duration_s
 VALUES (@feeding_id, @side, @started_at, @ended_at, @duration_s);
 
 -- name: GetLastFeeding :one
-SELECT timestamp, source FROM feedings
+SELECT
+    f.timestamp,
+    f.source,
+    EXISTS(SELECT 1 FROM feeding_bottle_detail d WHERE d.feeding_id = f.id) AS has_bottle_detail
+FROM feedings f
+WHERE f.deleted_at IS NULL
+ORDER BY f.timestamp DESC LIMIT 1;
+
+-- name: GetLastFeedingID :one
+SELECT id FROM feedings
 WHERE deleted_at IS NULL
 ORDER BY timestamp DESC LIMIT 1;
 

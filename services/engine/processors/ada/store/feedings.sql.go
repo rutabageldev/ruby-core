@@ -11,21 +11,39 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getLastFeeding = `-- name: GetLastFeeding :one
-SELECT timestamp, source FROM feedings
+const getLastFeedingID = `-- name: GetLastFeedingID :one
+SELECT id FROM feedings
 WHERE deleted_at IS NULL
 ORDER BY timestamp DESC LIMIT 1
 `
 
+func (q *Queries) GetLastFeedingID(ctx context.Context) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLastFeedingID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getLastFeeding = `-- name: GetLastFeeding :one
+SELECT
+    f.timestamp,
+    f.source,
+    EXISTS(SELECT 1 FROM feeding_bottle_detail d WHERE d.feeding_id = f.id) AS has_bottle_detail
+FROM feedings f
+WHERE f.deleted_at IS NULL
+ORDER BY f.timestamp DESC LIMIT 1
+`
+
 type GetLastFeedingRow struct {
-	Timestamp pgtype.Timestamptz
-	Source    string
+	Timestamp       pgtype.Timestamptz
+	Source          string
+	HasBottleDetail bool
 }
 
 func (q *Queries) GetLastFeeding(ctx context.Context) (*GetLastFeedingRow, error) {
 	row := q.db.QueryRow(ctx, getLastFeeding)
 	var i GetLastFeedingRow
-	err := row.Scan(&i.Timestamp, &i.Source)
+	err := row.Scan(&i.Timestamp, &i.Source, &i.HasBottleDetail)
 	return &i, err
 }
 
