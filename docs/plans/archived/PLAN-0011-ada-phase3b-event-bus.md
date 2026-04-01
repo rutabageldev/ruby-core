@@ -1,6 +1,6 @@
 # PLAN-0011 — Ada Phase 3b: Replace HTTP Gateway Calls with HA Event Bus
 
-* **Status:** Approved
+* **Status:** Complete
 * **Date:** 2026-04-01
 * **Project:** ruby-core + homeassistant
 * **Branch:** feat/ada-phase3b-event-bus
