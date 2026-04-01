@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nats-io/nats.go"
@@ -505,6 +506,7 @@ func (p *Processor) pushFeedingSensors(ctx context.Context, lastFeedingTime time
 		)
 	}
 	p.pushAll(ctx, pushes)
+	p.pushFeedingHistory(ctx)
 }
 
 // pushDiaperSensors pushes all diaper-related sensors after a diaper event.
@@ -546,6 +548,7 @@ func (p *Processor) pushSupplementOzSensor(ctx context.Context) {
 		{sensorTodayFeedingOz, strconv.FormatFloat(agg.TotalOz, 'f', 2, 64)},
 		{sensorLastFeedingSource, "supplemented"},
 	})
+	p.pushFeedingHistory(ctx)
 }
 
 // pushSleepStartedSensors pushes sensors after a sleep session starts.
@@ -662,6 +665,7 @@ func (p *Processor) restoreSensors(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today feeding aggregates", slog.String("error", err.Error()))
 	}
+	p.pushFeedingHistory(ctx)
 
 	if agg, err := p.q.GetTodayDiaperAggregates(ctx); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
@@ -690,6 +694,75 @@ func (p *Processor) restoreSensors(ctx context.Context) {
 		})
 	} else {
 		p.log.Warn("ada: restore today tummy aggregates", slog.String("error", err.Error()))
+	}
+}
+
+// ── Feeding history cache ─────────────────────────────────────────────────────
+
+// FeedingHistoryEntry is one element of the JSON array pushed as attributes on
+// sensor.ada_feeding_history. Only fields relevant to the source type are set;
+// zero-value oz fields are omitted from JSON output via omitempty.
+type FeedingHistoryEntry struct {
+	ID             string   `json:"id"`
+	Timestamp      string   `json:"timestamp"`
+	Source         string   `json:"source"`
+	LeftDurationS  int      `json:"left_duration_s"`
+	RightDurationS int      `json:"right_duration_s"`
+	AmountOz       *float64 `json:"amount_oz,omitempty"`
+	BreastMilkOz   *float64 `json:"breast_milk_oz,omitempty"`
+	FormulaOz      *float64 `json:"formula_oz,omitempty"`
+}
+
+// buildFeedingHistory converts sqlc rows to JSON-serializable history entries.
+// oz fields that are 0 (no bottle detail on a breast feeding) are left nil so
+// they are omitted from the JSON payload sent to HA.
+func buildFeedingHistory(rows []*store.GetLast24hFeedingsRow) []FeedingHistoryEntry {
+	entries := make([]FeedingHistoryEntry, 0, len(rows))
+	for _, r := range rows {
+		e := FeedingHistoryEntry{
+			ID:             uuid.UUID(r.ID.Bytes).String(),
+			Timestamp:      r.Timestamp.Time.UTC().Format(time.RFC3339),
+			Source:         r.Source,
+			LeftDurationS:  int(r.LeftDurationS),
+			RightDurationS: int(r.RightDurationS),
+		}
+		if r.AmountOz != 0 {
+			v := r.AmountOz
+			e.AmountOz = &v
+		}
+		if r.BreastMilkOz != 0 {
+			v := r.BreastMilkOz
+			e.BreastMilkOz = &v
+		}
+		if r.FormulaOz != 0 {
+			v := r.FormulaOz
+			e.FormulaOz = &v
+		}
+		entries = append(entries, e)
+	}
+	return entries
+}
+
+// pushFeedingHistory queries the last 24h of feedings and pushes them as
+// attributes on sensor.ada_feeding_history. The sensor state is the entry
+// count so HA has a meaningful scalar to observe. An empty result pushes
+// state="0" and an empty entries array.
+func (p *Processor) pushFeedingHistory(ctx context.Context) {
+	rows, err := p.q.GetLast24hFeedings(ctx)
+	if err != nil {
+		p.log.Warn("ada: query feeding history failed", slog.String("error", err.Error()))
+		return
+	}
+
+	entries := buildFeedingHistory(rows)
+
+	attributes := map[string]any{
+		"entries":      entries,
+		"last_updated": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if err := p.ha.PushState(ctx, "sensor.ada_feeding_history", strconv.Itoa(len(entries)), attributes); err != nil {
+		p.log.Warn("ada: push feeding history failed", slog.String("error", err.Error()))
 	}
 }
 
