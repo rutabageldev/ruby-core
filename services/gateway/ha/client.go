@@ -266,14 +266,24 @@ func (c *Client) handleStateChanged(ev *haEvent) error {
 	return nil
 }
 
-// handleAdaEvent processes an ada_event fired from the dashboard via hass.fireEvent.
-// The payload is forwarded to NATS via the shared ada.Publish function.
+// handleAdaEvent processes an ada_event fired from the dashboard via the
+// script.fire_ada_event HA script intermediary. The script wraps the caller's
+// payload under a "payload" key, so ev.Data arrives as:
+//
+//	{"payload": {"event": "ada.diaper.log", "type": "dirty", ...}}
+//
+// Unwrap the inner payload before forwarding to ada.Publish.
 func (c *Client) handleAdaEvent(ev *haEvent) error {
-	var payload map[string]any
-	if err := json.Unmarshal(ev.Data, &payload); err != nil {
-		return fmt.Errorf("ha: unmarshal ada_event data: %w", err)
+	var wrapper struct {
+		Payload map[string]any `json:"payload"`
 	}
-	return ada.Publish(c.nc, payload, c.log)
+	if err := json.Unmarshal(ev.Data, &wrapper); err != nil {
+		return fmt.Errorf("ha: unmarshal ada_event wrapper: %w", err)
+	}
+	if wrapper.Payload == nil {
+		return fmt.Errorf("ha: ada_event missing payload field")
+	}
+	return ada.Publish(c.nc, wrapper.Payload, c.log)
 }
 
 // haWSURL converts an HTTP(S) HA base URL to a WebSocket URL.
