@@ -80,6 +80,7 @@ services:
       - default
       - vault-ruby-core-prod
       - traefik_proxy
+      - traefik-public
     depends_on:
       nats:
         condition: service_healthy
@@ -103,6 +104,7 @@ services:
       - "traefik.http.routers.ruby-gateway.tls=true"
       - "traefik.http.routers.ruby-gateway.middlewares=ruby-gateway-auth"
       - "traefik.http.middlewares.ruby-gateway-auth.forwardauth.address=${TRAEFIK_FORWARD_AUTH_URL:-http://traefik-auth:4181}"
+      - "traefik.http.middlewares.ruby-gateway-auth.forwardauth.authRequestHeaders=Authorization"
       - "traefik.http.services.ruby-gateway.loadbalancer.server.port=8080"
 
   # ==========================================================================
@@ -255,6 +257,10 @@ networks:
   traefik_proxy:
     external: true
     name: traefik_proxy
+  # Traefik public overlay network — gateway must be on this for Traefik file-provider routing.
+  traefik-public:
+    external: true
+    name: traefik-public
   postgres:
     external: true
     name: postgres
