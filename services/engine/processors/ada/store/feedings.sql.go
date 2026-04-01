@@ -11,17 +11,72 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getLastFeedingID = `-- name: GetLastFeedingID :one
-SELECT id FROM feedings
-WHERE deleted_at IS NULL
-ORDER BY timestamp DESC LIMIT 1
+const getLast24hFeedings = `-- name: GetLast24hFeedings :many
+SELECT
+    f.id,
+    f.timestamp,
+    f.source,
+    d.amount_oz::float8       AS amount_oz,
+    d.breast_milk_oz::float8  AS breast_milk_oz,
+    d.formula_oz::float8      AS formula_oz,
+    COALESCE(
+        SUM(CASE WHEN fs.side = 'left'  THEN fs.duration_s END), 0
+    )::int AS left_duration_s,
+    COALESCE(
+        SUM(CASE WHEN fs.side = 'right' THEN fs.duration_s END), 0
+    )::int AS right_duration_s
+FROM feedings f
+LEFT JOIN feeding_bottle_detail d ON d.feeding_id = f.id
+LEFT JOIN feeding_segments fs     ON fs.feeding_id = f.id
+WHERE f.deleted_at IS NULL
+  AND f.timestamp >= NOW() - INTERVAL '24 hours'
+GROUP BY
+    f.id, f.timestamp, f.source,
+    d.amount_oz, d.breast_milk_oz, d.formula_oz
+ORDER BY f.timestamp DESC
 `
 
-func (q *Queries) GetLastFeedingID(ctx context.Context) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, getLastFeedingID)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
+type GetLast24hFeedingsRow struct {
+	ID             pgtype.UUID
+	Timestamp      pgtype.Timestamptz
+	Source         string
+	AmountOz       float64
+	BreastMilkOz   float64
+	FormulaOz      float64
+	LeftDurationS  int32
+	RightDurationS int32
+}
+
+// Returns all feedings in the last 24 hours with per-side breast durations
+// and bottle amounts. Left/right duration_s are 0 for non-breast sessions.
+// oz columns are cast to float8 so nullable results scan as pgtype.Float8.
+func (q *Queries) GetLast24hFeedings(ctx context.Context) ([]*GetLast24hFeedingsRow, error) {
+	rows, err := q.db.Query(ctx, getLast24hFeedings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*GetLast24hFeedingsRow
+	for rows.Next() {
+		var i GetLast24hFeedingsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Timestamp,
+			&i.Source,
+			&i.AmountOz,
+			&i.BreastMilkOz,
+			&i.FormulaOz,
+			&i.LeftDurationS,
+			&i.RightDurationS,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getLastFeeding = `-- name: GetLastFeeding :one
@@ -45,6 +100,19 @@ func (q *Queries) GetLastFeeding(ctx context.Context) (*GetLastFeedingRow, error
 	var i GetLastFeedingRow
 	err := row.Scan(&i.Timestamp, &i.Source, &i.HasBottleDetail)
 	return &i, err
+}
+
+const getLastFeedingID = `-- name: GetLastFeedingID :one
+SELECT id FROM feedings
+WHERE deleted_at IS NULL
+ORDER BY timestamp DESC LIMIT 1
+`
+
+func (q *Queries) GetLastFeedingID(ctx context.Context) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLastFeedingID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getTodayFeedingAggregates = `-- name: GetTodayFeedingAggregates :one
