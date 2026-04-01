@@ -59,7 +59,7 @@ func New(haURL, haToken string, nc *goNats.Conn, log *slog.Logger) (*App, error)
 	var client *ha.Client
 	if haURL != "" {
 		reconciler := ha.NewReconciler(haURL, haToken, stateKV, norm, publisher, log)
-		client = ha.NewClient(haURL, haToken, norm, publisher, stateKV, critEntities, reconciler, log)
+		client = ha.NewClient(haURL, haToken, nc, norm, publisher, stateKV, critEntities, reconciler, log)
 	} else {
 		log.Warn("gateway: no HA URL configured — WebSocket client disabled (degraded mode)")
 	}
