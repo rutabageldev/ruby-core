@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -40,6 +41,7 @@ const (
 	sensorTodayDiaperCount   = "sensor.ada_today_diaper_count"
 	sensorTodayDiaperWet     = "sensor.ada_today_diaper_wet"
 	sensorTodayDiaperDirty   = "sensor.ada_today_diaper_dirty"
+	sensorTodayDiaperMixed   = "sensor.ada_today_diaper_mixed"
 	sensorSleepState         = "sensor.ada_sleep_state"
 	sensorLastSleepChange    = "sensor.ada_last_sleep_change"
 	sensorTodaySleepHours    = "sensor.ada_today_sleep_hours"
@@ -257,19 +259,12 @@ func (p *Processor) handleFeedingSupplemented(ctx context.Context, evt schemas.C
 		return fmt.Errorf("ada: decode feeding_supplement: %w", err)
 	}
 
-	// Supplements have no explicit timestamp — use the CloudEvent time (real-time action).
-	evtTime, err := parseRFC3339(evt.Time)
+	// A supplement is a bottle top-off during the same breast feeding session.
+	// Attach the bottle detail to the most recent feeding row rather than
+	// creating a new one — this keeps ada_today_feeding_count accurate.
+	feedingID, err := p.q.GetLastFeedingID(ctx)
 	if err != nil {
-		return fmt.Errorf("ada: parse event time: %w", err)
-	}
-
-	feedingID, err := p.q.InsertFeeding(ctx, &store.InsertFeedingParams{
-		Timestamp: toTimestamptz(evtTime),
-		Source:    d.Source,
-		LoggedBy:  d.LoggedBy,
-	})
-	if err != nil {
-		return fmt.Errorf("ada: insert feeding_supplement: %w", err)
+		return fmt.Errorf("ada: get last feeding for supplement: %w", err)
 	}
 
 	if err := p.q.InsertFeedingBottleDetail(ctx, &store.InsertFeedingBottleDetailParams{
@@ -279,7 +274,9 @@ func (p *Processor) handleFeedingSupplemented(ctx context.Context, evt schemas.C
 		return fmt.Errorf("ada: insert supplement bottle detail: %w", err)
 	}
 
-	p.pushFeedingSensors(ctx, evtTime, d.Source)
+	// Push only oz sensors — last_feeding_time, last_feeding_source,
+	// next_feeding_target, and today_feeding_count must not change.
+	p.pushSupplementOzSensor(ctx)
 	return nil
 }
 
@@ -473,6 +470,8 @@ func (p *Processor) handleThresholdChange(ctx context.Context, evt schemas.Cloud
 
 // pushFeedingSensors pushes all feeding-related sensors after a feeding event.
 // lastFeedingTime is the actual event time (never time.Now()).
+// source is the raw DB source value; it is mapped to a display label before pushing.
+// No supplement has occurred yet at this point, so hasBottleDetail is false.
 func (p *Processor) pushFeedingSensors(ctx context.Context, lastFeedingTime time.Time, source string) {
 	lastTimeStr := lastFeedingTime.UTC().Format(time.RFC3339)
 
@@ -496,7 +495,7 @@ func (p *Processor) pushFeedingSensors(ctx context.Context, lastFeedingTime time
 
 	pushes := []struct{ id, state string }{
 		{sensorLastFeedingTime, lastTimeStr},
-		{sensorLastFeedingSource, source},
+		{sensorLastFeedingSource, feedingDisplaySource(source, false)},
 		{sensorNextFeedingTarget, nextTargetStr},
 	}
 	if agg != nil {
@@ -527,9 +526,26 @@ func (p *Processor) pushDiaperSensors(ctx context.Context, lastDiaperTime time.T
 			struct{ id, state string }{sensorTodayDiaperCount, strconv.Itoa(int(agg.Total))},
 			struct{ id, state string }{sensorTodayDiaperWet, strconv.Itoa(int(agg.Wet))},
 			struct{ id, state string }{sensorTodayDiaperDirty, strconv.Itoa(int(agg.Dirty))},
+			struct{ id, state string }{sensorTodayDiaperMixed, strconv.Itoa(int(agg.Mixed))},
 		)
 	}
 	p.pushAll(ctx, pushes)
+}
+
+// pushSupplementOzSensor pushes today_feeding_oz and last_feeding_source after
+// a supplement event. Count, last time, and next target must not change.
+// last_feeding_source is updated to "supplemented" — a supplement always follows
+// a breast feeding session, so the combined display label is always "supplemented".
+func (p *Processor) pushSupplementOzSensor(ctx context.Context) {
+	agg, err := p.q.GetTodayFeedingAggregates(ctx)
+	if err != nil {
+		p.log.Warn("ada: get today feeding aggregates for supplement", slog.String("error", err.Error()))
+		return
+	}
+	p.pushAll(ctx, []struct{ id, state string }{
+		{sensorTodayFeedingOz, strconv.FormatFloat(agg.TotalOz, 'f', 2, 64)},
+		{sensorLastFeedingSource, "supplemented"},
+	})
 }
 
 // pushSleepStartedSensors pushes sensors after a sleep session starts.
@@ -594,7 +610,7 @@ func (p *Processor) restoreSensors(ctx context.Context) {
 		lastTime := f.Timestamp.Time.UTC().Format(time.RFC3339)
 		p.pushAll(ctx, []struct{ id, state string }{
 			{sensorLastFeedingTime, lastTime},
-			{sensorLastFeedingSource, f.Source},
+			{sensorLastFeedingSource, feedingDisplaySource(f.Source, f.HasBottleDetail)},
 		})
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		p.log.Warn("ada: restore last feeding", slog.String("error", err.Error()))
@@ -652,6 +668,7 @@ func (p *Processor) restoreSensors(ctx context.Context) {
 			{sensorTodayDiaperCount, strconv.Itoa(int(agg.Total))},
 			{sensorTodayDiaperWet, strconv.Itoa(int(agg.Wet))},
 			{sensorTodayDiaperDirty, strconv.Itoa(int(agg.Dirty))},
+			{sensorTodayDiaperMixed, strconv.Itoa(int(agg.Mixed))},
 		})
 	} else {
 		p.log.Warn("ada: restore today diaper aggregates", slog.String("error", err.Error()))
@@ -744,4 +761,27 @@ func isBottleSource(source string) bool {
 		return true
 	}
 	return false
+}
+
+// feedingDisplaySource maps a raw DB feeding source to a human-readable label.
+//
+//   - breast* (no bottle detail)  → "breast"
+//   - breast* + bottle detail     → "supplemented"
+//   - bottle_breast               → "breast milk"
+//   - bottle_formula              → "formula"
+//   - anything else               → source as-is
+func feedingDisplaySource(source string, hasBottleDetail bool) string {
+	isBreast := strings.HasPrefix(source, "breast")
+	switch {
+	case isBreast && hasBottleDetail:
+		return "supplemented"
+	case isBreast:
+		return "breast"
+	case source == "bottle_breast":
+		return "breast milk"
+	case source == "bottle_formula":
+		return "formula"
+	default:
+		return source
+	}
 }

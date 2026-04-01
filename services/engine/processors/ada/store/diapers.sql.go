@@ -33,7 +33,8 @@ const getTodayDiaperAggregates = `-- name: GetTodayDiaperAggregates :one
 SELECT
     COUNT(*)::int                                        AS total,
     COUNT(*) FILTER (WHERE type = 'wet')::int            AS wet,
-    COUNT(*) FILTER (WHERE type = 'dirty')::int          AS dirty
+    COUNT(*) FILTER (WHERE type = 'dirty')::int          AS dirty,
+    COUNT(*) FILTER (WHERE type = 'mixed')::int           AS mixed
 FROM diapers
 WHERE deleted_at IS NULL
   AND timestamp >= NOW()::date
@@ -43,12 +44,13 @@ type GetTodayDiaperAggregatesRow struct {
 	Total int32
 	Wet   int32
 	Dirty int32
+	Mixed int32
 }
 
 func (q *Queries) GetTodayDiaperAggregates(ctx context.Context) (*GetTodayDiaperAggregatesRow, error) {
 	row := q.db.QueryRow(ctx, getTodayDiaperAggregates)
 	var i GetTodayDiaperAggregatesRow
-	err := row.Scan(&i.Total, &i.Wet, &i.Dirty)
+	err := row.Scan(&i.Total, &i.Wet, &i.Dirty, &i.Mixed)
 	return &i, err
 }
 

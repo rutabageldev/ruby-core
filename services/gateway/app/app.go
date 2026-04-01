@@ -116,10 +116,9 @@ func (a *App) runHTTP(ctx context.Context, addr string) {
 }
 
 // runHealthBeat publishes a gateway.health heartbeat every 15 s (ADR-0008).
-// haConnected is derived from whether the HA client is actively running; we use
-// a simple always-true here because we only call this while the client goroutine
-// is alive. A full circuit-breaker state could be threaded through in a future
-// iteration.
+// ha_connected reflects the client's actual connection state: true only after
+// both WebSocket subscriptions are confirmed, false on TCP disconnect. The
+// engine watches for the false→true transition to trigger restoreSensors.
 func (a *App) runHealthBeat(ctx context.Context) {
 	ticker := time.NewTicker(healthInterval)
 	defer ticker.Stop()
@@ -128,7 +127,8 @@ func (a *App) runHealthBeat(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := a.publisher.PublishHealth(true); err != nil {
+			connected := a.client != nil && a.client.Connected()
+			if err := a.publisher.PublishHealth(connected); err != nil {
 				a.log.Warn("gateway: publish health failed", slog.String("error", err.Error()))
 			}
 		}

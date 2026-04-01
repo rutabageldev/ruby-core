@@ -11,7 +11,8 @@ ORDER BY timestamp DESC LIMIT 1;
 SELECT
     COUNT(*)::int                                        AS total,
     COUNT(*) FILTER (WHERE type = 'wet')::int            AS wet,
-    COUNT(*) FILTER (WHERE type = 'dirty')::int          AS dirty
+    COUNT(*) FILTER (WHERE type = 'dirty')::int          AS dirty,
+    COUNT(*) FILTER (WHERE type = 'mixed')::int           AS mixed
 FROM diapers
 WHERE deleted_at IS NULL
   AND timestamp >= NOW()::date;

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -60,6 +61,7 @@ type Client struct {
 	critEntities []string
 	reconciler   *Reconciler
 	log          *slog.Logger
+	haConnected  atomic.Bool
 }
 
 // NewClient creates a Client.
@@ -86,6 +88,12 @@ func NewClient(
 	}
 }
 
+// Connected reports whether the HA WebSocket is currently authenticated and
+// subscribed. Safe to call concurrently from the health heartbeat goroutine.
+func (c *Client) Connected() bool {
+	return c.haConnected.Load()
+}
+
 // Run connects to the HA WebSocket and processes events until ctx is cancelled.
 // It reconnects with exponential backoff capped at 30 s (ADR-0008).
 func (c *Client) Run(ctx context.Context) {
@@ -103,6 +111,7 @@ func (c *Client) Run(ctx context.Context) {
 			return
 		}
 		if err := c.runOnce(ctx); err != nil {
+			c.haConnected.Store(false)
 			c.log.Warn("ha websocket: disconnected",
 				slog.String("error", err.Error()),
 				slog.Int("attempt", attempt+1),
@@ -194,6 +203,11 @@ func (c *Client) runOnce(ctx context.Context) error {
 		return fmt.Errorf("ha websocket: subscribe ada_event rejected")
 	}
 	c.log.Info("ha websocket: subscribed to ada_event")
+
+	// Mark connected only after both subscriptions are confirmed — the health
+	// heartbeat reads this flag to publish ha_connected, which the engine watches
+	// to trigger restoreSensors on the false→true transition.
+	c.haConnected.Store(true)
 
 	// Trigger targeted reconciliation after a successful reconnect (ADR-0008).
 	go c.reconciler.Run(ctx, c.critEntities)
