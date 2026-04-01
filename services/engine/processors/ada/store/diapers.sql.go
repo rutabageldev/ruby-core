@@ -50,7 +50,12 @@ type GetTodayDiaperAggregatesRow struct {
 func (q *Queries) GetTodayDiaperAggregates(ctx context.Context) (*GetTodayDiaperAggregatesRow, error) {
 	row := q.db.QueryRow(ctx, getTodayDiaperAggregates)
 	var i GetTodayDiaperAggregatesRow
-	err := row.Scan(&i.Total, &i.Wet, &i.Dirty, &i.Mixed)
+	err := row.Scan(
+		&i.Total,
+		&i.Wet,
+		&i.Dirty,
+		&i.Mixed,
+	)
 	return &i, err
 }
 
