@@ -28,14 +28,14 @@ ORDER BY timestamp DESC LIMIT 1;
 -- name: GetLast24hFeedings :many
 -- Returns all feedings in the last 24 hours with per-side breast durations
 -- and bottle amounts. Left/right duration_s are 0 for non-breast sessions.
--- oz columns are cast to float8 so nullable results scan as pgtype.Float8.
+-- COALESCE handles NULL oz columns from LEFT JOIN on non-bottle feedings.
 SELECT
     f.id,
     f.timestamp,
     f.source,
-    d.amount_oz::float8       AS amount_oz,
-    d.breast_milk_oz::float8  AS breast_milk_oz,
-    d.formula_oz::float8      AS formula_oz,
+    COALESCE(d.amount_oz, 0)::float8       AS amount_oz,
+    COALESCE(d.breast_milk_oz, 0)::float8  AS breast_milk_oz,
+    COALESCE(d.formula_oz, 0)::float8      AS formula_oz,
     COALESCE(
         SUM(CASE WHEN fs.side = 'left'  THEN fs.duration_s END), 0
     )::int AS left_duration_s,
