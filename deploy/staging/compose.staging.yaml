@@ -15,7 +15,7 @@
 # Usage:
 #   make staging-up            # start stack
 #   make staging-down          # stop and remove volumes
-#   make deploy-staging VERSION=v0.5.4   # pull + start + smoke test + tear down
+#   make deploy-staging VERSION=v0.5.5   # pull + start + smoke test + tear down
 
 services:
   # ==========================================================================
