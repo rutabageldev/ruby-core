@@ -2,6 +2,7 @@ package ha
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	goNats "github.com/nats-io/nats.go"
 
+	"github.com/primaryrutabaga/ruby-core/services/gateway/ada"
 	gatewayNats "github.com/primaryrutabaga/ruby-core/services/gateway/nats"
 )
 
@@ -23,10 +25,11 @@ type haWSMessage struct {
 	Event       *haEvent `json:"event,omitempty"`
 }
 
-// haEvent wraps a HA state_changed event payload.
+// haEvent wraps a HA WebSocket event. Data is left as raw JSON so the
+// routing logic can unmarshal it into the appropriate type per event_type.
 type haEvent struct {
-	EventType string      `json:"event_type"`
-	Data      haEventData `json:"data"`
+	EventType string          `json:"event_type"`
+	Data      json.RawMessage `json:"data"`
 }
 
 // haEventData is the data field of a state_changed event.
@@ -44,12 +47,13 @@ type haEntityState struct {
 }
 
 // Client connects to the Home Assistant WebSocket API, subscribes to
-// state_changed events, normalises them via the Normalizer, and publishes
-// CloudEvents to NATS. On each successful reconnect it triggers the Reconciler
-// (ADR-0008 targeted reconciliation).
+// state_changed and ada_event events, normalises state_changed events via the
+// Normalizer, and publishes CloudEvents to NATS. On each successful reconnect
+// it triggers the Reconciler (ADR-0008 targeted reconciliation).
 type Client struct {
 	haURL        string
 	haToken      string
+	nc           *goNats.Conn
 	norm         *Normalizer
 	publisher    *gatewayNats.Publisher
 	stateKV      goNats.KeyValue
@@ -61,6 +65,7 @@ type Client struct {
 // NewClient creates a Client.
 func NewClient(
 	haURL, haToken string,
+	nc *goNats.Conn,
 	norm *Normalizer,
 	publisher *gatewayNats.Publisher,
 	stateKV goNats.KeyValue,
@@ -71,6 +76,7 @@ func NewClient(
 	return &Client{
 		haURL:        haURL,
 		haToken:      haToken,
+		nc:           nc,
 		norm:         norm,
 		publisher:    publisher,
 		stateKV:      stateKV,
@@ -152,24 +158,42 @@ func (c *Client) runOnce(ctx context.Context) error {
 		return fmt.Errorf("ha websocket: unexpected auth response type %q", authResp.Type)
 	}
 
-	// ── subscribe to state_changed ─────────────────────────────────────────
-	const subID = 1
+	// ── subscribe to events ────────────────────────────────────────────────
+	// IDs must be unique per connection; increment if adding subscriptions.
+	const subID = 1    // state_changed
+	const adaSubID = 2 // ada_event (Phase 3b dashboard write path)
+
 	if err := conn.WriteJSON(haWSMessage{
 		ID:        subID,
 		Type:      "subscribe_events",
 		EventType: "state_changed",
 	}); err != nil {
-		return fmt.Errorf("write subscribe_events: %w", err)
+		return fmt.Errorf("write subscribe_events state_changed: %w", err)
 	}
-
 	var subResp haWSMessage
 	if err := conn.ReadJSON(&subResp); err != nil {
-		return fmt.Errorf("read subscribe result: %w", err)
+		return fmt.Errorf("read subscribe state_changed result: %w", err)
 	}
 	if !subResp.Success {
-		return fmt.Errorf("ha websocket: subscribe_events request rejected")
+		return fmt.Errorf("ha websocket: subscribe state_changed rejected")
 	}
 	c.log.Info("ha websocket: subscribed to state_changed")
+
+	if err := conn.WriteJSON(haWSMessage{
+		ID:        adaSubID,
+		Type:      "subscribe_events",
+		EventType: "ada_event",
+	}); err != nil {
+		return fmt.Errorf("write subscribe_events ada_event: %w", err)
+	}
+	var adaSubResp haWSMessage
+	if err := conn.ReadJSON(&adaSubResp); err != nil {
+		return fmt.Errorf("read subscribe ada_event result: %w", err)
+	}
+	if !adaSubResp.Success {
+		return fmt.Errorf("ha websocket: subscribe ada_event rejected")
+	}
+	c.log.Info("ha websocket: subscribed to ada_event")
 
 	// Trigger targeted reconciliation after a successful reconnect (ADR-0008).
 	go c.reconciler.Run(ctx, c.critEntities)
@@ -197,12 +221,27 @@ func (c *Client) runOnce(ctx context.Context) error {
 	}
 }
 
-// handleEvent processes a single state_changed event from HA.
+// handleEvent routes an incoming HA WebSocket event by event_type.
 func (c *Client) handleEvent(ev *haEvent) error {
-	if ev.Data.NewState == nil {
+	switch ev.EventType {
+	case "ada_event":
+		return c.handleAdaEvent(ev)
+	default:
+		return c.handleStateChanged(ev)
+	}
+}
+
+// handleStateChanged processes a state_changed event from HA.
+func (c *Client) handleStateChanged(ev *haEvent) error {
+	var data haEventData
+	if err := json.Unmarshal(ev.Data, &data); err != nil {
+		return fmt.Errorf("ha: unmarshal state_changed data: %w", err)
+	}
+
+	if data.NewState == nil {
 		return nil // entity removed; nothing to publish
 	}
-	ns := ev.Data.NewState
+	ns := data.NewState
 	if ns.LastChanged == "" {
 		return nil
 	}
@@ -225,6 +264,16 @@ func (c *Client) handleEvent(ev *haEvent) error {
 		)
 	}
 	return nil
+}
+
+// handleAdaEvent processes an ada_event fired from the dashboard via hass.fireEvent.
+// The payload is forwarded to NATS via the shared ada.Publish function.
+func (c *Client) handleAdaEvent(ev *haEvent) error {
+	var payload map[string]any
+	if err := json.Unmarshal(ev.Data, &payload); err != nil {
+		return fmt.Errorf("ha: unmarshal ada_event data: %w", err)
+	}
+	return ada.Publish(c.nc, payload, c.log)
 }
 
 // haWSURL converts an HTTP(S) HA base URL to a WebSocket URL.
