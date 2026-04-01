@@ -103,8 +103,6 @@ services:
       - "traefik.http.routers.ruby-gateway.entrypoints=websecure"
       - "traefik.http.routers.ruby-gateway.tls=true"
       - "traefik.http.routers.ruby-gateway.middlewares=ruby-gateway-auth"
-      - "traefik.http.middlewares.ruby-gateway-auth.forwardauth.address=${TRAEFIK_FORWARD_AUTH_URL:-http://traefik-auth:4181}"
-      - "traefik.http.middlewares.ruby-gateway-auth.forwardauth.authRequestHeaders=Authorization"
       - "traefik.http.services.ruby-gateway.loadbalancer.server.port=8080"
 
   # ==========================================================================
