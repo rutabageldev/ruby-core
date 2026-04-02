@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -225,6 +224,10 @@ func (p *Processor) handleFeedingLogged(ctx context.Context, evt schemas.CloudEv
 		return fmt.Errorf("ada: decode feeding_logged: %w", err)
 	}
 
+	// Normalize dashboard-style source names to canonical DB values so that
+	// isBottleSource and feedingDisplaySource work correctly downstream.
+	source := normalizeSource(d.Source)
+
 	startTime, err := parseRFC3339(d.StartTime)
 	if err != nil {
 		return fmt.Errorf("ada: parse feeding start_time: %w", err)
@@ -232,14 +235,14 @@ func (p *Processor) handleFeedingLogged(ctx context.Context, evt schemas.CloudEv
 
 	feedingID, err := p.q.InsertFeeding(ctx, &store.InsertFeedingParams{
 		Timestamp: toTimestamptz(startTime),
-		Source:    d.Source,
+		Source:    source,
 		LoggedBy:  d.LoggedBy,
 	})
 	if err != nil {
 		return fmt.Errorf("ada: insert feeding_logged: %w", err)
 	}
 
-	if isBottleSource(d.Source) {
+	if isBottleSource(source) {
 		if err := p.q.InsertFeedingBottleDetail(ctx, &store.InsertFeedingBottleDetailParams{
 			FeedingID:    feedingID,
 			AmountOz:     numericFromFloat(d.AmountOz),
@@ -250,7 +253,7 @@ func (p *Processor) handleFeedingLogged(ctx context.Context, evt schemas.CloudEv
 		}
 	}
 
-	p.pushFeedingSensors(ctx, startTime, d.Source)
+	p.pushFeedingSensors(ctx, startTime, source)
 	return nil
 }
 
@@ -722,7 +725,7 @@ func buildFeedingHistory(rows []*store.GetLast24hFeedingsRow) []FeedingHistoryEn
 		e := FeedingHistoryEntry{
 			ID:             uuid.UUID(r.ID.Bytes).String(),
 			Timestamp:      r.Timestamp.Time.UTC().Format(time.RFC3339),
-			Source:         r.Source,
+			Source:         feedingDisplaySource(r.Source, r.AmountOz != 0 || r.BreastMilkOz != 0 || r.FormulaOz != 0),
 			LeftDurationS:  int(r.LeftDurationS),
 			RightDurationS: int(r.RightDurationS),
 		}
@@ -827,10 +830,26 @@ func breastSource(segments []schemas.AdaFeedingSegment) string {
 	return "breast"
 }
 
+// normalizeSource maps dashboard-style source names to canonical DB values.
+// The dashboard sends display-style names ("formula", "breast_milk"); the DB
+// and all downstream logic expect canonical names ("bottle_formula", "bottle_breast").
+func normalizeSource(source string) string {
+	switch source {
+	case "formula":
+		return "bottle_formula"
+	case "breast_milk":
+		return "bottle_breast"
+	default:
+		return source
+	}
+}
+
 // isBottleSource reports whether a feeding source string indicates a bottle feeding.
+// Handles both canonical DB values and legacy dashboard-style values.
 func isBottleSource(source string) bool {
 	switch source {
-	case "bottle_breast", "bottle_formula", "mixed":
+	case "bottle_breast", "bottle_formula", "mixed",
+		"breast_milk", "formula": // legacy dashboard values
 		return true
 	}
 	return false
@@ -838,21 +857,21 @@ func isBottleSource(source string) bool {
 
 // feedingDisplaySource maps a raw DB feeding source to a human-readable label.
 //
-//   - breast* (no bottle detail)  → "breast"
-//   - breast* + bottle detail     → "supplemented"
-//   - bottle_breast               → "breast milk"
-//   - bottle_formula              → "formula"
-//   - anything else               → source as-is
+//   - breast, breast_left, breast_right (no bottle detail) → "breast"
+//   - breast feed + bottle detail                          → "supplemented"
+//   - bottle_breast or breast_milk                         → "breast milk"
+//   - bottle_formula or formula                            → "formula"
+//   - anything else                                        → source as-is
 func feedingDisplaySource(source string, hasBottleDetail bool) string {
-	isBreast := strings.HasPrefix(source, "breast")
+	isBreastFeed := source == "breast" || source == "breast_left" || source == "breast_right"
 	switch {
-	case isBreast && hasBottleDetail:
+	case isBreastFeed && hasBottleDetail:
 		return "supplemented"
-	case isBreast:
+	case isBreastFeed:
 		return "breast"
-	case source == "bottle_breast":
+	case source == "bottle_breast" || source == "breast_milk":
 		return "breast milk"
-	case source == "bottle_formula":
+	case source == "bottle_formula" || source == "formula":
 		return "formula"
 	default:
 		return source
