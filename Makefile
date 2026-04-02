@@ -12,7 +12,7 @@
         staging-up staging-down deploy-staging \
         docker-ps docker-images docker-volumes docker-clean \
         setup-creds setup-creds-force setup-staging-creds nats-validate \
-        bump-version
+        bump-version db-seed db-seed-clear
 
 # Default target
 .DEFAULT_GOAL := help
@@ -248,6 +248,12 @@ setup-creds-force: ## Regenerate ALL credentials (overwrites existing)
 
 bump-version: ## Bump semver (LEVEL=major|minor|patch — default: patch)
 	@scripts/bump-version.sh "$(LEVEL)"
+
+db-seed: ## Seed the Ada database with representative test data (all source/type combinations)
+	@scripts/seed-db.sh
+
+db-seed-clear: ## Remove all seeded rows (logged_by='seed') from Ada tables
+	@scripts/clear-seed-db.sh
 
 # =============================================================================
 # Validation
