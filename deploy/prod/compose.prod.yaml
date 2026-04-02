@@ -68,7 +68,7 @@ services:
   # ADR-0020: Port NOT published to host — all HTTP access goes through Traefik.
   # Traefik validates JWTs before forwarding requests to the gateway.
   gateway:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-gateway:${VERSION:-v0.5.6}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-gateway:${VERSION:-v0.5.7}
     container_name: ruby-core-prod-gateway
     restart: unless-stopped
     read_only: true
@@ -109,7 +109,7 @@ services:
   # Engine Service
   # ==========================================================================
   engine:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-engine:${VERSION:-v0.5.6}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-engine:${VERSION:-v0.5.7}
     container_name: ruby-core-prod-engine
     restart: unless-stopped
     read_only: true
@@ -143,7 +143,7 @@ services:
   # Notifier Service
   # ==========================================================================
   notifier:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-notifier:${VERSION:-v0.5.6}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-notifier:${VERSION:-v0.5.7}
     container_name: ruby-core-prod-notifier
     restart: unless-stopped
     read_only: true
@@ -174,7 +174,7 @@ services:
   # ==========================================================================
   # Multi-source presence fusion with WiFi corroboration and debounce.
   presence:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-presence:${VERSION:-v0.5.6}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-presence:${VERSION:-v0.5.7}
     container_name: ruby-core-prod-presence
     restart: unless-stopped
     read_only: true
@@ -213,7 +213,7 @@ services:
   # Runs as root in container (see Dockerfile comment) to write to the host bind mount.
   # Host path: /var/lib/ruby-core/audit — include in automated backup schedule.
   audit-sink:
-    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-audit-sink:${VERSION:-v0.5.6}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-audit-sink:${VERSION:-v0.5.7}
     container_name: ruby-core-prod-audit-sink
     restart: unless-stopped
     security_opt:

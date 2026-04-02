@@ -11,6 +11,7 @@ const (
 	AdaEventSleepLogged         = "ha.events.ada.sleep_logged"
 	AdaEventTummyEnded          = "ha.events.ada.tummy_ended"
 	AdaEventTummyLogged         = "ha.events.ada.tummy_logged"
+	AdaEventFeedingLoggedPast   = "ha.events.ada.feeding_logged_past"
 )
 
 // AdaFeedingEndedData is the CloudEvent Data payload for a breast feeding session end.
@@ -96,4 +97,17 @@ type AdaTummyLoggedData struct {
 	EndTime   string `json:"end_time"`   // RFC3339; actual event time
 	DurationS int    `json:"duration_s"`
 	LoggedBy  string `json:"logged_by,omitempty"`
+}
+
+// AdaFeedingLoggedPastData is the payload for a past feeding logged in one step
+// via the ada.feeding.log_past frontend event. It combines breast timing and/or
+// bottle amounts. Timing fields are in seconds; liquid amounts are in millilitres
+// and converted to oz at ingestion. Source is derived from which fields are non-zero.
+type AdaFeedingLoggedPastData struct {
+	StartTime    string  `json:"start_time"`
+	LeftBreastS  int     `json:"left_breast_s,omitempty"`
+	RightBreastS int     `json:"right_breast_s,omitempty"`
+	BreastMilkML float64 `json:"breast_milk_ml,omitempty"`
+	FormulaML    float64 `json:"formula_ml,omitempty"`
+	LoggedBy     string  `json:"logged_by,omitempty"`
 }
