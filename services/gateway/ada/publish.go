@@ -24,6 +24,7 @@ var eventRoutes = map[string]string{
 	"ada.sleep.log":          schemas.AdaEventSleepLogged,
 	"ada.tummy.end":          schemas.AdaEventTummyEnded,
 	"ada.tummy.log":          schemas.AdaEventTummyLogged,
+	"ada.feeding.log_past":   schemas.AdaEventFeedingLoggedPast,
 }
 
 // Publish wraps payload in a CloudEvent and publishes to the appropriate

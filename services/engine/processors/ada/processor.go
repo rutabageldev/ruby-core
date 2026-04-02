@@ -146,6 +146,8 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleTummyEnded(ctx, evt)
 	case schemas.AdaEventTummyLogged:
 		return p.handleTummyLogged(ctx, evt)
+	case schemas.AdaEventFeedingLoggedPast:
+		return p.handleFeedingLoggedPast(ctx, evt)
 	case "ha.events.input_number.ada_alert_threshold_h":
 		return p.handleThresholdChange(ctx, evt)
 	default:
@@ -214,7 +216,7 @@ func (p *Processor) handleFeedingEnded(ctx context.Context, evt schemas.CloudEve
 		segStart = segEnd
 	}
 
-	p.pushFeedingSensors(ctx, sessionStart, source)
+	p.pushFeedingSensors(ctx, sessionStart, source, false)
 	return nil
 }
 
@@ -253,7 +255,98 @@ func (p *Processor) handleFeedingLogged(ctx context.Context, evt schemas.CloudEv
 		}
 	}
 
-	p.pushFeedingSensors(ctx, startTime, source)
+	p.pushFeedingSensors(ctx, startTime, source, false)
+	return nil
+}
+
+// handleFeedingLoggedPast handles ada.feeding.log_past — a historical feeding
+// entered in one shot with breast timing (seconds per side) and/or bottle amounts
+// (millilitres). Source is derived from which fields are non-zero. Breast segments
+// are reconstructed with absolute timestamps forwarded from start_time. Bottle
+// amounts are converted from ml to oz at ingestion.
+func (p *Processor) handleFeedingLoggedPast(ctx context.Context, evt schemas.CloudEvent) error {
+	var d schemas.AdaFeedingLoggedPastData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode feeding_logged_past: %w", err)
+	}
+
+	startTime, err := parseRFC3339(d.StartTime)
+	if err != nil {
+		return fmt.Errorf("ada: parse feeding_logged_past start_time: %w", err)
+	}
+
+	hasBreast := d.LeftBreastS > 0 || d.RightBreastS > 0
+	hasBottle := d.BreastMilkML > 0 || d.FormulaML > 0
+
+	var source string
+	switch {
+	case hasBreast && d.LeftBreastS > 0 && d.RightBreastS > 0:
+		source = "breast"
+	case hasBreast && d.LeftBreastS > 0:
+		source = "breast_left"
+	case hasBreast:
+		source = "breast_right"
+	case d.BreastMilkML > 0 && d.FormulaML > 0:
+		source = "mixed"
+	case d.BreastMilkML > 0:
+		source = "bottle_breast"
+	default:
+		source = "bottle_formula"
+	}
+
+	feedingID, err := p.q.InsertFeeding(ctx, &store.InsertFeedingParams{
+		Timestamp: toTimestamptz(startTime),
+		Source:    source,
+		LoggedBy:  d.LoggedBy,
+	})
+	if err != nil {
+		return fmt.Errorf("ada: insert feeding_logged_past: %w", err)
+	}
+
+	// Insert breast segments, reconstructing absolute timestamps forward from start.
+	segCursor := startTime
+	if d.LeftBreastS > 0 {
+		segEnd := segCursor.Add(time.Duration(d.LeftBreastS) * time.Second)
+		if err := p.q.InsertFeedingSegment(ctx, &store.InsertFeedingSegmentParams{
+			FeedingID: feedingID,
+			Side:      "left",
+			StartedAt: toTimestamptz(segCursor),
+			EndedAt:   toTimestamptz(segEnd),
+			DurationS: int32(d.LeftBreastS), //nolint:gosec // G115: bounded by session duration in seconds
+		}); err != nil {
+			return fmt.Errorf("ada: insert left segment for log_past: %w", err)
+		}
+		segCursor = segEnd
+	}
+	if d.RightBreastS > 0 {
+		segEnd := segCursor.Add(time.Duration(d.RightBreastS) * time.Second)
+		if err := p.q.InsertFeedingSegment(ctx, &store.InsertFeedingSegmentParams{
+			FeedingID: feedingID,
+			Side:      "right",
+			StartedAt: toTimestamptz(segCursor),
+			EndedAt:   toTimestamptz(segEnd),
+			DurationS: int32(d.RightBreastS), //nolint:gosec // G115: bounded by session duration in seconds
+		}); err != nil {
+			return fmt.Errorf("ada: insert right segment for log_past: %w", err)
+		}
+	}
+
+	// Insert bottle detail with ml→oz conversion if any liquid amounts are present.
+	if hasBottle {
+		const mlPerOz = 29.5735
+		breastMilkOz := d.BreastMilkML / mlPerOz
+		formulaOz := d.FormulaML / mlPerOz
+		if err := p.q.InsertFeedingBottleDetail(ctx, &store.InsertFeedingBottleDetailParams{
+			FeedingID:    feedingID,
+			AmountOz:     numericFromFloat(breastMilkOz + formulaOz),
+			BreastMilkOz: numericFromFloat(breastMilkOz),
+			FormulaOz:    numericFromFloat(formulaOz),
+		}); err != nil {
+			return fmt.Errorf("ada: insert bottle detail for log_past: %w", err)
+		}
+	}
+
+	p.pushFeedingSensors(ctx, startTime, source, hasBottle)
 	return nil
 }
 
@@ -475,8 +568,9 @@ func (p *Processor) handleThresholdChange(ctx context.Context, evt schemas.Cloud
 // pushFeedingSensors pushes all feeding-related sensors after a feeding event.
 // lastFeedingTime is the actual event time (never time.Now()).
 // source is the raw DB source value; it is mapped to a display label before pushing.
-// No supplement has occurred yet at this point, so hasBottleDetail is false.
-func (p *Processor) pushFeedingSensors(ctx context.Context, lastFeedingTime time.Time, source string) {
+// hasBottleDetail is true when a feeding_bottle_detail row was written for this event
+// (affects the display label for breast feedings that also have a supplement).
+func (p *Processor) pushFeedingSensors(ctx context.Context, lastFeedingTime time.Time, source string, hasBottleDetail bool) {
 	lastTimeStr := lastFeedingTime.UTC().Format(time.RFC3339)
 
 	// Compute next feeding target using stored interval (or default).
@@ -499,7 +593,7 @@ func (p *Processor) pushFeedingSensors(ctx context.Context, lastFeedingTime time
 
 	pushes := []struct{ id, state string }{
 		{sensorLastFeedingTime, lastTimeStr},
-		{sensorLastFeedingSource, feedingDisplaySource(source, false)},
+		{sensorLastFeedingSource, feedingDisplaySource(source, hasBottleDetail)},
 		{sensorNextFeedingTarget, nextTargetStr},
 	}
 	if agg != nil {
