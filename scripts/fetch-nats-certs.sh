@@ -276,7 +276,7 @@ authorization {
       nkey: "${PUBKEY_NAVI_DEV}"
       permissions: {
         publish: {
-          allow: ["navi.dev.>", "\$JS.API.>", "\$JS.ACK.>"]
+          allow: ["navi.dev.>", "audit.navi.>", "\$JS.API.>", "\$JS.ACK.>"]
         }
         subscribe: {
           allow: ["navi.dev.>", "_INBOX.>"]
@@ -289,7 +289,7 @@ authorization {
       nkey: "${PUBKEY_NAVI_STAGING}"
       permissions: {
         publish: {
-          allow: ["navi.staging.>", "\$JS.API.>", "\$JS.ACK.>"]
+          allow: ["navi.staging.>", "audit.navi.>", "\$JS.API.>", "\$JS.ACK.>"]
         }
         subscribe: {
           allow: ["navi.staging.>", "_INBOX.>"]
@@ -302,7 +302,7 @@ authorization {
       nkey: "${PUBKEY_NAVI_PROD}"
       permissions: {
         publish: {
-          allow: ["navi.prod.>", "\$JS.API.>", "\$JS.ACK.>"]
+          allow: ["navi.prod.>", "audit.navi.>", "\$JS.API.>", "\$JS.ACK.>"]
         }
         subscribe: {
           allow: ["navi.prod.>", "_INBOX.>"]
