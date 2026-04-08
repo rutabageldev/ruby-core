@@ -100,6 +100,9 @@ PUBKEY_NOTIFIER=$(fetch_pubkey notifier)
 PUBKEY_PRESENCE=$(fetch_pubkey presence)
 PUBKEY_ADMIN=$(fetch_pubkey admin)
 PUBKEY_AUDIT_SINK=$(fetch_pubkey audit-sink)
+PUBKEY_NAVI_DEV=$(fetch_pubkey navi-dev)
+PUBKEY_NAVI_STAGING=$(fetch_pubkey navi-staging)
+PUBKEY_NAVI_PROD=$(fetch_pubkey navi-prod)
 
 echo "[nats-init] Generating auth.conf..."
 
@@ -264,6 +267,45 @@ authorization {
           allow: [
             "_INBOX.>"
           ]
+        }
+      }
+    },
+
+    # Navi digest service (dev)
+    {
+      nkey: "${PUBKEY_NAVI_DEV}"
+      permissions: {
+        publish: {
+          allow: ["navi.dev.>", "audit.navi.>", "\$JS.API.>", "\$JS.ACK.>"]
+        }
+        subscribe: {
+          allow: ["navi.dev.>", "_INBOX.>"]
+        }
+      }
+    },
+
+    # Navi digest service (staging)
+    {
+      nkey: "${PUBKEY_NAVI_STAGING}"
+      permissions: {
+        publish: {
+          allow: ["navi.staging.>", "audit.navi.>", "\$JS.API.>", "\$JS.ACK.>"]
+        }
+        subscribe: {
+          allow: ["navi.staging.>", "_INBOX.>"]
+        }
+      }
+    },
+
+    # Navi digest service (prod)
+    {
+      nkey: "${PUBKEY_NAVI_PROD}"
+      permissions: {
+        publish: {
+          allow: ["navi.prod.>", "audit.navi.>", "\$JS.API.>", "\$JS.ACK.>"]
+        }
+        subscribe: {
+          allow: ["navi.prod.>", "_INBOX.>"]
         }
       }
     },
