@@ -51,6 +51,9 @@ services:
       # TLS certificates and auth.conf (fetched/generated from Vault by nats-init)
       - nats-certs:/etc/nats/certs:ro
     command: ["-c", "/etc/nats/nats.conf"]
+    networks:
+      - default
+      - event-bus-prod
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
       interval: 30s
@@ -251,6 +254,12 @@ networks:
   vault-ruby-core-prod:
     external: true
     name: vault-ruby-core-prod
+  # Shared event-bus network — external services (e.g. Navi) join this to reach NATS
+  # without coupling to ruby-core's internal compose network.
+  # Create with: docker network create event-bus-prod
+  event-bus-prod:
+    external: true
+    name: event-bus-prod
   # Traefik proxy network (ADR-0020). Create with: docker network create traefik_proxy
   traefik_proxy:
     external: true
