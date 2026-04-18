@@ -230,7 +230,7 @@ func (p *Processor) handleFeedingEnded(ctx context.Context, evt schemas.CloudEve
 		segStart = segEnd
 	}
 
-	p.pushFeedingSensors(ctx, sessionStart, source, false)
+	p.pushFeedingSensors(ctx)
 	return nil
 }
 
@@ -269,7 +269,7 @@ func (p *Processor) handleFeedingLogged(ctx context.Context, evt schemas.CloudEv
 		}
 	}
 
-	p.pushFeedingSensors(ctx, startTime, source, false)
+	p.pushFeedingSensors(ctx)
 	return nil
 }
 
@@ -360,7 +360,7 @@ func (p *Processor) handleFeedingLoggedPast(ctx context.Context, evt schemas.Clo
 		}
 	}
 
-	p.pushFeedingSensors(ctx, startTime, source, hasBottle)
+	p.pushFeedingSensors(ctx)
 	return nil
 }
 
@@ -580,11 +580,18 @@ func (p *Processor) handleThresholdChange(ctx context.Context, evt schemas.Cloud
 // ── Sensor push helpers ───────────────────────────────────────────────────────
 
 // pushFeedingSensors pushes all feeding-related sensors after a feeding event.
-// lastFeedingTime is the actual event time (never time.Now()).
-// source is the raw DB source value; it is mapped to a display label before pushing.
-// hasBottleDetail is true when a feeding_bottle_detail row was written for this event
-// (affects the display label for breast feedings that also have a supplement).
-func (p *Processor) pushFeedingSensors(ctx context.Context, lastFeedingTime time.Time, source string, hasBottleDetail bool) {
+// It queries GetLastFeeding to determine the actual most-recent feeding by timestamp,
+// so backdated entries never displace a later feeding from the last-fed display.
+func (p *Processor) pushFeedingSensors(ctx context.Context) {
+	last, err := p.q.GetLastFeeding(ctx)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			p.log.Warn("ada: get last feeding for sensor push", slog.String("error", err.Error()))
+		}
+		return
+	}
+
+	lastFeedingTime := last.Timestamp.Time
 	lastTimeStr := lastFeedingTime.UTC().Format(time.RFC3339)
 
 	// Compute next feeding target using stored interval (or default).
@@ -607,7 +614,7 @@ func (p *Processor) pushFeedingSensors(ctx context.Context, lastFeedingTime time
 
 	pushes := []struct{ id, state string }{
 		{sensorLastFeedingTime, lastTimeStr},
-		{sensorLastFeedingSource, feedingDisplaySource(source, hasBottleDetail)},
+		{sensorLastFeedingSource, feedingDisplaySource(last.Source, last.HasBottleDetail)},
 		{sensorNextFeedingTarget, nextTargetStr},
 	}
 	if agg != nil {
