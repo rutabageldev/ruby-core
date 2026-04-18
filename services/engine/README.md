@@ -18,6 +18,8 @@ On startup the engine:
 
 The `ada` processor persists feeding, diaper, sleep, and tummy time events to PostgreSQL and pushes derived sensor state to Home Assistant after each event. It also subscribes to the bare `gateway.health` subject to restore HA sensor state after a gateway reconnect. A background ticker runs every 60 seconds to push `sensor.ada_sleep_session_min` while a session is active, refresh daily aggregates at midnight rollover, and perform a full sensor restore every 4 hours as a safety net against HA state loss.
 
+Three sensors carry a 24-hour rolling history array as their `entries[]` attribute: `sensor.ada_feeding_history`, `sensor.ada_diaper_history`, and `sensor.ada_sleep_history`. Each is pushed after the relevant event and on every daily restore. Sensor state is the entry count; active sleep sessions appear in `sensor.ada_sleep_history` with `end_time` and `duration_s` omitted.
+
 ## Configuration
 
 | Variable | Default | Notes |
