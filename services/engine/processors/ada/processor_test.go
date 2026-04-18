@@ -267,3 +267,40 @@ func TestBuildFeedingHistory_MixedBottle(t *testing.T) {
 		t.Errorf("FormulaOz = %v, want 1.0", e.FormulaOz)
 	}
 }
+
+// ── sleepElapsedMin ───────────────────────────────────────────────────────────
+
+func TestSleepElapsedMin_Now(t *testing.T) {
+	// A start time of right now should yield 0 elapsed minutes.
+	got := sleepElapsedMin(time.Now())
+	if got != 0 {
+		t.Errorf("sleepElapsedMin(now) = %d, want 0", got)
+	}
+}
+
+func TestSleepElapsedMin_FifteenMinutesAgo(t *testing.T) {
+	// A start time 15 minutes ago should yield exactly 15.
+	start := time.Now().Add(-15 * time.Minute)
+	got := sleepElapsedMin(start)
+	if got != 15 {
+		t.Errorf("sleepElapsedMin(15m ago) = %d, want 15", got)
+	}
+}
+
+func TestSleepElapsedMin_OneHourAgo(t *testing.T) {
+	// A start time 60 minutes ago should yield 60, not 1 (not hours).
+	start := time.Now().Add(-60 * time.Minute)
+	got := sleepElapsedMin(start)
+	if got != 60 {
+		t.Errorf("sleepElapsedMin(60m ago) = %d, want 60", got)
+	}
+}
+
+func TestSleepElapsedMin_FractionalMinutes(t *testing.T) {
+	// 90.5 minutes ago should truncate to 90, not round to 91.
+	start := time.Now().Add(-(90*time.Minute + 30*time.Second))
+	got := sleepElapsedMin(start)
+	if got != 90 {
+		t.Errorf("sleepElapsedMin(90m30s ago) = %d, want 90 (truncate, not round)", got)
+	}
+}

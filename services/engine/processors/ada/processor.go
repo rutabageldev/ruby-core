@@ -48,6 +48,7 @@ const (
 	sensorTodaySleepNapCount = "sensor.ada_today_sleep_nap_count"
 	sensorTodayTummyMin      = "sensor.ada_today_tummy_time_min"
 	sensorTodayTummySessions = "sensor.ada_today_tummy_time_sessions"
+	sensorSleepSessionMin    = "sensor.ada_sleep_session_min"
 )
 
 // Processor implements processor.StatefulProcessor for Ada baby tracking.
@@ -61,6 +62,9 @@ type Processor struct {
 	lastHAConnected bool
 	healthSub       *nats.Subscription
 	log             *slog.Logger
+	stopCh          chan struct{}
+	lastRefreshDate time.Time // date of last daily-aggregate push (for midnight rollover)
+	lastFullRefresh time.Time // time of last full sensor restore (for 4h safety net)
 }
 
 // compile-time interface check
@@ -103,17 +107,27 @@ func (p *Processor) Initialize(cfg processor.Config) error {
 
 	// Restore sensor state from Postgres so HA sensors are current immediately
 	// after an engine restart. Errors are non-fatal.
-	p.restoreSensors(context.Background())
+	p.refreshAllSensors(context.Background())
+
+	// Seed ticker state so the first tick doesn't trigger immediate rollover/restore.
+	p.lastRefreshDate = startOfDay(time.Now().Local())
+	p.lastFullRefresh = time.Now()
+	p.stopCh = make(chan struct{})
+	go p.runTicker()
 
 	p.log.Info("ada: processor initialized")
 	return nil
 }
 
-// Shutdown unsubscribes the bare gateway.health subscription.
-// The pool and HA client are owned by the engine and must not be closed here.
+// Shutdown unsubscribes the bare gateway.health subscription and stops the
+// background ticker goroutine. The pool and HA client are owned by the engine
+// and must not be closed here.
 func (p *Processor) Shutdown() {
 	if p.healthSub != nil {
 		_ = p.healthSub.Unsubscribe()
+	}
+	if p.stopCh != nil {
+		close(p.stopCh)
 	}
 	p.log.Info("ada: processor shut down")
 }
@@ -168,7 +182,7 @@ func (p *Processor) handleHealthEvent(data []byte) {
 	connected, _ := evt.Data["ha_connected"].(bool)
 	if connected && !p.lastHAConnected {
 		p.log.Info("ada: HA reconnected — restoring sensors")
-		go p.restoreSensors(context.Background())
+		go p.refreshAllSensors(context.Background())
 	}
 	p.lastHAConnected = connected
 }
@@ -649,14 +663,18 @@ func (p *Processor) pushSupplementOzSensor(ctx context.Context) {
 }
 
 // pushSleepStartedSensors pushes sensors after a sleep session starts.
+// sensorSleepSessionMin is set to the elapsed minutes from startTime, which
+// correctly reflects a backdated start (e.g. "started 15 min ago" → pushes 15).
 func (p *Processor) pushSleepStartedSensors(ctx context.Context, startTime time.Time) {
 	p.pushAll(ctx, []struct{ id, state string }{
 		{sensorSleepState, "sleeping"},
 		{sensorLastSleepChange, startTime.UTC().Format(time.RFC3339)},
+		{sensorSleepSessionMin, strconv.Itoa(sleepElapsedMin(startTime))},
 	})
 }
 
 // pushSleepEndedSensors pushes sensors after a sleep session ends.
+// sensorSleepSessionMin is reset to "0" — the session is over.
 func (p *Processor) pushSleepEndedSensors(ctx context.Context, endTime time.Time) {
 	agg, err := p.q.GetTodaySleepAggregates(ctx)
 	if err != nil {
@@ -666,6 +684,7 @@ func (p *Processor) pushSleepEndedSensors(ctx context.Context, endTime time.Time
 	pushes := []struct{ id, state string }{
 		{sensorSleepState, "awake"},
 		{sensorLastSleepChange, endTime.UTC().Format(time.RFC3339)},
+		{sensorSleepSessionMin, "0"},
 	}
 	if agg != nil {
 		pushes = append(pushes,
@@ -698,25 +717,35 @@ func (p *Processor) pushAll(ctx context.Context, pushes []struct{ id, state stri
 	}
 }
 
-// ── restoreSensors ────────────────────────────────────────────────────────────
+// ── Sensor restore / periodic refresh ────────────────────────────────────────
 
-// restoreSensors reads last-known state from Postgres and pushes to HA.
-// Called once in Initialize and from handleHealthEvent on HA reconnect.
-// pgx.ErrNoRows is normal — log at Debug, not Warn.
-// All other errors are logged at Warn; sensor pushes are best-effort.
-func (p *Processor) restoreSensors(ctx context.Context) {
-	// 1. Last feeding
+// refreshAllSensors re-pushes the complete Ada sensor set from Postgres.
+// Called on engine startup, HA reconnect, and the 4-hour safety-net ticker tick.
+func (p *Processor) refreshAllSensors(ctx context.Context) {
+	p.pushLastEventSensors(ctx)
+	p.pushDailyAggregates(ctx)
+	p.pushActiveSleepState(ctx)
+}
+
+// pushLastEventSensors pushes sensors derived from the most recent event of each
+// type: last feeding time/source/next-target and last diaper time/type.
+// These change only when a new event is logged, not on daily rollover.
+func (p *Processor) pushLastEventSensors(ctx context.Context) {
 	if f, err := p.q.GetLastFeeding(ctx); err == nil {
-		lastTime := f.Timestamp.Time.UTC().Format(time.RFC3339)
 		p.pushAll(ctx, []struct{ id, state string }{
-			{sensorLastFeedingTime, lastTime},
+			{sensorLastFeedingTime, f.Timestamp.Time.UTC().Format(time.RFC3339)},
 			{sensorLastFeedingSource, feedingDisplaySource(f.Source, f.HasBottleDetail)},
 		})
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		p.log.Warn("ada: restore last feeding", slog.String("error", err.Error()))
 	}
 
-	// 2. Last diaper
+	if cfg, err := p.q.GetConfig(ctx, cfgKeyNextFeedingTarget); err == nil {
+		p.pushAll(ctx, []struct{ id, state string }{{sensorNextFeedingTarget, cfg.Value}})
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		p.log.Warn("ada: restore next_feeding_target", slog.String("error", err.Error()))
+	}
+
 	if d, err := p.q.GetLastDiaper(ctx); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
 			{sensorLastDiaperTime, d.Timestamp.Time.UTC().Format(time.RFC3339)},
@@ -725,35 +754,11 @@ func (p *Processor) restoreSensors(ctx context.Context) {
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		p.log.Warn("ada: restore last diaper", slog.String("error", err.Error()))
 	}
+}
 
-	// 3. Sleep state
-	if active, err := p.q.GetActiveSleepSession(ctx); err == nil {
-		p.pushAll(ctx, []struct{ id, state string }{
-			{sensorSleepState, "sleeping"},
-			{sensorLastSleepChange, active.Time.UTC().Format(time.RFC3339)},
-		})
-	} else if errors.Is(err, pgx.ErrNoRows) {
-		// No active session — push awake + last sleep end if available
-		p.pushAll(ctx, []struct{ id, state string }{{sensorSleepState, "awake"}})
-		if lastEnd, err := p.q.GetLastSleepEnd(ctx); err == nil {
-			p.pushAll(ctx, []struct{ id, state string }{
-				{sensorLastSleepChange, lastEnd.Time.UTC().Format(time.RFC3339)},
-			})
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			p.log.Warn("ada: restore last sleep end", slog.String("error", err.Error()))
-		}
-	} else {
-		p.log.Warn("ada: restore active sleep session", slog.String("error", err.Error()))
-	}
-
-	// 4. Next feeding target
-	if cfg, err := p.q.GetConfig(ctx, cfgKeyNextFeedingTarget); err == nil {
-		p.pushAll(ctx, []struct{ id, state string }{{sensorNextFeedingTarget, cfg.Value}})
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		p.log.Warn("ada: restore next_feeding_target", slog.String("error", err.Error()))
-	}
-
-	// 5–8. Today aggregates
+// pushDailyAggregates pushes all today_* aggregate sensors from Postgres.
+// Called on startup, HA reconnect, midnight rollover, and the 4-hour safety net.
+func (p *Processor) pushDailyAggregates(ctx context.Context) {
 	if agg, err := p.q.GetTodayFeedingAggregates(ctx); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
 			{sensorTodayFeedingCount, strconv.Itoa(int(agg.Count))},
@@ -792,6 +797,106 @@ func (p *Processor) restoreSensors(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today tummy aggregates", slog.String("error", err.Error()))
 	}
+}
+
+// pushActiveSleepState pushes the current sleep state and session elapsed time.
+// If a session is active: state="sleeping", session_min=elapsed minutes from start.
+// If no active session: state="awake", session_min="0", last_sleep_change=last end time.
+func (p *Processor) pushActiveSleepState(ctx context.Context) {
+	active, err := p.q.GetActiveSleepSession(ctx)
+	if err == nil {
+		p.pushAll(ctx, []struct{ id, state string }{
+			{sensorSleepState, "sleeping"},
+			{sensorLastSleepChange, active.Time.UTC().Format(time.RFC3339)},
+			{sensorSleepSessionMin, strconv.Itoa(sleepElapsedMin(active.Time))},
+		})
+		return
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		p.log.Warn("ada: restore active sleep session", slog.String("error", err.Error()))
+		return
+	}
+	// No active session — push awake state and last sleep end if available.
+	p.pushAll(ctx, []struct{ id, state string }{
+		{sensorSleepState, "awake"},
+		{sensorSleepSessionMin, "0"},
+	})
+	if lastEnd, err := p.q.GetLastSleepEnd(ctx); err == nil {
+		p.pushAll(ctx, []struct{ id, state string }{
+			{sensorLastSleepChange, lastEnd.Time.UTC().Format(time.RFC3339)},
+		})
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		p.log.Warn("ada: restore last sleep end", slog.String("error", err.Error()))
+	}
+}
+
+// ── Background ticker ─────────────────────────────────────────────────────────
+
+// runTicker runs the background ticker goroutine. Started in Initialize,
+// stopped via stopCh in Shutdown.
+func (p *Processor) runTicker() {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			p.onTick(context.Background())
+		case <-p.stopCh:
+			return
+		}
+	}
+}
+
+// onTick runs on each 60-second ticker tick. It handles three concerns:
+//
+//  1. 4-hour safety net: full sensor re-push to recover from any HA state loss.
+//  2. Midnight rollover: re-push daily aggregate sensors when the calendar date changes.
+//  3. Sleep session timer: push sensorSleepSessionMin with current elapsed minutes
+//     (only when a session is active; no-op when awake to avoid redundant pushes).
+func (p *Processor) onTick(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	today := startOfDay(time.Now().Local())
+
+	// 4-hour safety net: full refresh covers all three sub-pushes.
+	if time.Since(p.lastFullRefresh) >= 4*time.Hour {
+		p.log.Info("ada: 4-hour safety net — full sensor refresh")
+		p.refreshAllSensors(ctx)
+		p.lastFullRefresh = time.Now()
+		p.lastRefreshDate = today
+		return
+	}
+
+	// Midnight rollover: reset today_* aggregates when the date changes.
+	if today.After(p.lastRefreshDate) {
+		p.log.Info("ada: midnight rollover — refreshing daily aggregates")
+		p.pushDailyAggregates(ctx)
+		p.lastRefreshDate = today
+	}
+
+	// Sleep session timer: push elapsed minutes if a session is active.
+	active, err := p.q.GetActiveSleepSession(ctx)
+	if err == nil {
+		if haErr := p.ha.PushState(ctx, sensorSleepSessionMin, strconv.Itoa(sleepElapsedMin(active.Time)), nil); haErr != nil {
+			p.log.Warn("ada: ticker push sleep_session_min", slog.String("error", haErr.Error()))
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		p.log.Warn("ada: ticker query active sleep session", slog.String("error", err.Error()))
+	}
+}
+
+// ── Helpers ── (sleep elapsed time) ──────────────────────────────────────────
+
+// sleepElapsedMin returns the number of whole minutes elapsed since startTime.
+// Used when pushing sensorSleepSessionMin so the computation is testable in isolation.
+func sleepElapsedMin(startTime time.Time) int {
+	return int(time.Since(startTime).Minutes())
+}
+
+// startOfDay returns midnight of t's date in t's local timezone.
+func startOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 // ── Feeding history cache ─────────────────────────────────────────────────────
