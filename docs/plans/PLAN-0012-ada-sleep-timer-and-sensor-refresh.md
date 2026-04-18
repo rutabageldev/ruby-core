@@ -1,6 +1,6 @@
 # PLAN-0012 - Ada: Live Sleep Timer and Periodic Sensor Refresh
 
-* **Status:** Complete
+* **Status:** In Progress
 * **Date:** 2026-04-18
 * **Project:** ruby-core (+ homeassistant frontend, tracked separately)
 * **Roadmap Item:** none (standalone improvement)
@@ -38,9 +38,9 @@ New NATS subjects. The homeassistant frontend change is tracked as a separate Gi
 ## Pre-conditions
 
 * [x] Branch `feat/ada-sleep-timer-sensor-refresh` created from `main`
-* [ ] Engine is running and healthy in dev (`make dev-up`)
+* [ ] Engine is running and healthy in dev (`make dev-up`) — pending push
 * [ ] `sensor.ada_sleep_state` and `sensor.ada_last_sleep_change` are visible and updating in HA
-      developer tools after a manual sleep-start event (confirm current baseline works)
+      developer tools after a manual sleep-start event (confirm current baseline works) — pending push
 
 ---
 
@@ -69,8 +69,9 @@ in `services/engine/processors/ada/processor.go` alongside the existing sleep se
 Replace the body of `restoreSensors()` with sequential calls to all three. Behaviour is
 identical to today — this is pure refactor, no logic changes.
 
-**Verification:** `go test ./services/engine/processors/ada/...` passes. ✓ (deploy-to-dev
-verification deferred to integration — pending push)
+**Verification:** `go test ./services/engine/processors/ada/...` passes. ✓
+Remaining: deploy to dev, restart engine, confirm HA developer tools shows all sensors
+restored correctly within a few seconds of engine startup. — pending push
 
 ---
 
@@ -86,8 +87,10 @@ verification deferred to integration — pending push)
   when a session ends. This covers both explicit end events and logged-past sessions
   (`handleSleepLogged` calls `pushSleepEndedSensors`).
 
-**Verification:** End-to-end frontend verification deferred pending push and dev deploy. Unit
-test coverage for `sleepElapsedMin` confirms correct elapsed-time computation. ✓ (partial)
+**Verification:** `sleepElapsedMin` unit tests confirm correct elapsed-time computation. ✓
+Remaining: start sleep with "started 15 min ago" in dev → confirm HA developer tools shows
+`sensor.ada_sleep_session_min = 15`; confirm quick-actions button shows "Sleeping · 15m";
+end session and confirm sensor resets to `0`. — pending push
 
 ---
 
@@ -130,7 +133,9 @@ Implement `onTick(ctx)`:
    from any HA state loss (e.g. HA restart between events) without waiting for the next event.
 
 **Verification:** `go build ./...` and `go test -tags=fast -race ./...` pass cleanly. ✓
-Live ticker and midnight rollover verification deferred to dev integration post-push.
+Remaining: with an active sleep session confirm `sensor.ada_sleep_session_min` increments
+in HA developer tools every ~60 seconds; confirm engine shuts down cleanly with no goroutine
+leak in logs. — pending push
 
 ---
 
