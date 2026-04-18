@@ -304,3 +304,96 @@ func TestSleepElapsedMin_FractionalMinutes(t *testing.T) {
 		t.Errorf("sleepElapsedMin(90m30s ago) = %d, want 90 (truncate, not round)", got)
 	}
 }
+
+// ── buildDiaperHistory ────────────────────────────────────────────────────────
+
+func TestBuildDiaperHistory_Empty(t *testing.T) {
+	entries := buildDiaperHistory(nil)
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries for nil input, got %d", len(entries))
+	}
+}
+
+func TestBuildDiaperHistory_Single(t *testing.T) {
+	rows := []*store.GetLast24hDiapersRow{
+		{
+			ID:        mustUUID("bbbbbbbb-0000-0000-0000-000000000001"),
+			Timestamp: mustTimestamptz("2026-04-01T10:00:00Z"),
+			Type:      "wet",
+		},
+	}
+	entries := buildDiaperHistory(rows)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	e := entries[0]
+	if e.Type != "wet" {
+		t.Errorf("Type = %q, want %q", e.Type, "wet")
+	}
+	if e.Timestamp != "2026-04-01T10:00:00Z" {
+		t.Errorf("Timestamp = %q, want %q", e.Timestamp, "2026-04-01T10:00:00Z")
+	}
+}
+
+// ── buildSleepHistory ─────────────────────────────────────────────────────────
+
+func TestBuildSleepHistory_Empty(t *testing.T) {
+	entries := buildSleepHistory(nil)
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries for nil input, got %d", len(entries))
+	}
+}
+
+func TestBuildSleepHistory_CompletedSession(t *testing.T) {
+	rows := []*store.GetLast24hSleepSessionsRow{
+		{
+			ID:        mustUUID("cccccccc-0000-0000-0000-000000000001"),
+			StartTime: mustTimestamptz("2026-04-01T08:00:00Z"),
+			EndTime:   mustTimestamptz("2026-04-01T09:30:00Z"),
+			SleepType: "nap",
+		},
+	}
+	entries := buildSleepHistory(rows)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	e := entries[0]
+	if e.SleepType != "nap" {
+		t.Errorf("SleepType = %q, want %q", e.SleepType, "nap")
+	}
+	if e.EndTime == nil {
+		t.Fatal("EndTime should be set for a completed session")
+	}
+	if *e.EndTime != "2026-04-01T09:30:00Z" {
+		t.Errorf("EndTime = %q, want %q", *e.EndTime, "2026-04-01T09:30:00Z")
+	}
+	if e.DurationS == nil {
+		t.Fatal("DurationS should be set for a completed session")
+	}
+	if *e.DurationS != 5400 {
+		t.Errorf("DurationS = %d, want 5400 (90 min)", *e.DurationS)
+	}
+}
+
+func TestBuildSleepHistory_ActiveSession(t *testing.T) {
+	// Active sessions have EndTime.Valid=false; EndTime and DurationS must be omitted.
+	rows := []*store.GetLast24hSleepSessionsRow{
+		{
+			ID:        mustUUID("dddddddd-0000-0000-0000-000000000001"),
+			StartTime: mustTimestamptz("2026-04-01T22:00:00Z"),
+			EndTime:   pgtype.Timestamptz{Valid: false},
+			SleepType: "night",
+		},
+	}
+	entries := buildSleepHistory(rows)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	e := entries[0]
+	if e.EndTime != nil {
+		t.Errorf("EndTime should be nil for active session, got %v", e.EndTime)
+	}
+	if e.DurationS != nil {
+		t.Errorf("DurationS should be nil for active session, got %v", e.DurationS)
+	}
+}

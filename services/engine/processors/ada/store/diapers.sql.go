@@ -11,6 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getLast24hDiapers = `-- name: GetLast24hDiapers :many
+SELECT id, timestamp, type
+FROM diapers
+WHERE deleted_at IS NULL
+  AND timestamp >= NOW() - INTERVAL '24 hours'
+ORDER BY timestamp DESC
+`
+
+type GetLast24hDiapersRow struct {
+	ID        pgtype.UUID
+	Timestamp pgtype.Timestamptz
+	Type      string
+}
+
+// Returns all diaper events in the last 24 hours ordered newest-first.
+func (q *Queries) GetLast24hDiapers(ctx context.Context) ([]*GetLast24hDiapersRow, error) {
+	rows, err := q.db.Query(ctx, getLast24hDiapers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*GetLast24hDiapersRow
+	for rows.Next() {
+		var i GetLast24hDiapersRow
+		if err := rows.Scan(&i.ID, &i.Timestamp, &i.Type); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLastDiaper = `-- name: GetLastDiaper :one
 SELECT timestamp, type FROM diapers
 WHERE deleted_at IS NULL

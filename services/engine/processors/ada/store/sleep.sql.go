@@ -24,6 +24,50 @@ func (q *Queries) GetActiveSleepSession(ctx context.Context) (pgtype.Timestamptz
 	return start_time, err
 }
 
+const getLast24hSleepSessions = `-- name: GetLast24hSleepSessions :many
+SELECT id, start_time, end_time, sleep_type
+FROM sleep_sessions
+WHERE deleted_at IS NULL
+  AND start_time >= NOW() - INTERVAL '24 hours'
+ORDER BY start_time DESC
+`
+
+type GetLast24hSleepSessionsRow struct {
+	ID        pgtype.UUID
+	StartTime pgtype.Timestamptz
+	EndTime   pgtype.Timestamptz
+	SleepType string
+}
+
+// Returns sleep sessions that started in the last 24 hours, newest-first.
+// end_time is zero-value (Valid=false) for active sessions. duration_s is
+// computed in Go from start_time and end_time to avoid a CASE expression
+// that sqlc cannot type statically.
+func (q *Queries) GetLast24hSleepSessions(ctx context.Context) ([]*GetLast24hSleepSessionsRow, error) {
+	rows, err := q.db.Query(ctx, getLast24hSleepSessions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*GetLast24hSleepSessionsRow
+	for rows.Next() {
+		var i GetLast24hSleepSessionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StartTime,
+			&i.EndTime,
+			&i.SleepType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLastSleepEnd = `-- name: GetLastSleepEnd :one
 SELECT end_time FROM sleep_sessions
 WHERE end_time IS NOT NULL AND deleted_at IS NULL
