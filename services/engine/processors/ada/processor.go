@@ -49,6 +49,8 @@ const (
 	sensorTodayTummyMin      = "sensor.ada_today_tummy_time_min"
 	sensorTodayTummySessions = "sensor.ada_today_tummy_time_sessions"
 	sensorSleepSessionMin    = "sensor.ada_sleep_session_min"
+	sensorDiaperHistory      = "sensor.ada_diaper_history"
+	sensorSleepHistory       = "sensor.ada_sleep_history"
 )
 
 // Processor implements processor.StatefulProcessor for Ada baby tracking.
@@ -650,6 +652,7 @@ func (p *Processor) pushDiaperSensors(ctx context.Context, lastDiaperTime time.T
 		)
 	}
 	p.pushAll(ctx, pushes)
+	p.pushDiaperHistory(ctx)
 }
 
 // pushSupplementOzSensor pushes today_feeding_oz and last_feeding_source after
@@ -678,6 +681,7 @@ func (p *Processor) pushSleepStartedSensors(ctx context.Context, startTime time.
 		{sensorLastSleepChange, startTime.UTC().Format(time.RFC3339)},
 		{sensorSleepSessionMin, strconv.Itoa(sleepElapsedMin(startTime))},
 	})
+	p.pushSleepHistory(ctx)
 }
 
 // pushSleepEndedSensors pushes sensors after a sleep session ends.
@@ -700,6 +704,7 @@ func (p *Processor) pushSleepEndedSensors(ctx context.Context, endTime time.Time
 		)
 	}
 	p.pushAll(ctx, pushes)
+	p.pushSleepHistory(ctx)
 }
 
 // pushTummySensors pushes tummy time aggregate sensors.
@@ -786,6 +791,7 @@ func (p *Processor) pushDailyAggregates(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today diaper aggregates", slog.String("error", err.Error()))
 	}
+	p.pushDiaperHistory(ctx)
 
 	if agg, err := p.q.GetTodaySleepAggregates(ctx); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
@@ -795,6 +801,7 @@ func (p *Processor) pushDailyAggregates(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today sleep aggregates", slog.String("error", err.Error()))
 	}
+	p.pushSleepHistory(ctx)
 
 	if agg, err := p.q.GetTodayTummyAggregates(ctx); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
@@ -972,6 +979,99 @@ func (p *Processor) pushFeedingHistory(ctx context.Context) {
 
 	if err := p.ha.PushState(ctx, "sensor.ada_feeding_history", strconv.Itoa(len(entries)), attributes); err != nil {
 		p.log.Warn("ada: push feeding history failed", slog.String("error", err.Error()))
+	}
+}
+
+// ── Diaper history ────────────────────────────────────────────────────────────
+
+// DiaperHistoryEntry is one element of the JSON array pushed as attributes on
+// sensor.ada_diaper_history. Sensor state is the entry count.
+type DiaperHistoryEntry struct {
+	ID        string `json:"id"`
+	Timestamp string `json:"timestamp"`
+	Type      string `json:"type"`
+}
+
+// buildDiaperHistory converts sqlc rows to JSON-serializable history entries.
+func buildDiaperHistory(rows []*store.GetLast24hDiapersRow) []DiaperHistoryEntry {
+	entries := make([]DiaperHistoryEntry, 0, len(rows))
+	for _, r := range rows {
+		entries = append(entries, DiaperHistoryEntry{
+			ID:        uuid.UUID(r.ID.Bytes).String(),
+			Timestamp: r.Timestamp.Time.UTC().Format(time.RFC3339),
+			Type:      r.Type,
+		})
+	}
+	return entries
+}
+
+// pushDiaperHistory queries the last 24h of diaper events and pushes them as
+// attributes on sensor.ada_diaper_history. Sensor state is the entry count.
+func (p *Processor) pushDiaperHistory(ctx context.Context) {
+	rows, err := p.q.GetLast24hDiapers(ctx)
+	if err != nil {
+		p.log.Warn("ada: query diaper history", slog.String("error", err.Error()))
+		return
+	}
+	entries := buildDiaperHistory(rows)
+	attributes := map[string]any{
+		"entries":      entries,
+		"last_updated": time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := p.ha.PushState(ctx, sensorDiaperHistory, strconv.Itoa(len(entries)), attributes); err != nil {
+		p.log.Warn("ada: push diaper history", slog.String("error", err.Error()))
+	}
+}
+
+// ── Sleep history ─────────────────────────────────────────────────────────────
+
+// SleepHistoryEntry is one element of the JSON array pushed as attributes on
+// sensor.ada_sleep_history. EndTime and DurationS are omitted for active sessions.
+type SleepHistoryEntry struct {
+	ID        string  `json:"id"`
+	StartTime string  `json:"start_time"`
+	EndTime   *string `json:"end_time,omitempty"`
+	SleepType string  `json:"sleep_type"`
+	DurationS *int    `json:"duration_s,omitempty"`
+}
+
+// buildSleepHistory converts sqlc rows to JSON-serializable history entries.
+// Active sessions (EndTime.Valid=false) are included with EndTime and DurationS omitted.
+func buildSleepHistory(rows []*store.GetLast24hSleepSessionsRow) []SleepHistoryEntry {
+	entries := make([]SleepHistoryEntry, 0, len(rows))
+	for _, r := range rows {
+		e := SleepHistoryEntry{
+			ID:        uuid.UUID(r.ID.Bytes).String(),
+			StartTime: r.StartTime.Time.UTC().Format(time.RFC3339),
+			SleepType: r.SleepType,
+		}
+		if r.EndTime.Valid {
+			s := r.EndTime.Time.UTC().Format(time.RFC3339)
+			e.EndTime = &s
+			d := int(r.EndTime.Time.Sub(r.StartTime.Time).Seconds())
+			e.DurationS = &d
+		}
+		entries = append(entries, e)
+	}
+	return entries
+}
+
+// pushSleepHistory queries the last 24h of sleep sessions and pushes them as
+// attributes on sensor.ada_sleep_history. Active sessions are included with
+// end_time and duration_s omitted. Sensor state is the total session count.
+func (p *Processor) pushSleepHistory(ctx context.Context) {
+	rows, err := p.q.GetLast24hSleepSessions(ctx)
+	if err != nil {
+		p.log.Warn("ada: query sleep history", slog.String("error", err.Error()))
+		return
+	}
+	entries := buildSleepHistory(rows)
+	attributes := map[string]any{
+		"entries":      entries,
+		"last_updated": time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := p.ha.PushState(ctx, sensorSleepHistory, strconv.Itoa(len(entries)), attributes); err != nil {
+		p.log.Warn("ada: push sleep history", slog.String("error", err.Error()))
 	}
 }
 

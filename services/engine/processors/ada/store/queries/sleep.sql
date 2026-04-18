@@ -34,3 +34,14 @@ FROM sleep_sessions
 WHERE deleted_at IS NULL
   AND end_time IS NOT NULL
   AND start_time >= NOW()::date;
+
+-- name: GetLast24hSleepSessions :many
+-- Returns sleep sessions that started in the last 24 hours, newest-first.
+-- end_time is zero-value (Valid=false) for active sessions. duration_s is
+-- computed in Go from start_time and end_time to avoid a CASE expression
+-- that sqlc cannot type statically.
+SELECT id, start_time, end_time, sleep_type
+FROM sleep_sessions
+WHERE deleted_at IS NULL
+  AND start_time >= NOW() - INTERVAL '24 hours'
+ORDER BY start_time DESC;
