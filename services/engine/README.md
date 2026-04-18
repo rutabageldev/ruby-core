@@ -16,7 +16,7 @@ On startup the engine:
 | `presence_notify` | No | `ha.events.>`, `ruby_presence.events.>` |
 | `ada` | Yes (Postgres) | `ha.events.ada.>`, `ha.events.input_number.ada_alert_threshold_h` |
 
-The `ada` processor persists feeding, diaper, sleep, and tummy time events to PostgreSQL and pushes derived sensor state to Home Assistant after each event. It also subscribes to the bare `gateway.health` subject to restore HA sensor state after a gateway reconnect.
+The `ada` processor persists feeding, diaper, sleep, and tummy time events to PostgreSQL and pushes derived sensor state to Home Assistant after each event. It also subscribes to the bare `gateway.health` subject to restore HA sensor state after a gateway reconnect. A background ticker runs every 60 seconds to push `sensor.ada_sleep_session_min` while a session is active, refresh daily aggregates at midnight rollover, and perform a full sensor restore every 4 hours as a safety net against HA state loss.
 
 ## Configuration
 
