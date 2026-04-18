@@ -110,8 +110,7 @@ func (p *Processor) Initialize(cfg processor.Config) error {
 	p.refreshAllSensors(context.Background())
 
 	// Seed ticker state so the first tick doesn't trigger immediate rollover/restore.
-	now := time.Now().Local()
-	p.lastRefreshDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	p.lastRefreshDate = startOfDay(time.Now().Local())
 	p.lastFullRefresh = time.Now()
 	p.stopCh = make(chan struct{})
 	go p.runTicker()
@@ -855,8 +854,10 @@ func (p *Processor) runTicker() {
 //  3. Sleep session timer: push sensorSleepSessionMin with current elapsed minutes
 //     (only when a session is active; no-op when awake to avoid redundant pushes).
 func (p *Processor) onTick(ctx context.Context) {
-	now := time.Now().Local()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	today := startOfDay(time.Now().Local())
 
 	// 4-hour safety net: full refresh covers all three sub-pushes.
 	if time.Since(p.lastFullRefresh) >= 4*time.Hour {
@@ -883,7 +884,6 @@ func (p *Processor) onTick(ctx context.Context) {
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		p.log.Warn("ada: ticker query active sleep session", slog.String("error", err.Error()))
 	}
-	// pgx.ErrNoRows (no active session) is expected when awake — silently skip.
 }
 
 // ── Helpers ── (sleep elapsed time) ──────────────────────────────────────────
@@ -892,6 +892,11 @@ func (p *Processor) onTick(ctx context.Context) {
 // Used when pushing sensorSleepSessionMin so the computation is testable in isolation.
 func sleepElapsedMin(startTime time.Time) int {
 	return int(time.Since(startTime).Minutes())
+}
+
+// startOfDay returns midnight of t's date in t's local timezone.
+func startOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 // ── Feeding history cache ─────────────────────────────────────────────────────
