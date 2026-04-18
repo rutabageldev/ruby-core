@@ -50,6 +50,9 @@ services:
       # TLS certificates and auth.conf (fetched/generated from Vault by nats-init)
       - nats-certs:/etc/nats/certs:ro
     command: ["-c", "/etc/nats/nats.conf"]
+    networks:
+      - default
+      - event-bus-dev
     healthcheck:
       # Health check via HTTP monitoring endpoint
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
@@ -232,6 +235,12 @@ networks:
   vault-ruby-core-dev:
     external: true
     name: vault-ruby-core-dev
+  # Shared event-bus network — external services (e.g. Navi) join this to reach NATS
+  # without coupling to ruby-core's internal compose network.
+  # Create with: docker network create event-bus-dev
+  event-bus-dev:
+    external: true
+    name: event-bus-dev
 
 # ==========================================================================
 # Named Volumes
