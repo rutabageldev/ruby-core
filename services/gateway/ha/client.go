@@ -334,17 +334,23 @@ func (c *Client) syncUsers(ctx context.Context, conn *websocket.Conn, id int) er
 		return fmt.Errorf("ha: write config/auth/list: %w", err)
 	}
 
+	// The WebSocket is live — HA may send event messages before the command
+	// result arrives. Loop until we get the message with our command ID.
 	var result struct {
+		ID      int  `json:"id"`
 		Success bool `json:"success"`
 		Error   *struct {
 			Message string `json:"message"`
 		} `json:"error"`
-		Result struct {
-			Users []haUserEntry `json:"users"`
-		} `json:"result"`
+		Result json.RawMessage `json:"result"` // HA returns a flat array, not an object
 	}
-	if err := conn.ReadJSON(&result); err != nil {
-		return fmt.Errorf("ha: read config/auth/list result: %w", err)
+	for {
+		if err := conn.ReadJSON(&result); err != nil {
+			return fmt.Errorf("ha: read config/auth/list result: %w", err)
+		}
+		if result.ID == id {
+			break
+		}
 	}
 	if !result.Success {
 		msg := "unknown error"
@@ -354,14 +360,20 @@ func (c *Client) syncUsers(ctx context.Context, conn *websocket.Conn, id int) er
 		return fmt.Errorf("ha: config/auth/list failed: %s", msg)
 	}
 
+	// HA returns result as a flat array of user objects.
+	var haUsers []haUserEntry
+	if err := json.Unmarshal(result.Result, &haUsers); err != nil {
+		return fmt.Errorf("ha: unmarshal config/auth/list users: %w", err)
+	}
+
 	notifyServices, err := c.fetchNotifyServices(ctx)
 	if err != nil {
 		c.log.Warn("ha: fetch notify services", slog.String("error", err.Error()))
 		notifyServices = map[string]bool{}
 	}
 
-	users := make([]schemas.AdaHAUser, 0, len(result.Result.Users))
-	for _, u := range result.Result.Users {
+	users := make([]schemas.AdaHAUser, 0, len(haUsers))
+	for _, u := range haUsers {
 		if !u.IsActive {
 			continue
 		}
