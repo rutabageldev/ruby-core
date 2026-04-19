@@ -14,6 +14,13 @@ type AdaConfig struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type AdaProfile struct {
+	ID        pgtype.UUID
+	BirthAt   pgtype.Timestamptz
+	Singleton bool
+	CreatedAt pgtype.Timestamptz
+}
+
 type Diaper struct {
 	ID        pgtype.UUID
 	Timestamp pgtype.Timestamptz
