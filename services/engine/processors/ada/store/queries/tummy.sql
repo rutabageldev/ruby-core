@@ -8,4 +8,4 @@ SELECT
     COUNT(*)::int                           AS sessions
 FROM tummy_time_sessions
 WHERE deleted_at IS NULL
-  AND start_time >= NOW()::date;
+  AND start_time >= @boundary;

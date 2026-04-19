@@ -141,6 +141,7 @@ services:
       - RULES_DIR=/etc/ruby-core/rules
       - VAULT_PG_PATH=secret/data/ruby-core/postgres
       - VAULT_HA_PATH=secret/data/ruby-core/ha
+      - TZ=America/New_York
 
   # ==========================================================================
   # Notifier Service

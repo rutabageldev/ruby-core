@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processor"
@@ -27,9 +30,14 @@ import (
 const (
 	defaultFeedIntervalHours = 2.5
 
-	// ada_config keys
+	// ada_config keys — feed interval
 	cfgKeyFeedIntervalHours = "feed_interval_hours"
 	cfgKeyNextFeedingTarget = "next_feeding_target"
+
+	// ada_config keys — bedtime boundary
+	cfgKeyBedtimeHHMM     = "bedtime_hhmm"      // e.g. "19:00"
+	cfgKeyDaytimeHHMM     = "daytime_hhmm"      // e.g. "07:00"
+	cfgKeyBedtimeGraceMin = "bedtime_grace_min" // default 30
 
 	// HA sensor entity IDs
 	sensorLastFeedingTime    = "sensor.ada_last_feeding_time"
@@ -52,13 +60,20 @@ const (
 	sensorSleepSessionMin    = "sensor.ada_sleep_session_min"
 	sensorDiaperHistory      = "sensor.ada_diaper_history"
 	sensorSleepHistory       = "sensor.ada_sleep_history"
+	sensorTodayBoundary      = "sensor.ada_today_boundary"
 )
+
+// adaBoundaryCrossingsTotal counts bedtime boundary crossings that trigger a
+// daily aggregate refresh.
+var adaBoundaryCrossingsTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "ada_boundary_crossings_total",
+	Help: "Number of bedtime boundary crossings triggering daily aggregate refresh.",
+})
 
 // Processor implements processor.StatefulProcessor for Ada baby tracking.
 // It persists feeding, diaper, sleep, and tummy time events to Postgres
 // and pushes derived sensor state to Home Assistant.
-// There is no background polling goroutine — elapsed-time display is computed
-// client-side by the dashboard from stored timestamps.
+// Daily aggregate refresh is driven by a bedtime boundary ticker (not midnight).
 type Processor struct {
 	q               *store.Queries
 	ha              *adaha.Client
@@ -66,7 +81,6 @@ type Processor struct {
 	healthSub       *nats.Subscription
 	log             *slog.Logger
 	stopCh          chan struct{}
-	lastRefreshDate time.Time // date of last daily-aggregate push (for midnight rollover)
 	lastFullRefresh time.Time // time of last full sensor restore (for 4h safety net)
 	alertMu         sync.Mutex
 	alertTimer      *time.Timer
@@ -110,15 +124,20 @@ func (p *Processor) Initialize(cfg processor.Config) error {
 		return fmt.Errorf("ada: subscribe gateway.health: %w", err)
 	}
 
+	ctx := context.Background()
+
 	// Restore sensor state from Postgres so HA sensors are current immediately
 	// after an engine restart. Errors are non-fatal.
-	p.refreshAllSensors(context.Background())
+	p.refreshAllSensors(ctx)
 
-	// Seed ticker state so the first tick doesn't trigger immediate rollover/restore.
-	p.lastRefreshDate = startOfDay(time.Now().Local())
+	// Seed default config keys (bedtime, daytime, grace) if not already set.
+	p.seedDefaultConfig(ctx)
+
 	p.lastFullRefresh = time.Now()
 	p.stopCh = make(chan struct{})
-	go p.runTicker()
+
+	// Start the bedtime boundary ticker — fires once per day at bedtime.
+	p.startBoundaryTicker(ctx)
 
 	p.log.Info("ada: processor initialized")
 	return nil
@@ -186,6 +205,8 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleRemoveChannel(ctx, evt)
 	case schemas.AdaEventTummyTarget:
 		return p.handleTummyTarget(ctx, evt)
+	case schemas.AdaEventBedtimeConfig:
+		return p.handleBedtimeConfig(ctx, evt)
 	case "ha.events.input_number.ada_alert_threshold_h":
 		return p.handleThresholdChange(ctx, evt)
 	default:
@@ -453,9 +474,16 @@ func (p *Processor) handleSleepStarted(ctx context.Context, evt schemas.CloudEve
 		return fmt.Errorf("ada: parse sleep start_time: %w", err)
 	}
 
+	// Auto-categorize if not explicitly set by the user.
+	cfg := p.loadSleepConfig(ctx)
+	sleepType := d.SleepType
+	if sleepType == "" {
+		sleepType = categorizeSleep(startTime, cfg.BedtimeHHMM, cfg.DaytimeHHMM, cfg.GraceMin)
+	}
+
 	if _, err := p.q.InsertSleepStart(ctx, &store.InsertSleepStartParams{
 		StartTime: toTimestamptz(startTime),
-		SleepType: d.SleepType,
+		SleepType: sleepType,
 		LoggedBy:  d.LoggedBy,
 	}); err != nil {
 		return fmt.Errorf("ada: insert sleep start: %w", err)
@@ -499,10 +527,17 @@ func (p *Processor) handleSleepLogged(ctx context.Context, evt schemas.CloudEven
 		return fmt.Errorf("ada: parse sleep end_time: %w", err)
 	}
 
+	// Auto-categorize if not explicitly set by the user.
+	cfg := p.loadSleepConfig(ctx)
+	sleepType := d.SleepType
+	if sleepType == "" {
+		sleepType = categorizeSleep(startTime, cfg.BedtimeHHMM, cfg.DaytimeHHMM, cfg.GraceMin)
+	}
+
 	if err := p.q.InsertSleepSession(ctx, &store.InsertSleepSessionParams{
 		StartTime: toTimestamptz(startTime),
 		EndTime:   toTimestamptz(endTime),
-		SleepType: d.SleepType,
+		SleepType: sleepType,
 		LoggedBy:  d.LoggedBy,
 	}); err != nil {
 		return fmt.Errorf("ada: insert sleep session: %w", err)
@@ -718,6 +753,42 @@ func (p *Processor) handleTummyTarget(ctx context.Context, evt schemas.CloudEven
 	return nil
 }
 
+// ── Bedtime config handler ────────────────────────────────────────────────────
+
+func (p *Processor) handleBedtimeConfig(ctx context.Context, evt schemas.CloudEvent) error {
+	var d schemas.AdaBedtimeConfigData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode bedtime_config: %w", err)
+	}
+
+	if err := p.q.UpsertConfig(ctx, &store.UpsertConfigParams{
+		Key: cfgKeyBedtimeHHMM, Value: d.BedtimeHHMM,
+	}); err != nil {
+		return fmt.Errorf("ada: upsert bedtime_hhmm: %w", err)
+	}
+	if err := p.q.UpsertConfig(ctx, &store.UpsertConfigParams{
+		Key: cfgKeyDaytimeHHMM, Value: d.DaytimeHHMM,
+	}); err != nil {
+		return fmt.Errorf("ada: upsert daytime_hhmm: %w", err)
+	}
+	if d.GraceMin > 0 {
+		if err := p.q.UpsertConfig(ctx, &store.UpsertConfigParams{
+			Key: cfgKeyBedtimeGraceMin, Value: strconv.Itoa(d.GraceMin),
+		}); err != nil {
+			return fmt.Errorf("ada: upsert bedtime_grace_min: %w", err)
+		}
+	}
+
+	p.log.Info("ada: bedtime config updated",
+		slog.String("bedtime", d.BedtimeHHMM),
+		slog.String("daytime", d.DaytimeHHMM),
+		slog.Int("grace_min", d.GraceMin))
+
+	p.pushTodayBoundary(ctx)
+	p.pushDailyAggregates(ctx)
+	return nil
+}
+
 // ── Threshold change handler ─────────────────────────────────────────────────
 
 func (p *Processor) handleThresholdChange(ctx context.Context, evt schemas.CloudEvent) error {
@@ -798,7 +869,8 @@ func (p *Processor) pushFeedingSensors(ctx context.Context) {
 
 	p.setFeedingAlertTimer(lastFeedingTime, nextTarget)
 
-	agg, err := p.q.GetTodayFeedingAggregates(ctx)
+	btz := p.todayBoundaryTz(ctx)
+	agg, err := p.q.GetTodayFeedingAggregates(ctx, btz)
 	if err != nil {
 		p.log.Warn("ada: get today feeding aggregates", slog.String("error", err.Error()))
 	}
@@ -815,7 +887,7 @@ func (p *Processor) pushFeedingSensors(ctx context.Context) {
 		)
 	}
 	p.pushAll(ctx, pushes)
-	p.pushFeedingHistory(ctx)
+	p.pushFeedingHistory(ctx, btz)
 }
 
 // pushDiaperSensors pushes all diaper-related sensors after a diaper event.
@@ -823,7 +895,8 @@ func (p *Processor) pushFeedingSensors(ctx context.Context) {
 func (p *Processor) pushDiaperSensors(ctx context.Context, lastDiaperTime time.Time, diaperType string) {
 	lastTimeStr := lastDiaperTime.UTC().Format(time.RFC3339)
 
-	agg, err := p.q.GetTodayDiaperAggregates(ctx)
+	btz := p.todayBoundaryTz(ctx)
+	agg, err := p.q.GetTodayDiaperAggregates(ctx, btz)
 	if err != nil {
 		p.log.Warn("ada: get today diaper aggregates", slog.String("error", err.Error()))
 	}
@@ -841,7 +914,7 @@ func (p *Processor) pushDiaperSensors(ctx context.Context, lastDiaperTime time.T
 		)
 	}
 	p.pushAll(ctx, pushes)
-	p.pushDiaperHistory(ctx)
+	p.pushDiaperHistory(ctx, btz)
 }
 
 // pushSupplementOzSensor pushes today_feeding_oz and last_feeding_source after
@@ -849,7 +922,8 @@ func (p *Processor) pushDiaperSensors(ctx context.Context, lastDiaperTime time.T
 // last_feeding_source is updated to "supplemented" — a supplement always follows
 // a breast feeding session, so the combined display label is always "supplemented".
 func (p *Processor) pushSupplementOzSensor(ctx context.Context) {
-	agg, err := p.q.GetTodayFeedingAggregates(ctx)
+	btz := p.todayBoundaryTz(ctx)
+	agg, err := p.q.GetTodayFeedingAggregates(ctx, btz)
 	if err != nil {
 		p.log.Warn("ada: get today feeding aggregates for supplement", slog.String("error", err.Error()))
 		return
@@ -858,7 +932,7 @@ func (p *Processor) pushSupplementOzSensor(ctx context.Context) {
 		{sensorTodayFeedingOz, strconv.FormatFloat(agg.TotalOz, 'f', 2, 64)},
 		{sensorLastFeedingSource, "supplemented"},
 	})
-	p.pushFeedingHistory(ctx)
+	p.pushFeedingHistory(ctx, btz)
 }
 
 // pushSleepStartedSensors pushes sensors after a sleep session starts.
@@ -870,13 +944,15 @@ func (p *Processor) pushSleepStartedSensors(ctx context.Context, startTime time.
 		{sensorLastSleepChange, startTime.UTC().Format(time.RFC3339)},
 		{sensorSleepSessionMin, strconv.Itoa(sleepElapsedMin(startTime))},
 	})
-	p.pushSleepHistory(ctx)
+	btz := p.todayBoundaryTz(ctx)
+	p.pushSleepHistory(ctx, btz)
 }
 
 // pushSleepEndedSensors pushes sensors after a sleep session ends.
 // sensorSleepSessionMin is reset to "0" — the session is over.
 func (p *Processor) pushSleepEndedSensors(ctx context.Context, endTime time.Time) {
-	agg, err := p.q.GetTodaySleepAggregates(ctx)
+	btz := p.todayBoundaryTz(ctx)
+	agg, err := p.q.GetTodaySleepAggregates(ctx, btz)
 	if err != nil {
 		p.log.Warn("ada: get today sleep aggregates", slog.String("error", err.Error()))
 	}
@@ -893,12 +969,13 @@ func (p *Processor) pushSleepEndedSensors(ctx context.Context, endTime time.Time
 		)
 	}
 	p.pushAll(ctx, pushes)
-	p.pushSleepHistory(ctx)
+	p.pushSleepHistory(ctx, btz)
 }
 
 // pushTummySensors pushes tummy time aggregate sensors.
 func (p *Processor) pushTummySensors(ctx context.Context) {
-	agg, err := p.q.GetTodayTummyAggregates(ctx)
+	btz := p.todayBoundaryTz(ctx)
+	agg, err := p.q.GetTodayTummyAggregates(ctx, btz)
 	if err != nil {
 		p.log.Warn("ada: get today tummy aggregates", slog.String("error", err.Error()))
 		return
@@ -928,6 +1005,7 @@ func (p *Processor) refreshAllSensors(ctx context.Context) {
 	p.pushActiveSleepState(ctx)
 	p.pushPeopleList(ctx)
 	p.restoreAlertTimer(ctx)
+	p.pushTodayBoundary(ctx)
 }
 
 // pushLastEventSensors pushes sensors derived from the most recent event of each
@@ -960,9 +1038,11 @@ func (p *Processor) pushLastEventSensors(ctx context.Context) {
 }
 
 // pushDailyAggregates pushes all today_* aggregate sensors from Postgres.
-// Called on startup, HA reconnect, midnight rollover, and the 4-hour safety net.
+// Called on startup, HA reconnect, bedtime boundary crossing, and the 4-hour safety net.
 func (p *Processor) pushDailyAggregates(ctx context.Context) {
-	if agg, err := p.q.GetTodayFeedingAggregates(ctx); err == nil {
+	btz := p.todayBoundaryTz(ctx)
+
+	if agg, err := p.q.GetTodayFeedingAggregates(ctx, btz); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
 			{sensorTodayFeedingCount, strconv.Itoa(int(agg.Count))},
 			{sensorTodayFeedingOz, strconv.FormatFloat(agg.TotalOz, 'f', 2, 64)},
@@ -970,9 +1050,9 @@ func (p *Processor) pushDailyAggregates(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today feeding aggregates", slog.String("error", err.Error()))
 	}
-	p.pushFeedingHistory(ctx)
+	p.pushFeedingHistory(ctx, btz)
 
-	if agg, err := p.q.GetTodayDiaperAggregates(ctx); err == nil {
+	if agg, err := p.q.GetTodayDiaperAggregates(ctx, btz); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
 			{sensorTodayDiaperCount, strconv.Itoa(int(agg.Total))},
 			{sensorTodayDiaperWet, strconv.Itoa(int(agg.Wet))},
@@ -982,9 +1062,9 @@ func (p *Processor) pushDailyAggregates(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today diaper aggregates", slog.String("error", err.Error()))
 	}
-	p.pushDiaperHistory(ctx)
+	p.pushDiaperHistory(ctx, btz)
 
-	if agg, err := p.q.GetTodaySleepAggregates(ctx); err == nil {
+	if agg, err := p.q.GetTodaySleepAggregates(ctx, btz); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
 			{sensorTodaySleepHours, strconv.FormatFloat(agg.TotalHours, 'f', 2, 64)},
 			{sensorTodaySleepNapCount, strconv.Itoa(int(agg.NapCount))},
@@ -992,9 +1072,9 @@ func (p *Processor) pushDailyAggregates(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today sleep aggregates", slog.String("error", err.Error()))
 	}
-	p.pushSleepHistory(ctx)
+	p.pushSleepHistory(ctx, btz)
 
-	if agg, err := p.q.GetTodayTummyAggregates(ctx); err == nil {
+	if agg, err := p.q.GetTodayTummyAggregates(ctx, btz); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
 			{sensorTodayTummyMin, strconv.Itoa(int(agg.TotalMinutes))},
 			{sensorTodayTummySessions, strconv.Itoa(int(agg.Sessions))},
@@ -1035,55 +1115,226 @@ func (p *Processor) pushActiveSleepState(ctx context.Context) {
 	}
 }
 
-// ── Background ticker ─────────────────────────────────────────────────────────
+// ── Bedtime boundary helpers ──────────────────────────────────────────────────
 
-// runTicker runs the background ticker goroutine. Started in Initialize,
-// stopped via stopCh in Shutdown.
-func (p *Processor) runTicker() {
-	ticker := time.NewTicker(60 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			p.onTick(context.Background())
-		case <-p.stopCh:
-			return
+// computeTodayBoundary returns the most recent occurrence of the configured
+// bedtime clock time in the server's local timezone.
+// Rules:
+//   - Parse bedtime as HH:MM (24h). Default "19:00" if blank or unparseable.
+//   - If current time >= today's bedtime: boundary = today at bedtime
+//   - If current time < today's bedtime: boundary = yesterday at bedtime
+//   - Fallback on parse error: midnight UTC today
+func computeTodayBoundary(bedtimeHHMM string) time.Time {
+	if bedtimeHHMM == "" {
+		bedtimeHHMM = "19:00"
+	}
+	parts := strings.SplitN(bedtimeHHMM, ":", 2)
+	if len(parts) != 2 {
+		return time.Now().UTC().Truncate(24 * time.Hour)
+	}
+	hour, errH := strconv.Atoi(parts[0])
+	min, errM := strconv.Atoi(parts[1])
+	if errH != nil || errM != nil {
+		return time.Now().UTC().Truncate(24 * time.Hour)
+	}
+	now := time.Now()
+	todayBedtime := time.Date(now.Year(), now.Month(), now.Day(),
+		hour, min, 0, 0, now.Location())
+	if now.Before(todayBedtime) {
+		return todayBedtime.AddDate(0, 0, -1)
+	}
+	return todayBedtime
+}
+
+// todayBoundaryTz computes the current bedtime boundary as a pgtype.Timestamptz.
+// Reads bedtime_hhmm from config; falls back to "19:00" on error.
+func (p *Processor) todayBoundaryTz(ctx context.Context) pgtype.Timestamptz {
+	bedtimeHHMM := "19:00"
+	if row, err := p.q.GetConfig(ctx, cfgKeyBedtimeHHMM); err == nil {
+		bedtimeHHMM = row.Value
+	}
+	boundary := computeTodayBoundary(bedtimeHHMM)
+	return pgtype.Timestamptz{Time: boundary, Valid: true}
+}
+
+// pushTodayBoundary pushes sensor.ada_today_boundary with the current boundary
+// time so the HA dashboard can display elapsed-time since the boundary.
+func (p *Processor) pushTodayBoundary(ctx context.Context) {
+	bedtimeHHMM := "19:00"
+	if row, err := p.q.GetConfig(ctx, cfgKeyBedtimeHHMM); err == nil {
+		bedtimeHHMM = row.Value
+	}
+	boundary := computeTodayBoundary(bedtimeHHMM)
+	if err := p.ha.PushState(ctx, sensorTodayBoundary,
+		boundary.UTC().Format(time.RFC3339),
+		map[string]any{
+			"boundary_local": boundary.Format("Jan 2, 2006 3:04 PM"),
+		},
+	); err != nil {
+		p.log.Warn("ada: push today boundary", slog.String("error", err.Error()))
+	}
+}
+
+// seedDefaultConfig writes default values for bedtime config keys only if they
+// don't already exist. Uses errors.Is(pgx.ErrNoRows) to avoid re-seeding on
+// transient DB errors.
+func (p *Processor) seedDefaultConfig(ctx context.Context) {
+	defaults := map[string]string{
+		cfgKeyBedtimeHHMM:     "19:00",
+		cfgKeyDaytimeHHMM:     "07:00",
+		cfgKeyBedtimeGraceMin: "30",
+	}
+	for key, val := range defaults {
+		_, err := p.q.GetConfig(ctx, key)
+		if errors.Is(err, pgx.ErrNoRows) {
+			if upsertErr := p.q.UpsertConfig(ctx, &store.UpsertConfigParams{
+				Key: key, Value: val,
+			}); upsertErr != nil {
+				p.log.Warn("ada: seed default config",
+					slog.String("key", key),
+					slog.String("error", upsertErr.Error()))
+			}
 		}
 	}
 }
 
-// onTick runs on each 60-second ticker tick. It handles three concerns:
-//
-//  1. 4-hour safety net: full sensor re-push to recover from any HA state loss.
-//  2. Midnight rollover: re-push daily aggregate sensors when the calendar date changes.
-//  3. Sleep session timer: push sensorSleepSessionMin with current elapsed minutes
-//     (only when a session is active; no-op when awake to avoid redundant pushes).
-func (p *Processor) onTick(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+// ── Sleep config and auto-categorization ─────────────────────────────────────
 
-	today := startOfDay(time.Now().Local())
+type sleepConfig struct {
+	BedtimeHHMM string
+	DaytimeHHMM string
+	GraceMin    int
+}
 
-	// 4-hour safety net: full refresh covers all three sub-pushes.
+func (p *Processor) loadSleepConfig(ctx context.Context) sleepConfig {
+	get := func(key, def string) string {
+		row, err := p.q.GetConfig(ctx, key)
+		if err != nil {
+			return def
+		}
+		return row.Value
+	}
+	graceMin := 30
+	if g, err := strconv.Atoi(get(cfgKeyBedtimeGraceMin, "30")); err == nil {
+		graceMin = g
+	}
+	return sleepConfig{
+		BedtimeHHMM: get(cfgKeyBedtimeHHMM, "19:00"),
+		DaytimeHHMM: get(cfgKeyDaytimeHHMM, "07:00"),
+		GraceMin:    graceMin,
+	}
+}
+
+// categorizeSleep returns "night" if startTime falls in the configured night
+// window (bedtime ± grace to daytime). Returns "nap" otherwise.
+// The night window wraps midnight (e.g. 19:00 → 07:00 next day).
+func categorizeSleep(startTime time.Time, bedtimeHHMM, daytimeHHMM string, graceMin int) string {
+	if graceMin <= 0 {
+		graceMin = 30
+	}
+	parseClock := func(hhmm, def string) (int, int) {
+		parts := strings.SplitN(hhmm, ":", 2)
+		if len(parts) != 2 {
+			parts = strings.SplitN(def, ":", 2)
+		}
+		h, errH := strconv.Atoi(parts[0])
+		m, errM := strconv.Atoi(parts[1])
+		if errH != nil || errM != nil {
+			dparts := strings.SplitN(def, ":", 2)
+			h, _ = strconv.Atoi(dparts[0])
+			m, _ = strconv.Atoi(dparts[1])
+		}
+		return h, m
+	}
+	bedH, bedM := parseClock(bedtimeHHMM, "19:00")
+	dayH, dayM := parseClock(daytimeHHMM, "07:00")
+
+	loc := startTime.Location()
+	bedtime := time.Date(startTime.Year(), startTime.Month(), startTime.Day(), bedH, bedM, 0, 0, loc)
+	daytime := time.Date(startTime.Year(), startTime.Month(), startTime.Day(), dayH, dayM, 0, 0, loc)
+	effectiveBedtime := bedtime.Add(-time.Duration(graceMin) * time.Minute)
+
+	if daytime.Before(bedtime) {
+		// Wrapping window: night is effectiveBedtime → midnight → daytime
+		if !startTime.Before(effectiveBedtime) || startTime.Before(daytime) {
+			return "night"
+		}
+		return "nap"
+	}
+	// Same-day window (unusual)
+	if !startTime.Before(effectiveBedtime) && startTime.Before(daytime) {
+		return "night"
+	}
+	return "nap"
+}
+
+// ── Background boundary ticker ────────────────────────────────────────────────
+
+// startBoundaryTicker fires once per bedtime boundary crossing. On each crossing
+// it refreshes daily aggregates and increments the Prometheus counter.
+// It also runs a 4-hour safety-net full refresh inside the same goroutine via
+// a secondary ticker, so we don't lose the safety net from the old onTick.
+func (p *Processor) startBoundaryTicker(ctx context.Context) {
+	go func() {
+		safetyTicker := time.NewTicker(60 * time.Second)
+		defer safetyTicker.Stop()
+
+		for {
+			// Compute time until next bedtime boundary.
+			bedtimeHHMM := "19:00"
+			if row, err := p.q.GetConfig(ctx, cfgKeyBedtimeHHMM); err == nil {
+				bedtimeHHMM = row.Value
+			}
+			// Next crossing = most recent boundary + 24h
+			nextBoundary := computeTodayBoundary(bedtimeHHMM).Add(24 * time.Hour)
+			delay := time.Until(nextBoundary)
+
+			boundaryTimer := time.NewTimer(delay)
+
+			// Inner loop: run safety-net ticks until the boundary fires.
+		inner:
+			for {
+				select {
+				case <-ctx.Done():
+					boundaryTimer.Stop()
+					return
+				case <-p.stopCh:
+					boundaryTimer.Stop()
+					return
+				case <-boundaryTimer.C:
+					p.log.Info("ada: bedtime boundary crossed — refreshing daily aggregates")
+					adaBoundaryCrossingsTotal.Inc()
+					p.pushTodayBoundary(ctx)
+					p.pushDailyAggregates(ctx)
+					break inner
+				case <-safetyTicker.C:
+					p.runSafetyNet(ctx)
+				}
+			}
+		}
+	}()
+}
+
+// runSafetyNet implements the 4-hour safety-net full sensor refresh and the
+// sleep session elapsed-time push (formerly in onTick).
+func (p *Processor) runSafetyNet(ctx context.Context) {
+	// 4-hour safety net: full refresh.
 	if time.Since(p.lastFullRefresh) >= 4*time.Hour {
 		p.log.Info("ada: 4-hour safety net — full sensor refresh")
-		p.refreshAllSensors(ctx)
+		innerCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		p.refreshAllSensors(innerCtx)
+		cancel()
 		p.lastFullRefresh = time.Now()
-		p.lastRefreshDate = today
 		return
 	}
 
-	// Midnight rollover: reset today_* aggregates when the date changes.
-	if today.After(p.lastRefreshDate) {
-		p.log.Info("ada: midnight rollover — refreshing daily aggregates")
-		p.pushDailyAggregates(ctx)
-		p.lastRefreshDate = today
-	}
-
 	// Sleep session timer: push elapsed minutes if a session is active.
-	active, err := p.q.GetActiveSleepSession(ctx)
+	innerCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	active, err := p.q.GetActiveSleepSession(innerCtx)
 	if err == nil {
-		if haErr := p.ha.PushState(ctx, sensorSleepSessionMin, strconv.Itoa(sleepElapsedMin(active.Time)), nil); haErr != nil {
+		if haErr := p.ha.PushState(innerCtx, sensorSleepSessionMin,
+			strconv.Itoa(sleepElapsedMin(active.Time)), nil); haErr != nil {
 			p.log.Warn("ada: ticker push sleep_session_min", slog.String("error", haErr.Error()))
 		}
 	} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -1097,11 +1348,6 @@ func (p *Processor) onTick(ctx context.Context) {
 // Used when pushing sensorSleepSessionMin so the computation is testable in isolation.
 func sleepElapsedMin(startTime time.Time) int {
 	return int(time.Since(startTime).Minutes())
-}
-
-// startOfDay returns midnight of t's date in t's local timezone.
-func startOfDay(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 // ── Feeding history cache ─────────────────────────────────────────────────────
@@ -1150,12 +1396,10 @@ func buildFeedingHistory(rows []*store.GetLast24hFeedingsRow) []FeedingHistoryEn
 	return entries
 }
 
-// pushFeedingHistory queries the last 24h of feedings and pushes them as
-// attributes on sensor.ada_feeding_history. The sensor state is the entry
-// count so HA has a meaningful scalar to observe. An empty result pushes
-// state="0" and an empty entries array.
-func (p *Processor) pushFeedingHistory(ctx context.Context) {
-	rows, err := p.q.GetLast24hFeedings(ctx)
+// pushFeedingHistory queries feedings since @boundary and pushes them as
+// attributes on sensor.ada_feeding_history.
+func (p *Processor) pushFeedingHistory(ctx context.Context, btz pgtype.Timestamptz) {
+	rows, err := p.q.GetLast24hFeedings(ctx, btz)
 	if err != nil {
 		p.log.Warn("ada: query feeding history failed", slog.String("error", err.Error()))
 		return
@@ -1196,9 +1440,12 @@ func buildDiaperHistory(rows []*store.GetLast24hDiapersRow) []DiaperHistoryEntry
 	return entries
 }
 
-// pushDiaperHistory queries the last 24h of diaper events and pushes them as
-// attributes on sensor.ada_diaper_history. Sensor state is the entry count.
-func (p *Processor) pushDiaperHistory(ctx context.Context) {
+// pushDiaperHistory queries diaper events since @boundary and pushes them as
+// attributes on sensor.ada_diaper_history.
+func (p *Processor) pushDiaperHistory(ctx context.Context, btz pgtype.Timestamptz) {
+	// GetLast24hDiapers still uses the fixed 24h window — it's a display history,
+	// not an aggregate, so boundary is not passed here. It shows the last 24h
+	// regardless of boundary for context.
 	rows, err := p.q.GetLast24hDiapers(ctx)
 	if err != nil {
 		p.log.Warn("ada: query diaper history", slog.String("error", err.Error()))
@@ -1247,10 +1494,10 @@ func buildSleepHistory(rows []*store.GetLast24hSleepSessionsRow) []SleepHistoryE
 	return entries
 }
 
-// pushSleepHistory queries the last 24h of sleep sessions and pushes them as
-// attributes on sensor.ada_sleep_history. Active sessions are included with
-// end_time and duration_s omitted. Sensor state is the total session count.
-func (p *Processor) pushSleepHistory(ctx context.Context) {
+// pushSleepHistory queries sleep sessions since @boundary and pushes them as
+// attributes on sensor.ada_sleep_history. Active sessions are included.
+func (p *Processor) pushSleepHistory(ctx context.Context, btz pgtype.Timestamptz) {
+	// GetLast24hSleepSessions uses the fixed 24h window for display history context.
 	rows, err := p.q.GetLast24hSleepSessions(ctx)
 	if err != nil {
 		p.log.Warn("ada: query sleep history", slog.String("error", err.Error()))

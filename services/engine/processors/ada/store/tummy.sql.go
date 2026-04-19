@@ -17,7 +17,7 @@ SELECT
     COUNT(*)::int                           AS sessions
 FROM tummy_time_sessions
 WHERE deleted_at IS NULL
-  AND start_time >= NOW()::date
+  AND start_time >= $1
 `
 
 type GetTodayTummyAggregatesRow struct {
@@ -25,8 +25,8 @@ type GetTodayTummyAggregatesRow struct {
 	Sessions     int32
 }
 
-func (q *Queries) GetTodayTummyAggregates(ctx context.Context) (*GetTodayTummyAggregatesRow, error) {
-	row := q.db.QueryRow(ctx, getTodayTummyAggregates)
+func (q *Queries) GetTodayTummyAggregates(ctx context.Context, boundary pgtype.Timestamptz) (*GetTodayTummyAggregatesRow, error) {
+	row := q.db.QueryRow(ctx, getTodayTummyAggregates, boundary)
 	var i GetTodayTummyAggregatesRow
 	err := row.Scan(&i.TotalMinutes, &i.Sessions)
 	return &i, err

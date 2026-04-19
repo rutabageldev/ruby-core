@@ -26,7 +26,7 @@ WHERE deleted_at IS NULL
 ORDER BY timestamp DESC LIMIT 1;
 
 -- name: GetLast24hFeedings :many
--- Returns all feedings in the last 24 hours with per-side breast durations
+-- Returns all feedings since @boundary with per-side breast durations
 -- and bottle amounts. Left/right duration_s are 0 for non-breast sessions.
 -- COALESCE handles NULL oz columns from LEFT JOIN on non-bottle feedings.
 SELECT
@@ -46,7 +46,7 @@ FROM feedings f
 LEFT JOIN feeding_bottle_detail d ON d.feeding_id = f.id
 LEFT JOIN feeding_segments fs     ON fs.feeding_id = f.id
 WHERE f.deleted_at IS NULL
-  AND f.timestamp >= NOW() - INTERVAL '24 hours'
+  AND f.timestamp >= @boundary
 GROUP BY
     f.id, f.timestamp, f.source,
     d.amount_oz, d.breast_milk_oz, d.formula_oz
@@ -61,4 +61,4 @@ SELECT
 FROM feedings f
 LEFT JOIN feeding_bottle_detail d ON d.feeding_id = f.id
 WHERE f.deleted_at IS NULL
-  AND f.timestamp >= NOW()::date;
+  AND f.timestamp >= @boundary;

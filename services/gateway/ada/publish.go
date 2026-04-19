@@ -30,6 +30,7 @@ var eventRoutes = map[string]string{
 	"ada.config.tummy_target": schemas.AdaEventTummyTarget,
 	"ada.add_channel":         schemas.AdaEventAddChannel,
 	"ada.remove_channel":      schemas.AdaEventRemoveChannel,
+	"ada.config.bedtime":      schemas.AdaEventBedtimeConfig,
 }
 
 // Publish wraps payload in a CloudEvent and publishes to the appropriate
