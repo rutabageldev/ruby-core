@@ -20,6 +20,8 @@ The `ada` processor persists feeding, diaper, sleep, and tummy time events to Po
 
 Three sensors carry a 24-hour rolling history array as their `entries[]` attribute: `sensor.ada_feeding_history`, `sensor.ada_diaper_history`, and `sensor.ada_sleep_history`. Each is pushed after the relevant event and on every daily restore. Sensor state is the entry count; active sleep sessions appear in `sensor.ada_sleep_history` with `end_time` and `duration_s` omitted.
 
+The `ada.born` event persists Ada's birth datetime to the `ada_profile` table. The table is singleton-constrained (at most one row) and idempotent — repeated fires are silently ignored. `birth_at` is stored as a UTC timestamp and is available as a future query boundary for filtering pre-birth data.
+
 ## Configuration
 
 | Variable | Default | Notes |
