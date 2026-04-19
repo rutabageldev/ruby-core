@@ -11,41 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getLast24hDiapers = `-- name: GetLast24hDiapers :many
-SELECT id, timestamp, type
-FROM diapers
-WHERE deleted_at IS NULL
-  AND timestamp >= NOW() - INTERVAL '24 hours'
-ORDER BY timestamp DESC
-`
-
-type GetLast24hDiapersRow struct {
-	ID        pgtype.UUID
-	Timestamp pgtype.Timestamptz
-	Type      string
-}
-
-// Returns all diaper events in the last 24 hours ordered newest-first.
-func (q *Queries) GetLast24hDiapers(ctx context.Context) ([]*GetLast24hDiapersRow, error) {
-	rows, err := q.db.Query(ctx, getLast24hDiapers)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []*GetLast24hDiapersRow
-	for rows.Next() {
-		var i GetLast24hDiapersRow
-		if err := rows.Scan(&i.ID, &i.Timestamp, &i.Type); err != nil {
-			return nil, err
-		}
-		items = append(items, &i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getLastDiaper = `-- name: GetLastDiaper :one
 SELECT timestamp, type FROM diapers
 WHERE deleted_at IS NULL
@@ -92,6 +57,47 @@ func (q *Queries) GetTodayDiaperAggregates(ctx context.Context, boundary pgtype.
 		&i.Mixed,
 	)
 	return &i, err
+}
+
+const getTodayDiapers = `-- name: GetTodayDiapers :many
+SELECT id, timestamp, type, logged_by
+FROM diapers
+WHERE deleted_at IS NULL
+  AND timestamp >= $1
+ORDER BY timestamp DESC
+`
+
+type GetTodayDiapersRow struct {
+	ID        pgtype.UUID
+	Timestamp pgtype.Timestamptz
+	Type      string
+	LoggedBy  string
+}
+
+// Returns all diaper events since the bedtime boundary, ordered newest-first.
+func (q *Queries) GetTodayDiapers(ctx context.Context, boundary pgtype.Timestamptz) ([]*GetTodayDiapersRow, error) {
+	rows, err := q.db.Query(ctx, getTodayDiapers, boundary)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*GetTodayDiapersRow
+	for rows.Next() {
+		var i GetTodayDiapersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Timestamp,
+			&i.Type,
+			&i.LoggedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const insertDiaper = `-- name: InsertDiaper :exec

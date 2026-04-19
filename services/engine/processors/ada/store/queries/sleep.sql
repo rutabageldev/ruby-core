@@ -37,13 +37,18 @@ FROM sleep_sessions
 WHERE deleted_at IS NULL
   AND (end_time IS NULL OR end_time > @boundary);
 
--- name: GetLast24hSleepSessions :many
--- Returns sleep sessions that started in the last 24 hours, newest-first.
--- end_time is zero-value (Valid=false) for active sessions. duration_s is
--- computed in Go from start_time and end_time to avoid a CASE expression
--- that sqlc cannot type statically.
-SELECT id, start_time, end_time, sleep_type
+-- name: GetTodaySleepSessions :many
+-- Returns sleep sessions active since the bedtime boundary, newest-first.
+-- COALESCE ensures end_time is always non-null; is_complete distinguishes
+-- active sessions (end_time IS NULL) from completed ones.
+SELECT
+    id,
+    start_time,
+    COALESCE(end_time, NOW()) AS end_time,
+    sleep_type,
+    logged_by,
+    (end_time IS NOT NULL)::bool AS is_complete
 FROM sleep_sessions
 WHERE deleted_at IS NULL
-  AND start_time >= NOW() - INTERVAL '24 hours'
+  AND (end_time IS NULL OR end_time > @boundary)
 ORDER BY start_time DESC;

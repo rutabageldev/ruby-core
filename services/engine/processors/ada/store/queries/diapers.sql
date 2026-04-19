@@ -17,10 +17,10 @@ FROM diapers
 WHERE deleted_at IS NULL
   AND timestamp >= @boundary;
 
--- name: GetLast24hDiapers :many
--- Returns all diaper events in the last 24 hours ordered newest-first.
-SELECT id, timestamp, type
+-- name: GetTodayDiapers :many
+-- Returns all diaper events since the bedtime boundary, ordered newest-first.
+SELECT id, timestamp, type, logged_by
 FROM diapers
 WHERE deleted_at IS NULL
-  AND timestamp >= NOW() - INTERVAL '24 hours'
+  AND timestamp >= @boundary
 ORDER BY timestamp DESC;

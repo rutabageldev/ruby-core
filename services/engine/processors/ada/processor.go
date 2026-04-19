@@ -915,7 +915,7 @@ func (p *Processor) pushDiaperSensors(ctx context.Context, lastDiaperTime time.T
 		)
 	}
 	p.pushAll(ctx, pushes)
-	p.pushDiaperHistory(ctx)
+	p.pushDiaperHistory(ctx, btz)
 }
 
 // pushSupplementOzSensor pushes today_feeding_oz and last_feeding_source after
@@ -945,7 +945,8 @@ func (p *Processor) pushSleepStartedSensors(ctx context.Context, startTime time.
 		{sensorLastSleepChange, startTime.UTC().Format(time.RFC3339)},
 		{sensorSleepSessionMin, strconv.Itoa(sleepElapsedMin(startTime))},
 	})
-	p.pushSleepHistory(ctx)
+	btz := p.todayBoundaryTz(ctx)
+	p.pushSleepHistory(ctx, btz)
 }
 
 // pushSleepEndedSensors pushes sensors after a sleep session ends.
@@ -970,7 +971,7 @@ func (p *Processor) pushSleepEndedSensors(ctx context.Context, endTime time.Time
 		)
 	}
 	p.pushAll(ctx, pushes)
-	p.pushSleepHistory(ctx)
+	p.pushSleepHistory(ctx, btz)
 }
 
 // pushTummySensors pushes tummy time aggregate sensors.
@@ -1063,7 +1064,7 @@ func (p *Processor) pushDailyAggregates(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today diaper aggregates", slog.String("error", err.Error()))
 	}
-	p.pushDiaperHistory(ctx)
+	p.pushDiaperHistory(ctx, btz)
 
 	if agg, err := p.q.GetTodaySleepAggregates(ctx, btz); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
@@ -1074,7 +1075,7 @@ func (p *Processor) pushDailyAggregates(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today sleep aggregates", slog.String("error", err.Error()))
 	}
-	p.pushSleepHistory(ctx)
+	p.pushSleepHistory(ctx, btz)
 
 	if agg, err := p.q.GetTodayTummyAggregates(ctx, btz); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
@@ -1159,18 +1160,18 @@ func (p *Processor) todayBoundaryTz(ctx context.Context) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: boundary, Valid: true}
 }
 
-// pushTodayBoundary pushes sensor.ada_today_boundary with the current boundary
-// time so the HA dashboard can display elapsed-time since the boundary.
+// pushTodayBoundary pushes sensor.ada_today_boundary so the HA dashboard can
+// display elapsed-time since the boundary and pre-populate the config sub-screen.
 func (p *Processor) pushTodayBoundary(ctx context.Context) {
-	bedtimeHHMM := "19:00"
-	if row, err := p.q.GetConfig(ctx, cfgKeyBedtimeHHMM); err == nil {
-		bedtimeHHMM = row.Value
-	}
-	boundary := computeTodayBoundary(bedtimeHHMM)
+	cfg := p.loadSleepConfig(ctx)
+	boundary := computeTodayBoundary(cfg.BedtimeHHMM)
 	if err := p.ha.PushState(ctx, sensorTodayBoundary,
 		boundary.UTC().Format(time.RFC3339),
 		map[string]any{
 			"boundary_local": boundary.Format("Jan 2, 2006 3:04 PM"),
+			"bedtime_hhmm":   cfg.BedtimeHHMM,
+			"daytime_hhmm":   cfg.DaytimeHHMM,
+			"grace_min":      cfg.GraceMin,
 		},
 	); err != nil {
 		p.log.Warn("ada: push today boundary", slog.String("error", err.Error()))
@@ -1427,26 +1428,27 @@ type DiaperHistoryEntry struct {
 	ID        string `json:"id"`
 	Timestamp string `json:"timestamp"`
 	Type      string `json:"type"`
+	LoggedBy  string `json:"logged_by"`
 }
 
 // buildDiaperHistory converts sqlc rows to JSON-serializable history entries.
-func buildDiaperHistory(rows []*store.GetLast24hDiapersRow) []DiaperHistoryEntry {
+func buildDiaperHistory(rows []*store.GetTodayDiapersRow) []DiaperHistoryEntry {
 	entries := make([]DiaperHistoryEntry, 0, len(rows))
 	for _, r := range rows {
 		entries = append(entries, DiaperHistoryEntry{
 			ID:        uuid.UUID(r.ID.Bytes).String(),
 			Timestamp: r.Timestamp.Time.UTC().Format(time.RFC3339),
 			Type:      r.Type,
+			LoggedBy:  r.LoggedBy,
 		})
 	}
 	return entries
 }
 
-// pushDiaperHistory queries the last 24h of diaper events and pushes them as
-// attributes on sensor.ada_diaper_history. Uses a fixed 24h window (not boundary)
-// so the history modal always shows recent context regardless of when Today started.
-func (p *Processor) pushDiaperHistory(ctx context.Context) {
-	rows, err := p.q.GetLast24hDiapers(ctx)
+// pushDiaperHistory queries diaper events since the bedtime boundary and pushes
+// them as attributes on sensor.ada_diaper_history.
+func (p *Processor) pushDiaperHistory(ctx context.Context, btz pgtype.Timestamptz) {
+	rows, err := p.q.GetTodayDiapers(ctx, btz)
 	if err != nil {
 		p.log.Warn("ada: query diaper history", slog.String("error", err.Error()))
 		return
@@ -1470,20 +1472,24 @@ type SleepHistoryEntry struct {
 	StartTime string  `json:"start_time"`
 	EndTime   *string `json:"end_time,omitempty"`
 	SleepType string  `json:"sleep_type"`
+	LoggedBy  string  `json:"logged_by"`
 	DurationS *int    `json:"duration_s,omitempty"`
 }
 
 // buildSleepHistory converts sqlc rows to JSON-serializable history entries.
-// Active sessions (EndTime.Valid=false) are included with EndTime and DurationS omitted.
-func buildSleepHistory(rows []*store.GetLast24hSleepSessionsRow) []SleepHistoryEntry {
+// Active sessions (IsComplete=false) are included with EndTime and DurationS omitted.
+// end_time is always populated by COALESCE in the query; IsComplete distinguishes
+// a real end_time from the NOW() placeholder used for active sessions.
+func buildSleepHistory(rows []*store.GetTodaySleepSessionsRow) []SleepHistoryEntry {
 	entries := make([]SleepHistoryEntry, 0, len(rows))
 	for _, r := range rows {
 		e := SleepHistoryEntry{
 			ID:        uuid.UUID(r.ID.Bytes).String(),
 			StartTime: r.StartTime.Time.UTC().Format(time.RFC3339),
 			SleepType: r.SleepType,
+			LoggedBy:  r.LoggedBy,
 		}
-		if r.EndTime.Valid {
+		if r.IsComplete {
 			s := r.EndTime.Time.UTC().Format(time.RFC3339)
 			e.EndTime = &s
 			d := int(r.EndTime.Time.Sub(r.StartTime.Time).Seconds())
@@ -1494,11 +1500,10 @@ func buildSleepHistory(rows []*store.GetLast24hSleepSessionsRow) []SleepHistoryE
 	return entries
 }
 
-// pushSleepHistory queries the last 24h of sleep sessions and pushes them as
-// attributes on sensor.ada_sleep_history. Uses a fixed 24h window (not boundary)
-// so the history modal always shows recent context regardless of when Today started.
-func (p *Processor) pushSleepHistory(ctx context.Context) {
-	rows, err := p.q.GetLast24hSleepSessions(ctx)
+// pushSleepHistory queries sleep sessions since the bedtime boundary and pushes
+// them as attributes on sensor.ada_sleep_history.
+func (p *Processor) pushSleepHistory(ctx context.Context, btz pgtype.Timestamptz) {
+	rows, err := p.q.GetTodaySleepSessions(ctx, btz)
 	if err != nil {
 		p.log.Warn("ada: query sleep history", slog.String("error", err.Error()))
 		return
