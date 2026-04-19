@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	goNats "github.com/nats-io/nats.go"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 	"github.com/primaryrutabaga/ruby-core/services/gateway/ada"
 	gatewayNats "github.com/primaryrutabaga/ruby-core/services/gateway/nats"
 )
@@ -47,6 +49,14 @@ type haEntityState struct {
 	LastChanged string         `json:"last_changed"`
 }
 
+// haUserEntry is one HA user account from the config/auth/list WebSocket response.
+type haUserEntry struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Username string `json:"username"`
+	IsActive bool   `json:"is_active"`
+}
+
 // Client connects to the Home Assistant WebSocket API, subscribes to
 // state_changed and ada_event events, normalises state_changed events via the
 // Normalizer, and publishes CloudEvents to NATS. On each successful reconnect
@@ -62,6 +72,7 @@ type Client struct {
 	reconciler   *Reconciler
 	log          *slog.Logger
 	haConnected  atomic.Bool
+	httpClient   *http.Client
 }
 
 // NewClient creates a Client.
@@ -85,6 +96,7 @@ func NewClient(
 		critEntities: critEntities,
 		reconciler:   reconciler,
 		log:          log,
+		httpClient:   &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -168,9 +180,11 @@ func (c *Client) runOnce(ctx context.Context) error {
 	}
 
 	// ── subscribe to events ────────────────────────────────────────────────
-	// IDs must be unique per connection; increment if adding subscriptions.
+	// IDs must be unique per connection; 1 and 2 are used by the two subscriptions.
+	// msgID is incremented for any subsequent command (e.g. config/auth/list).
 	const subID = 1    // state_changed
 	const adaSubID = 2 // ada_event (Phase 3b dashboard write path)
+	msgID := 3         // next available ID for on-demand commands
 
 	if err := conn.WriteJSON(haWSMessage{
 		ID:        subID,
@@ -227,7 +241,7 @@ func (c *Client) runOnce(ctx context.Context) error {
 		if msg.Type != "event" || msg.Event == nil {
 			continue
 		}
-		if err := c.handleEvent(msg.Event); err != nil {
+		if err := c.handleEvent(ctx, conn, &msgID, msg.Event); err != nil {
 			c.log.Warn("ha websocket: handle event error",
 				slog.String("error", err.Error()),
 			)
@@ -236,10 +250,10 @@ func (c *Client) runOnce(ctx context.Context) error {
 }
 
 // handleEvent routes an incoming HA WebSocket event by event_type.
-func (c *Client) handleEvent(ev *haEvent) error {
+func (c *Client) handleEvent(ctx context.Context, conn *websocket.Conn, nextID *int, ev *haEvent) error {
 	switch ev.EventType {
 	case "ada_event":
-		return c.handleAdaEvent(ev)
+		return c.handleAdaEvent(ctx, conn, nextID, ev)
 	default:
 		return c.handleStateChanged(ev)
 	}
@@ -286,8 +300,9 @@ func (c *Client) handleStateChanged(ev *haEvent) error {
 //
 //	{"payload": {"event": "ada.diaper.log", "type": "dirty", ...}}
 //
-// Unwrap the inner payload before forwarding to ada.Publish.
-func (c *Client) handleAdaEvent(ev *haEvent) error {
+// ada.sync_users is intercepted here and handled inline via the open WebSocket
+// connection — it does not go through the standard eventRoutes publish path.
+func (c *Client) handleAdaEvent(ctx context.Context, conn *websocket.Conn, nextID *int, ev *haEvent) error {
 	var wrapper struct {
 		Payload map[string]any `json:"payload"`
 	}
@@ -297,7 +312,127 @@ func (c *Client) handleAdaEvent(ev *haEvent) error {
 	if wrapper.Payload == nil {
 		return fmt.Errorf("ha: ada_event missing payload field")
 	}
+
+	eventType, _ := wrapper.Payload["event"].(string)
+	if eventType == "ada.sync_users" {
+		id := *nextID
+		*nextID++
+		return c.syncUsers(ctx, conn, id)
+	}
+
 	return ada.Publish(c.nc, wrapper.Payload, c.log)
+}
+
+// syncUsers queries HA for all active users via the config/auth/list WebSocket
+// command, discovers Companion app notify services via the REST API, and
+// publishes ha.events.ada.users_synced to NATS.
+func (c *Client) syncUsers(ctx context.Context, conn *websocket.Conn, id int) error {
+	if err := conn.WriteJSON(map[string]any{
+		"id":   id,
+		"type": "config/auth/list",
+	}); err != nil {
+		return fmt.Errorf("ha: write config/auth/list: %w", err)
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Error   *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Result struct {
+			Users []haUserEntry `json:"users"`
+		} `json:"result"`
+	}
+	if err := conn.ReadJSON(&result); err != nil {
+		return fmt.Errorf("ha: read config/auth/list result: %w", err)
+	}
+	if !result.Success {
+		msg := "unknown error"
+		if result.Error != nil {
+			msg = result.Error.Message
+		}
+		return fmt.Errorf("ha: config/auth/list failed: %s", msg)
+	}
+
+	notifyServices, err := c.fetchNotifyServices(ctx)
+	if err != nil {
+		c.log.Warn("ha: fetch notify services", slog.String("error", err.Error()))
+		notifyServices = map[string]bool{}
+	}
+
+	users := make([]schemas.AdaHAUser, 0, len(result.Result.Users))
+	for _, u := range result.Result.Users {
+		if !u.IsActive {
+			continue
+		}
+		users = append(users, schemas.AdaHAUser{
+			ID:            u.ID,
+			Name:          u.Name,
+			Username:      u.Username,
+			NotifyService: matchNotifyService(u, notifyServices),
+		})
+	}
+
+	return ada.PublishUsersSynced(c.nc, users, c.log)
+}
+
+// fetchNotifyServices queries GET /api/services and returns the set of
+// registered notify service names (e.g. "mobile_app_mikes_iphone").
+func (c *Client) fetchNotifyServices(ctx context.Context) (map[string]bool, error) {
+	url := strings.TrimRight(c.haURL, "/") + "/api/services"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.haToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var domains []struct {
+		Domain   string         `json:"domain"`
+		Services map[string]any `json:"services"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&domains); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]bool)
+	for _, d := range domains {
+		if d.Domain == "notify" {
+			for svc := range d.Services {
+				result[svc] = true
+			}
+		}
+	}
+	return result, nil
+}
+
+// matchNotifyService attempts to find a mobile_app_* notify service for the
+// given HA user by normalizing their username and display name.
+func matchNotifyService(u haUserEntry, notifyServices map[string]bool) string {
+	candidates := []string{
+		"mobile_app_" + normalizeForNotify(u.Username),
+		"mobile_app_" + normalizeForNotify(u.Name),
+	}
+	for _, c := range candidates {
+		if notifyServices[c] {
+			return c
+		}
+	}
+	return ""
+}
+
+// normalizeForNotify lowercases s and replaces spaces and hyphens with
+// underscores to match the mobile_app_* naming convention.
+func normalizeForNotify(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, " ", "_")
+	s = strings.ReplaceAll(s, "-", "_")
+	return s
 }
 
 // haWSURL converts an HTTP(S) HA base URL to a WebSocket URL.
