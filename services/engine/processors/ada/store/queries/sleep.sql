@@ -32,7 +32,17 @@ SELECT
         LEAST(COALESCE(end_time, NOW()), NOW()) - GREATEST(start_time, @boundary)
     )) / 3600, 0)::float8 AS total_hours,
     COUNT(*) FILTER (WHERE sleep_type = 'night')::int AS night_count,
-    COUNT(*) FILTER (WHERE sleep_type = 'nap')::int   AS nap_count
+    COUNT(*) FILTER (WHERE sleep_type = 'nap')::int   AS nap_count,
+    COALESCE(EXTRACT(EPOCH FROM SUM(
+        CASE WHEN sleep_type = 'night'
+        THEN LEAST(COALESCE(end_time, NOW()), NOW()) - GREATEST(start_time, @boundary)
+        END
+    )) / 3600, 0)::float8 AS night_hours,
+    COALESCE(EXTRACT(EPOCH FROM SUM(
+        CASE WHEN sleep_type = 'nap'
+        THEN LEAST(COALESCE(end_time, NOW()), NOW()) - GREATEST(start_time, @boundary)
+        END
+    )) / 3600, 0)::float8 AS nap_hours
 FROM sleep_sessions
 WHERE deleted_at IS NULL
   AND (end_time IS NULL OR end_time > @boundary);

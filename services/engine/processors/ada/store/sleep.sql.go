@@ -43,7 +43,17 @@ SELECT
         LEAST(COALESCE(end_time, NOW()), NOW()) - GREATEST(start_time, $1)
     )) / 3600, 0)::float8 AS total_hours,
     COUNT(*) FILTER (WHERE sleep_type = 'night')::int AS night_count,
-    COUNT(*) FILTER (WHERE sleep_type = 'nap')::int   AS nap_count
+    COUNT(*) FILTER (WHERE sleep_type = 'nap')::int   AS nap_count,
+    COALESCE(EXTRACT(EPOCH FROM SUM(
+        CASE WHEN sleep_type = 'night'
+        THEN LEAST(COALESCE(end_time, NOW()), NOW()) - GREATEST(start_time, $1)
+        END
+    )) / 3600, 0)::float8 AS night_hours,
+    COALESCE(EXTRACT(EPOCH FROM SUM(
+        CASE WHEN sleep_type = 'nap'
+        THEN LEAST(COALESCE(end_time, NOW()), NOW()) - GREATEST(start_time, $1)
+        END
+    )) / 3600, 0)::float8 AS nap_hours
 FROM sleep_sessions
 WHERE deleted_at IS NULL
   AND (end_time IS NULL OR end_time > $1)
@@ -53,12 +63,20 @@ type GetTodaySleepAggregatesRow struct {
 	TotalHours float64
 	NightCount int32
 	NapCount   int32
+	NightHours float64
+	NapHours   float64
 }
 
 func (q *Queries) GetTodaySleepAggregates(ctx context.Context, boundary pgtype.Timestamptz) (*GetTodaySleepAggregatesRow, error) {
 	row := q.db.QueryRow(ctx, getTodaySleepAggregates, boundary)
 	var i GetTodaySleepAggregatesRow
-	err := row.Scan(&i.TotalHours, &i.NightCount, &i.NapCount)
+	err := row.Scan(
+		&i.TotalHours,
+		&i.NightCount,
+		&i.NapCount,
+		&i.NightHours,
+		&i.NapHours,
+	)
 	return &i, err
 }
 
