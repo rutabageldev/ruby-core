@@ -367,10 +367,10 @@ func (c *Client) syncUsers(ctx context.Context, conn *websocket.Conn, id int) er
 		return fmt.Errorf("ha: unmarshal config/auth/list users: %w", err)
 	}
 
-	notifyServices, err := c.fetchNotifyServices(ctx)
+	availableServices, err := c.fetchMobileAppServices(ctx)
 	if err != nil {
 		c.log.Warn("ha: fetch notify services", slog.String("error", err.Error()))
-		notifyServices = map[string]bool{}
+		availableServices = nil
 	}
 
 	users := make([]schemas.AdaHAUser, 0, len(haUsers))
@@ -379,19 +379,19 @@ func (c *Client) syncUsers(ctx context.Context, conn *websocket.Conn, id int) er
 			continue
 		}
 		users = append(users, schemas.AdaHAUser{
-			ID:            u.ID,
-			Name:          u.Name,
-			Username:      u.Username,
-			NotifyService: matchNotifyService(u, notifyServices),
+			ID:       u.ID,
+			Name:     u.Name,
+			Username: u.Username,
 		})
 	}
 
-	return ada.PublishUsersSynced(c.nc, users, c.log)
+	return ada.PublishUsersSynced(c.nc, users, availableServices, c.log)
 }
 
-// fetchNotifyServices queries GET /api/services and returns the set of
-// registered notify service names (e.g. "mobile_app_mikes_iphone").
-func (c *Client) fetchNotifyServices(ctx context.Context) (map[string]bool, error) {
+// fetchMobileAppServices queries GET /api/services and returns all mobile_app_*
+// notify service names. These are passed to the engine for the device picker;
+// the engine stores them and subtracts already-linked addresses from the list.
+func (c *Client) fetchMobileAppServices(ctx context.Context) ([]string, error) {
 	url := strings.TrimRight(c.haURL, "/") + "/api/services"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -413,39 +413,17 @@ func (c *Client) fetchNotifyServices(ctx context.Context) (map[string]bool, erro
 		return nil, err
 	}
 
-	result := make(map[string]bool)
+	var services []string
 	for _, d := range domains {
 		if d.Domain == "notify" {
 			for svc := range d.Services {
-				result[svc] = true
+				if strings.HasPrefix(svc, "mobile_app_") {
+					services = append(services, svc)
+				}
 			}
 		}
 	}
-	return result, nil
-}
-
-// matchNotifyService attempts to find a mobile_app_* notify service for the
-// given HA user by normalizing their username and display name.
-func matchNotifyService(u haUserEntry, notifyServices map[string]bool) string {
-	candidates := []string{
-		"mobile_app_" + normalizeForNotify(u.Username),
-		"mobile_app_" + normalizeForNotify(u.Name),
-	}
-	for _, c := range candidates {
-		if notifyServices[c] {
-			return c
-		}
-	}
-	return ""
-}
-
-// normalizeForNotify lowercases s and replaces spaces and hyphens with
-// underscores to match the mobile_app_* naming convention.
-func normalizeForNotify(s string) string {
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, " ", "_")
-	s = strings.ReplaceAll(s, "-", "_")
-	return s
+	return services, nil
 }
 
 // haWSURL converts an HTTP(S) HA base URL to a WebSocket URL.

@@ -21,18 +21,6 @@ type AdaProfile struct {
 	CreatedAt pgtype.Timestamptz
 }
 
-type Caretaker struct {
-	ID            pgtype.UUID
-	HaUserID      string
-	DisplayName   string
-	Username      string
-	IsCaretaker   bool
-	NotifyService pgtype.Text
-	DeletedAt     pgtype.Timestamptz
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-}
-
 type Diaper struct {
 	ID        pgtype.UUID
 	Timestamp pgtype.Timestamptz
@@ -66,6 +54,27 @@ type FeedingSegment struct {
 	StartedAt pgtype.Timestamptz
 	EndedAt   pgtype.Timestamptz
 	DurationS int32
+}
+
+type Person struct {
+	ID          pgtype.UUID
+	HaUserID    string
+	DisplayName string
+	Username    string
+	IsCaretaker bool
+	DeletedAt   pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type PersonChannel struct {
+	ID        pgtype.UUID
+	PersonID  pgtype.UUID
+	Type      string
+	Address   string
+	Label     pgtype.Text
+	IsActive  bool
+	CreatedAt pgtype.Timestamptz
 }
 
 type SleepSession struct {
