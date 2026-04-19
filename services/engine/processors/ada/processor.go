@@ -888,7 +888,7 @@ func (p *Processor) pushFeedingSensors(ctx context.Context) {
 		)
 	}
 	p.pushAll(ctx, pushes)
-	p.pushFeedingHistory(ctx, btz)
+	p.pushFeedingHistory(ctx)
 }
 
 // pushDiaperSensors pushes all diaper-related sensors after a diaper event.
@@ -933,7 +933,7 @@ func (p *Processor) pushSupplementOzSensor(ctx context.Context) {
 		{sensorTodayFeedingOz, strconv.FormatFloat(agg.TotalOz, 'f', 2, 64)},
 		{sensorLastFeedingSource, "supplemented"},
 	})
-	p.pushFeedingHistory(ctx, btz)
+	p.pushFeedingHistory(ctx)
 }
 
 // pushSleepStartedSensors pushes sensors after a sleep session starts.
@@ -1057,7 +1057,7 @@ func (p *Processor) pushDailyAggregates(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today feeding aggregates", slog.String("error", err.Error()))
 	}
-	p.pushFeedingHistory(ctx, btz)
+	p.pushFeedingHistory(ctx)
 
 	if agg, err := p.q.GetTodayDiaperAggregates(ctx, btz); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
@@ -1404,10 +1404,12 @@ func buildFeedingHistory(rows []*store.GetLast24hFeedingsRow) []FeedingHistoryEn
 	return entries
 }
 
-// pushFeedingHistory queries feedings since @boundary and pushes them as
-// attributes on sensor.ada_feeding_history.
-func (p *Processor) pushFeedingHistory(ctx context.Context, btz pgtype.Timestamptz) {
-	rows, err := p.q.GetLast24hFeedings(ctx, btz)
+// pushFeedingHistory queries the last 24h of feedings and pushes them as
+// attributes on sensor.ada_feeding_history. Uses a fixed 24h window so the
+// history modal always shows recent context regardless of the bedtime boundary.
+func (p *Processor) pushFeedingHistory(ctx context.Context) {
+	window := pgtype.Timestamptz{Time: time.Now().UTC().Add(-24 * time.Hour), Valid: true}
+	rows, err := p.q.GetLast24hFeedings(ctx, window)
 	if err != nil {
 		p.log.Warn("ada: query feeding history failed", slog.String("error", err.Error()))
 		return
