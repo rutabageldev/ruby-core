@@ -28,6 +28,8 @@ var eventRoutes = map[string]string{
 	"ada.born":                schemas.AdaEventBorn,
 	"ada.caretaker.update":    schemas.AdaEventCaretakerUpdate,
 	"ada.config.tummy_target": schemas.AdaEventTummyTarget,
+	"ada.channel.add":         schemas.AdaEventAddChannel,
+	"ada.channel.remove":      schemas.AdaEventRemoveChannel,
 }
 
 // Publish wraps payload in a CloudEvent and publishes to the appropriate
@@ -74,7 +76,9 @@ func Publish(nc *goNats.Conn, payload map[string]any, log *slog.Logger) error {
 // PublishUsersSynced wraps the synced user list in a CloudEvent and publishes
 // it to ha.events.ada.users_synced on NATS. Called directly by the gateway
 // after querying HA — not routed through eventRoutes.
-func PublishUsersSynced(nc *goNats.Conn, users []schemas.AdaHAUser, log *slog.Logger) error {
+// availableServices is the full list of mobile_app_* notify service names
+// discovered from HA, forwarded so the engine can populate the device picker.
+func PublishUsersSynced(nc *goNats.Conn, users []schemas.AdaHAUser, availableServices []string, log *slog.Logger) error {
 	subject := schemas.AdaEventUsersSynced
 	id := newID()
 	evt := schemas.CloudEvent{
@@ -87,7 +91,8 @@ func PublishUsersSynced(nc *goNats.Conn, users []schemas.AdaHAUser, log *slog.Lo
 		CorrelationID: id,
 		CausationID:   id,
 		Data: map[string]any{
-			"users": users,
+			"users":              users,
+			"available_services": availableServices,
 		},
 	}
 	b, err := json.Marshal(evt)

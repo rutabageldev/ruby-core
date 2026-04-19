@@ -180,6 +180,10 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleUsersSynced(ctx, evt)
 	case schemas.AdaEventCaretakerUpdate:
 		return p.handleCaretakerUpdate(ctx, evt)
+	case schemas.AdaEventAddChannel:
+		return p.handleAddChannel(ctx, evt)
+	case schemas.AdaEventRemoveChannel:
+		return p.handleRemoveChannel(ctx, evt)
 	case schemas.AdaEventTummyTarget:
 		return p.handleTummyTarget(ctx, evt)
 	case "ha.events.input_number.ada_alert_threshold_h":
@@ -573,7 +577,7 @@ func (p *Processor) handleBornEvent(ctx context.Context, evt schemas.CloudEvent)
 	return nil
 }
 
-// ── Caretaker and config handlers ────────────────────────────────────────────
+// ── People and channel handlers ───────────────────────────────────────────────
 
 func (p *Processor) handleUsersSynced(ctx context.Context, evt schemas.CloudEvent) error {
 	var d schemas.AdaUsersSyncedData
@@ -583,28 +587,26 @@ func (p *Processor) handleUsersSynced(ctx context.Context, evt schemas.CloudEven
 
 	incomingIDs := make(map[string]bool, len(d.Users))
 	for _, u := range d.Users {
-		ns := pgtype.Text{String: u.NotifyService, Valid: u.NotifyService != ""}
-		if err := p.q.UpsertCaretaker(ctx, &store.UpsertCaretakerParams{
-			HaUserID:      u.ID,
-			DisplayName:   u.Name,
-			Username:      u.Username,
-			NotifyService: ns,
+		if err := p.q.UpsertPerson(ctx, &store.UpsertPersonParams{
+			HaUserID:    u.ID,
+			DisplayName: u.Name,
+			Username:    u.Username,
 		}); err != nil {
-			p.log.Warn("ada: upsert caretaker",
+			p.log.Warn("ada: upsert person",
 				slog.String("user_id", u.ID),
 				slog.String("error", err.Error()))
 		}
 		incomingIDs[u.ID] = true
 	}
 
-	existing, err := p.q.GetCaretakerHAUserIDs(ctx)
+	existing, err := p.q.GetPersonHAUserIDs(ctx)
 	if err != nil {
-		p.log.Warn("ada: get caretaker ids", slog.String("error", err.Error()))
+		p.log.Warn("ada: get person ids", slog.String("error", err.Error()))
 	} else {
 		for _, id := range existing {
 			if !incomingIDs[id] {
-				if err := p.q.SoftDeleteCaretaker(ctx, id); err != nil {
-					p.log.Warn("ada: soft-delete caretaker",
+				if err := p.q.SoftDeletePerson(ctx, id); err != nil {
+					p.log.Warn("ada: soft-delete person",
 						slog.String("user_id", id),
 						slog.String("error", err.Error()))
 				}
@@ -612,8 +614,19 @@ func (p *Processor) handleUsersSynced(ctx context.Context, evt schemas.CloudEven
 		}
 	}
 
+	// Persist available notify services for the device picker.
+	if len(d.AvailableServices) > 0 {
+		b, _ := json.Marshal(d.AvailableServices)
+		if err := p.q.UpsertConfig(ctx, &store.UpsertConfigParams{
+			Key:   "available_notify_services",
+			Value: string(b),
+		}); err != nil {
+			p.log.Warn("ada: upsert available_notify_services", slog.String("error", err.Error()))
+		}
+	}
+
 	p.log.Info("ada: users synced", slog.Int("count", len(d.Users)))
-	p.pushCaretakerList(ctx)
+	p.pushPeopleList(ctx)
 	return nil
 }
 
@@ -631,7 +644,58 @@ func (p *Processor) handleCaretakerUpdate(ctx context.Context, evt schemas.Cloud
 	p.log.Info("ada: caretaker updated",
 		slog.String("user_id", d.HAUserID),
 		slog.Bool("is_caretaker", d.IsCaretaker))
-	p.pushCaretakerList(ctx)
+	p.pushPeopleList(ctx)
+	return nil
+}
+
+func (p *Processor) handleAddChannel(ctx context.Context, evt schemas.CloudEvent) error {
+	var d schemas.AdaAddChannelData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode add_channel: %w", err)
+	}
+	person, err := p.q.GetPersonByHAUserID(ctx, d.HAUserID)
+	if err != nil {
+		return fmt.Errorf("ada: get person for channel add: %w", err)
+	}
+	if err := p.q.AddPersonChannel(ctx, &store.AddPersonChannelParams{
+		PersonID: person.ID,
+		Type:     d.Type,
+		Address:  d.Address,
+		Label:    pgtype.Text{String: d.Label, Valid: d.Label != ""},
+	}); err != nil {
+		return fmt.Errorf("ada: add channel: %w", err)
+	}
+	p.log.Info("ada: channel added",
+		slog.String("user_id", d.HAUserID),
+		slog.String("type", d.Type),
+		slog.String("address", d.Address))
+	p.pushPeopleList(ctx)
+	return nil
+}
+
+func (p *Processor) handleRemoveChannel(ctx context.Context, evt schemas.CloudEvent) error {
+	var d schemas.AdaRemoveChannelData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode remove_channel: %w", err)
+	}
+	person, err := p.q.GetPersonByHAUserID(ctx, d.HAUserID)
+	if err != nil {
+		return fmt.Errorf("ada: get person for channel remove: %w", err)
+	}
+	channelID, err := uuid.Parse(d.ChannelID)
+	if err != nil {
+		return fmt.Errorf("ada: parse channel id: %w", err)
+	}
+	if err := p.q.RemovePersonChannel(ctx, &store.RemovePersonChannelParams{
+		ID:       pgtype.UUID{Bytes: channelID, Valid: true},
+		PersonID: person.ID,
+	}); err != nil {
+		return fmt.Errorf("ada: remove channel: %w", err)
+	}
+	p.log.Info("ada: channel removed",
+		slog.String("channel_id", d.ChannelID),
+		slog.String("user_id", d.HAUserID))
+	p.pushPeopleList(ctx)
 	return nil
 }
 
@@ -862,7 +926,7 @@ func (p *Processor) refreshAllSensors(ctx context.Context) {
 	p.pushLastEventSensors(ctx)
 	p.pushDailyAggregates(ctx)
 	p.pushActiveSleepState(ctx)
-	p.pushCaretakerList(ctx)
+	p.pushPeopleList(ctx)
 	p.restoreAlertTimer(ctx)
 }
 
@@ -1244,13 +1308,13 @@ func (p *Processor) restoreAlertTimer(ctx context.Context) {
 // dispatchFeedingAlert sends a push notification to all active caretakers.
 // Called by the alert timer goroutine — must not block indefinitely.
 func (p *Processor) dispatchFeedingAlert(ctx context.Context, lastFeedingTime time.Time) {
-	caretakers, err := p.q.GetActiveCaretakers(ctx)
+	channels, err := p.q.GetActivePeopleWithChannels(ctx)
 	if err != nil {
-		p.log.Warn("ada: get active caretakers for alert", slog.String("error", err.Error()))
+		p.log.Warn("ada: get active people with channels", slog.String("error", err.Error()))
 		return
 	}
-	if len(caretakers) == 0 {
-		p.log.Debug("ada: no active caretakers — skipping feeding alert")
+	if len(channels) == 0 {
+		p.log.Debug("ada: no active caretaker channels — skipping feeding alert")
 		return
 	}
 
@@ -1258,61 +1322,104 @@ func (p *Processor) dispatchFeedingAlert(ctx context.Context, lastFeedingTime ti
 	timeStr := lastFeedingTime.UTC().Format("3:04 PM UTC")
 	msg := fmt.Sprintf("Ada hasn't eaten since %s.", timeStr)
 
-	for _, c := range caretakers {
-		svc := c.NotifyService.String
-		if !c.NotifyService.Valid || svc == "" {
-			continue
-		}
-		if err := p.ha.Notify(ctx, svc, "Time to feed Ada 🍼", msg); err != nil {
-			p.log.Warn("ada: notify caretaker",
-				slog.String("service", svc),
-				slog.String("error", err.Error()))
+	for _, ch := range channels {
+		switch ch.Type {
+		case "ha_push":
+			if err := p.ha.Notify(ctx, ch.Address, "Time to feed Ada 🍼", msg); err != nil {
+				p.log.Warn("ada: ha_push notify failed",
+					slog.String("address", ch.Address),
+					slog.String("error", err.Error()))
+			}
+		case "sms":
+			// Twilio not yet implemented — log and skip.
+			p.log.Debug("ada: sms channel skipped (not yet implemented)",
+				slog.String("address", ch.Address))
 		}
 	}
 }
 
-// ── Caretaker list push ───────────────────────────────────────────────────────
+// ── People list push ──────────────────────────────────────────────────────────
 
-// pushCaretakerList queries all non-deleted caretakers and pushes them to
-// sensor.ada_caretakers so the HA config screen can render the full list.
-func (p *Processor) pushCaretakerList(ctx context.Context) {
-	rows, err := p.q.GetAllCaretakers(ctx)
+// pushPeopleList queries all non-deleted people with their channels and pushes
+// them to sensor.ada_caretakers (entity ID retained for HA dashboard compatibility).
+func (p *Processor) pushPeopleList(ctx context.Context) {
+	people, err := p.q.GetAllPeople(ctx)
 	if err != nil {
-		p.log.Warn("ada: get all caretakers", slog.String("error", err.Error()))
+		p.log.Warn("ada: get all people", slog.String("error", err.Error()))
 		return
 	}
 
-	type entry struct {
-		HAUserID      string `json:"ha_user_id"`
-		DisplayName   string `json:"display_name"`
-		Username      string `json:"username"`
-		IsCaretaker   bool   `json:"is_caretaker"`
-		NotifyService any    `json:"notify_service"` // string or null
+	type channelEntry struct {
+		ID      string `json:"id"`
+		Type    string `json:"type"`
+		Address string `json:"address"`
+		Label   any    `json:"label"` // string or null
+	}
+	type personEntry struct {
+		HAUserID    string         `json:"ha_user_id"`
+		DisplayName string         `json:"display_name"`
+		Username    string         `json:"username"`
+		IsCaretaker bool           `json:"is_caretaker"`
+		Channels    []channelEntry `json:"channels"`
 	}
 
-	entries := make([]entry, 0, len(rows))
-	for _, r := range rows {
-		var ns any
-		if r.NotifyService.Valid {
-			ns = r.NotifyService.String
+	entries := make([]personEntry, 0, len(people))
+	for _, person := range people {
+		chs, err := p.q.GetChannelsForPerson(ctx, person.ID)
+		if err != nil {
+			p.log.Warn("ada: get channels for person",
+				slog.String("person_id", person.ID.String()),
+				slog.String("error", err.Error()))
+			chs = nil
 		}
-		entries = append(entries, entry{
-			HAUserID:      r.HaUserID,
-			DisplayName:   r.DisplayName,
-			Username:      r.Username,
-			IsCaretaker:   r.IsCaretaker,
-			NotifyService: ns,
+		channelEntries := make([]channelEntry, 0, len(chs))
+		for _, ch := range chs {
+			var label any
+			if ch.Label.Valid {
+				label = ch.Label.String
+			}
+			channelEntries = append(channelEntries, channelEntry{
+				ID:      ch.ID.String(),
+				Type:    ch.Type,
+				Address: ch.Address,
+				Label:   label,
+			})
+		}
+		entries = append(entries, personEntry{
+			HAUserID:    person.HaUserID,
+			DisplayName: person.DisplayName,
+			Username:    person.Username,
+			IsCaretaker: person.IsCaretaker,
+			Channels:    channelEntries,
 		})
+	}
+
+	// Build unlinked available services list for the device picker.
+	linked, _ := p.q.GetLinkedHAPushAddresses(ctx)
+	linkedSet := make(map[string]bool, len(linked))
+	for _, addr := range linked {
+		linkedSet[addr] = true
+	}
+	var availableServices []string
+	if cfg, err := p.q.GetConfig(ctx, "available_notify_services"); err == nil {
+		_ = json.Unmarshal([]byte(cfg.Value), &availableServices)
+	}
+	unlinked := make([]string, 0)
+	for _, svc := range availableServices {
+		if !linkedSet[svc] {
+			unlinked = append(unlinked, svc)
+		}
 	}
 
 	if err := p.ha.PushState(ctx, "sensor.ada_caretakers",
 		strconv.Itoa(len(entries)),
 		map[string]any{
-			"caretakers":   entries,
-			"last_updated": time.Now().UTC().Format(time.RFC3339),
+			"people":             entries,
+			"available_services": unlinked,
+			"last_updated":       time.Now().UTC().Format(time.RFC3339),
 		},
 	); err != nil {
-		p.log.Warn("ada: push caretaker list", slog.String("error", err.Error()))
+		p.log.Warn("ada: push people list", slog.String("error", err.Error()))
 	}
 }
 

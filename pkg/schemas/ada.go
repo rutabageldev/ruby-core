@@ -17,6 +17,8 @@ const (
 	AdaEventUsersSynced         = "ha.events.ada.users_synced"
 	AdaEventCaretakerUpdate     = "ha.events.ada.caretaker_update"
 	AdaEventTummyTarget         = "ha.events.ada.config_tummy_target"
+	AdaEventAddChannel          = "ha.events.ada.add_channel"
+	AdaEventRemoveChannel       = "ha.events.ada.remove_channel"
 )
 
 // AdaFeedingEndedData is the CloudEvent Data payload for a breast feeding session end.
@@ -106,15 +108,17 @@ type AdaTummyLoggedData struct {
 
 // AdaHAUser represents one HA user returned by the gateway user sync.
 type AdaHAUser struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Username      string `json:"username"`
-	NotifyService string `json:"notify_service,omitempty"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Username string `json:"username"`
 }
 
 // AdaUsersSyncedData is published by the gateway after querying HA users.
+// AvailableServices is the full list of mobile_app_* notify service names
+// discovered from HA, used to populate the device picker in the config screen.
 type AdaUsersSyncedData struct {
-	Users []AdaHAUser `json:"users"`
+	Users             []AdaHAUser `json:"users"`
+	AvailableServices []string    `json:"available_services"`
 }
 
 // AdaCaretakerUpdateData is fired by the HA config screen on caretaker toggle.
@@ -122,6 +126,22 @@ type AdaCaretakerUpdateData struct {
 	HAUserID    string `json:"ha_user_id"`
 	IsCaretaker bool   `json:"is_caretaker"`
 	LoggedBy    string `json:"logged_by,omitempty"`
+}
+
+// AdaAddChannelData is fired when a user adds a notification channel to a person.
+type AdaAddChannelData struct {
+	HAUserID string `json:"ha_user_id"` // identifies the person
+	Type     string `json:"type"`       // "ha_push" | "sms"
+	Address  string `json:"address"`    // mobile_app_* service name or E.164 phone number
+	Label    string `json:"label,omitempty"`
+	LoggedBy string `json:"logged_by,omitempty"`
+}
+
+// AdaRemoveChannelData is fired when a user removes a notification channel.
+type AdaRemoveChannelData struct {
+	ChannelID string `json:"channel_id"` // UUID of the person_channels row
+	HAUserID  string `json:"ha_user_id"` // for ownership verification
+	LoggedBy  string `json:"logged_by,omitempty"`
 }
 
 // AdaTummyTargetData is fired by the HA config screen on tummy time target save.
