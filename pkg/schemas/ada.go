@@ -13,6 +13,10 @@ const (
 	AdaEventTummyLogged         = "ha.events.ada.tummy_logged"
 	AdaEventFeedingLoggedPast   = "ha.events.ada.feeding_logged_past"
 	AdaEventBorn                = "ha.events.ada.born"
+	AdaEventSyncUsers           = "ha.events.ada.sync_users"
+	AdaEventUsersSynced         = "ha.events.ada.users_synced"
+	AdaEventCaretakerUpdate     = "ha.events.ada.caretaker_update"
+	AdaEventTummyTarget         = "ha.events.ada.config_tummy_target"
 )
 
 // AdaFeedingEndedData is the CloudEvent Data payload for a breast feeding session end.
@@ -97,6 +101,32 @@ type AdaTummyLoggedData struct {
 	StartTime string `json:"start_time"` // RFC3339; actual event time
 	EndTime   string `json:"end_time"`   // RFC3339; actual event time
 	DurationS int    `json:"duration_s"`
+	LoggedBy  string `json:"logged_by,omitempty"`
+}
+
+// AdaHAUser represents one HA user returned by the gateway user sync.
+type AdaHAUser struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Username      string `json:"username"`
+	NotifyService string `json:"notify_service,omitempty"`
+}
+
+// AdaUsersSyncedData is published by the gateway after querying HA users.
+type AdaUsersSyncedData struct {
+	Users []AdaHAUser `json:"users"`
+}
+
+// AdaCaretakerUpdateData is fired by the HA config screen on caretaker toggle.
+type AdaCaretakerUpdateData struct {
+	HAUserID    string `json:"ha_user_id"`
+	IsCaretaker bool   `json:"is_caretaker"`
+	LoggedBy    string `json:"logged_by,omitempty"`
+}
+
+// AdaTummyTargetData is fired by the HA config screen on tummy time target save.
+type AdaTummyTargetData struct {
+	TargetMin int    `json:"target_min"`
 	LoggedBy  string `json:"logged_by,omitempty"`
 }
 

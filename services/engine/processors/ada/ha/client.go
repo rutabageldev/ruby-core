@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -70,6 +71,37 @@ func (c *Client) PushState(ctx context.Context, entityID, state string, attribut
 			slog.Int("status", resp.StatusCode),
 		)
 		return fmt.Errorf("ha: push state %s: HTTP %d", entityID, resp.StatusCode)
+	}
+	return nil
+}
+
+// Notify sends a push notification via HA's notify service REST API.
+// service is the full notify service name, e.g. "mobile_app_mikes_iphone".
+func (c *Client) Notify(ctx context.Context, service, title, message string) error {
+	body, err := json.Marshal(map[string]string{
+		"title":   title,
+		"message": message,
+	})
+	if err != nil {
+		return fmt.Errorf("ha: marshal notify payload: %w", err)
+	}
+
+	url := strings.TrimRight(c.baseURL, "/") + "/api/services/notify/" + service
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("ha: build notify request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("ha: notify %s: %w", service, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("ha: notify %s: HTTP %d", service, resp.StatusCode)
 	}
 	return nil
 }

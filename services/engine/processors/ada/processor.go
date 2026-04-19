@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,6 +68,8 @@ type Processor struct {
 	stopCh          chan struct{}
 	lastRefreshDate time.Time // date of last daily-aggregate push (for midnight rollover)
 	lastFullRefresh time.Time // time of last full sensor restore (for 4h safety net)
+	alertMu         sync.Mutex
+	alertTimer      *time.Timer
 }
 
 // compile-time interface check
@@ -125,6 +128,11 @@ func (p *Processor) Initialize(cfg processor.Config) error {
 // background ticker goroutine. The pool and HA client are owned by the engine
 // and must not be closed here.
 func (p *Processor) Shutdown() {
+	p.alertMu.Lock()
+	if p.alertTimer != nil {
+		p.alertTimer.Stop()
+	}
+	p.alertMu.Unlock()
 	if p.healthSub != nil {
 		_ = p.healthSub.Unsubscribe()
 	}
@@ -166,6 +174,14 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleFeedingLoggedPast(ctx, evt)
 	case schemas.AdaEventBorn:
 		return p.handleBornEvent(ctx, evt)
+	case schemas.AdaEventSyncUsers:
+		return nil // handled by gateway; processor ignores
+	case schemas.AdaEventUsersSynced:
+		return p.handleUsersSynced(ctx, evt)
+	case schemas.AdaEventCaretakerUpdate:
+		return p.handleCaretakerUpdate(ctx, evt)
+	case schemas.AdaEventTummyTarget:
+		return p.handleTummyTarget(ctx, evt)
 	case "ha.events.input_number.ada_alert_threshold_h":
 		return p.handleThresholdChange(ctx, evt)
 	default:
@@ -557,6 +573,87 @@ func (p *Processor) handleBornEvent(ctx context.Context, evt schemas.CloudEvent)
 	return nil
 }
 
+// ── Caretaker and config handlers ────────────────────────────────────────────
+
+func (p *Processor) handleUsersSynced(ctx context.Context, evt schemas.CloudEvent) error {
+	var d schemas.AdaUsersSyncedData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode users_synced: %w", err)
+	}
+
+	incomingIDs := make(map[string]bool, len(d.Users))
+	for _, u := range d.Users {
+		ns := pgtype.Text{String: u.NotifyService, Valid: u.NotifyService != ""}
+		if err := p.q.UpsertCaretaker(ctx, &store.UpsertCaretakerParams{
+			HaUserID:      u.ID,
+			DisplayName:   u.Name,
+			Username:      u.Username,
+			NotifyService: ns,
+		}); err != nil {
+			p.log.Warn("ada: upsert caretaker",
+				slog.String("user_id", u.ID),
+				slog.String("error", err.Error()))
+		}
+		incomingIDs[u.ID] = true
+	}
+
+	existing, err := p.q.GetCaretakerHAUserIDs(ctx)
+	if err != nil {
+		p.log.Warn("ada: get caretaker ids", slog.String("error", err.Error()))
+	} else {
+		for _, id := range existing {
+			if !incomingIDs[id] {
+				if err := p.q.SoftDeleteCaretaker(ctx, id); err != nil {
+					p.log.Warn("ada: soft-delete caretaker",
+						slog.String("user_id", id),
+						slog.String("error", err.Error()))
+				}
+			}
+		}
+	}
+
+	p.log.Info("ada: users synced", slog.Int("count", len(d.Users)))
+	p.pushCaretakerList(ctx)
+	return nil
+}
+
+func (p *Processor) handleCaretakerUpdate(ctx context.Context, evt schemas.CloudEvent) error {
+	var d schemas.AdaCaretakerUpdateData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode caretaker_update: %w", err)
+	}
+	if err := p.q.UpdateCaretakerStatus(ctx, &store.UpdateCaretakerStatusParams{
+		HaUserID:    d.HAUserID,
+		IsCaretaker: d.IsCaretaker,
+	}); err != nil {
+		return fmt.Errorf("ada: update caretaker status: %w", err)
+	}
+	p.log.Info("ada: caretaker updated",
+		slog.String("user_id", d.HAUserID),
+		slog.Bool("is_caretaker", d.IsCaretaker))
+	p.pushCaretakerList(ctx)
+	return nil
+}
+
+func (p *Processor) handleTummyTarget(ctx context.Context, evt schemas.CloudEvent) error {
+	var d schemas.AdaTummyTargetData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode tummy_target: %w", err)
+	}
+	targetStr := strconv.Itoa(d.TargetMin)
+	if err := p.q.UpsertConfig(ctx, &store.UpsertConfigParams{
+		Key:   "tummy_time_target_min",
+		Value: targetStr,
+	}); err != nil {
+		return fmt.Errorf("ada: upsert tummy target: %w", err)
+	}
+	p.log.Info("ada: tummy target updated", slog.Int("target_min", d.TargetMin))
+	if err := p.ha.PushState(ctx, "sensor.ada_tummy_time_target_min", targetStr, nil); err != nil {
+		p.log.Warn("ada: push tummy target sensor", slog.String("error", err.Error()))
+	}
+	return nil
+}
+
 // ── Threshold change handler ─────────────────────────────────────────────────
 
 func (p *Processor) handleThresholdChange(ctx context.Context, evt schemas.CloudEvent) error {
@@ -634,6 +731,8 @@ func (p *Processor) pushFeedingSensors(ctx context.Context) {
 	}); err != nil {
 		p.log.Warn("ada: upsert next_feeding_target", slog.String("error", err.Error()))
 	}
+
+	p.setFeedingAlertTimer(lastFeedingTime, nextTarget)
 
 	agg, err := p.q.GetTodayFeedingAggregates(ctx)
 	if err != nil {
@@ -763,6 +862,8 @@ func (p *Processor) refreshAllSensors(ctx context.Context) {
 	p.pushLastEventSensors(ctx)
 	p.pushDailyAggregates(ctx)
 	p.pushActiveSleepState(ctx)
+	p.pushCaretakerList(ctx)
+	p.restoreAlertTimer(ctx)
 }
 
 // pushLastEventSensors pushes sensors derived from the most recent event of each
@@ -1098,6 +1199,120 @@ func (p *Processor) pushSleepHistory(ctx context.Context) {
 	}
 	if err := p.ha.PushState(ctx, sensorSleepHistory, strconv.Itoa(len(entries)), attributes); err != nil {
 		p.log.Warn("ada: push sleep history", slog.String("error", err.Error()))
+	}
+}
+
+// ── Feeding alert dispatch ────────────────────────────────────────────────────
+
+// setFeedingAlertTimer arms (or re-arms) a one-shot timer to fire
+// dispatchFeedingAlert at nextTarget. Safe to call concurrently.
+func (p *Processor) setFeedingAlertTimer(lastFeedingTime, nextTarget time.Time) {
+	p.alertMu.Lock()
+	defer p.alertMu.Unlock()
+	if p.alertTimer != nil {
+		p.alertTimer.Stop()
+	}
+	delay := time.Until(nextTarget)
+	if delay <= 0 {
+		return
+	}
+	p.alertTimer = time.AfterFunc(delay, func() {
+		p.dispatchFeedingAlert(context.Background(), lastFeedingTime)
+	})
+}
+
+// restoreAlertTimer re-arms the feeding alert on engine restart if
+// next_feeding_target is still in the future.
+func (p *Processor) restoreAlertTimer(ctx context.Context) {
+	cfg, err := p.q.GetConfig(ctx, cfgKeyNextFeedingTarget)
+	if err != nil {
+		return // no target stored yet — nothing to restore
+	}
+	target, err := time.Parse(time.RFC3339, cfg.Value)
+	if err != nil || !time.Now().Before(target) {
+		return // already passed
+	}
+	last, err := p.q.GetLastFeeding(ctx)
+	if err != nil {
+		return
+	}
+	p.setFeedingAlertTimer(last.Timestamp.Time, target)
+	p.log.Info("ada: feeding alert timer restored",
+		slog.Duration("fires_in", time.Until(target)))
+}
+
+// dispatchFeedingAlert sends a push notification to all active caretakers.
+// Called by the alert timer goroutine — must not block indefinitely.
+func (p *Processor) dispatchFeedingAlert(ctx context.Context, lastFeedingTime time.Time) {
+	caretakers, err := p.q.GetActiveCaretakers(ctx)
+	if err != nil {
+		p.log.Warn("ada: get active caretakers for alert", slog.String("error", err.Error()))
+		return
+	}
+	if len(caretakers) == 0 {
+		p.log.Debug("ada: no active caretakers — skipping feeding alert")
+		return
+	}
+
+	// Use UTC explicitly — engine container timezone is not the user's local timezone.
+	timeStr := lastFeedingTime.UTC().Format("3:04 PM UTC")
+	msg := fmt.Sprintf("Ada hasn't eaten since %s.", timeStr)
+
+	for _, c := range caretakers {
+		svc := c.NotifyService.String
+		if !c.NotifyService.Valid || svc == "" {
+			continue
+		}
+		if err := p.ha.Notify(ctx, svc, "Time to feed Ada 🍼", msg); err != nil {
+			p.log.Warn("ada: notify caretaker",
+				slog.String("service", svc),
+				slog.String("error", err.Error()))
+		}
+	}
+}
+
+// ── Caretaker list push ───────────────────────────────────────────────────────
+
+// pushCaretakerList queries all non-deleted caretakers and pushes them to
+// sensor.ada_caretakers so the HA config screen can render the full list.
+func (p *Processor) pushCaretakerList(ctx context.Context) {
+	rows, err := p.q.GetAllCaretakers(ctx)
+	if err != nil {
+		p.log.Warn("ada: get all caretakers", slog.String("error", err.Error()))
+		return
+	}
+
+	type entry struct {
+		HAUserID      string `json:"ha_user_id"`
+		DisplayName   string `json:"display_name"`
+		Username      string `json:"username"`
+		IsCaretaker   bool   `json:"is_caretaker"`
+		NotifyService any    `json:"notify_service"` // string or null
+	}
+
+	entries := make([]entry, 0, len(rows))
+	for _, r := range rows {
+		var ns any
+		if r.NotifyService.Valid {
+			ns = r.NotifyService.String
+		}
+		entries = append(entries, entry{
+			HAUserID:      r.HaUserID,
+			DisplayName:   r.DisplayName,
+			Username:      r.Username,
+			IsCaretaker:   r.IsCaretaker,
+			NotifyService: ns,
+		})
+	}
+
+	if err := p.ha.PushState(ctx, "sensor.ada_caretakers",
+		strconv.Itoa(len(entries)),
+		map[string]any{
+			"caretakers":   entries,
+			"last_updated": time.Now().UTC().Format(time.RFC3339),
+		},
+	); err != nil {
+		p.log.Warn("ada: push caretaker list", slog.String("error", err.Error()))
 	}
 }
 

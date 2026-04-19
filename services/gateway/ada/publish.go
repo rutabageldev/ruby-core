@@ -69,6 +69,36 @@ func Publish(nc *goNats.Conn, payload map[string]any, log *slog.Logger) error {
 	return nil
 }
 
+// PublishUsersSynced wraps the synced user list in a CloudEvent and publishes
+// it to ha.events.ada.users_synced on NATS. Called directly by the gateway
+// after querying HA — not routed through eventRoutes.
+func PublishUsersSynced(nc *goNats.Conn, users []schemas.AdaHAUser, log *slog.Logger) error {
+	subject := schemas.AdaEventUsersSynced
+	id := newID()
+	evt := schemas.CloudEvent{
+		SpecVersion:   schemas.CloudEventsSpecVersion,
+		ID:            id,
+		Source:        "ruby_gateway",
+		Type:          subject,
+		Time:          time.Now().UTC().Format(time.RFC3339),
+		DataSchema:    schemas.CloudEventDataSchemaVersionV1,
+		CorrelationID: id,
+		CausationID:   id,
+		Data: map[string]any{
+			"users": users,
+		},
+	}
+	b, err := json.Marshal(evt)
+	if err != nil {
+		return fmt.Errorf("ada: marshal users_synced: %w", err)
+	}
+	if err := nc.Publish(subject, b); err != nil {
+		return fmt.Errorf("ada: publish users_synced: %w", err)
+	}
+	log.Info("ada: users_synced published", slog.Int("count", len(users)))
+	return nil
+}
+
 func newID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])

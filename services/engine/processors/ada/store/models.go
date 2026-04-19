@@ -21,6 +21,18 @@ type AdaProfile struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type Caretaker struct {
+	ID            pgtype.UUID
+	HaUserID      string
+	DisplayName   string
+	Username      string
+	IsCaretaker   bool
+	NotifyService pgtype.Text
+	DeletedAt     pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type Diaper struct {
 	ID        pgtype.UUID
 	Timestamp pgtype.Timestamptz
