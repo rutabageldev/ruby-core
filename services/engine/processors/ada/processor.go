@@ -1037,6 +1037,12 @@ func (p *Processor) pushLastEventSensors(ctx context.Context) {
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		p.log.Warn("ada: restore last diaper", slog.String("error", err.Error()))
 	}
+
+	if cfg, err := p.q.GetConfig(ctx, "tummy_time_target_min"); err == nil {
+		p.pushAll(ctx, []struct{ id, state string }{{"sensor.ada_tummy_time_target_min", cfg.Value}})
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		p.log.Warn("ada: restore tummy target", slog.String("error", err.Error()))
+	}
 }
 
 // pushDailyAggregates pushes all today_* aggregate sensors from Postgres.
