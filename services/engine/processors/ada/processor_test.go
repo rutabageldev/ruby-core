@@ -268,6 +268,47 @@ func TestBuildFeedingHistory_MixedBottle(t *testing.T) {
 	}
 }
 
+// ── categorizeSleep ───────────────────────────────────────────────────────────
+
+func TestCategorizeSleep(t *testing.T) {
+	loc := time.Local
+	cases := []struct {
+		start    time.Time
+		expected string
+	}{
+		{time.Date(2026, 4, 19, 19, 30, 0, 0, loc), "night"}, // after bedtime
+		{time.Date(2026, 4, 19, 18, 45, 0, 0, loc), "night"}, // within grace (18:30 effective)
+		{time.Date(2026, 4, 19, 18, 29, 0, 0, loc), "nap"},   // before grace window
+		{time.Date(2026, 4, 20, 2, 0, 0, 0, loc), "night"},   // overnight
+		{time.Date(2026, 4, 20, 7, 30, 0, 0, loc), "nap"},    // after daytime
+		{time.Date(2026, 4, 19, 12, 0, 0, 0, loc), "nap"},    // midday
+	}
+	for _, c := range cases {
+		got := categorizeSleep(c.start, "19:00", "07:00", 30)
+		if got != c.expected {
+			t.Errorf("categorizeSleep(%v) = %q, want %q", c.start, got, c.expected)
+		}
+	}
+}
+
+// ── computeTodayBoundary ──────────────────────────────────────────────────────
+
+func TestComputeTodayBoundary_DefaultFallback(t *testing.T) {
+	// Empty string should not panic and should return a valid time.
+	boundary := computeTodayBoundary("")
+	if boundary.IsZero() {
+		t.Error("computeTodayBoundary(\"\") returned zero time")
+	}
+}
+
+func TestComputeTodayBoundary_InvalidFormat(t *testing.T) {
+	// Invalid format should return UTC midnight fallback (non-zero).
+	boundary := computeTodayBoundary("not-a-time")
+	if boundary.IsZero() {
+		t.Error("computeTodayBoundary(invalid) returned zero time")
+	}
+}
+
 // ── sleepElapsedMin ───────────────────────────────────────────────────────────
 
 func TestSleepElapsedMin_Now(t *testing.T) {

@@ -19,6 +19,7 @@ const (
 	AdaEventTummyTarget         = "ha.events.ada.config_tummy_target"
 	AdaEventAddChannel          = "ha.events.ada.add_channel"
 	AdaEventRemoveChannel       = "ha.events.ada.remove_channel"
+	AdaEventBedtimeConfig       = "ha.events.ada.config_bedtime"
 )
 
 // AdaFeedingEndedData is the CloudEvent Data payload for a breast feeding session end.
@@ -156,6 +157,15 @@ type AdaTummyTargetData struct {
 type AdaBornData struct {
 	BirthAt  string `json:"birth_at"` // RFC3339, e.g. "2026-04-19T14:32:00-05:00"
 	LoggedBy string `json:"logged_by,omitempty"`
+}
+
+// AdaBedtimeConfigData is the payload for the ada.config.bedtime event.
+// GraceMin of 0 means "keep the existing value" — only update bedtime/daytime.
+type AdaBedtimeConfigData struct {
+	BedtimeHHMM string `json:"bedtime_hhmm"`
+	DaytimeHHMM string `json:"daytime_hhmm"`
+	GraceMin    int    `json:"grace_min,omitempty"` // 0 means "keep current value"
+	LoggedBy    string `json:"logged_by,omitempty"`
 }
 
 // AdaFeedingLoggedPastData is the payload for a past feeding logged in one step

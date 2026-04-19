@@ -12,10 +12,10 @@ SELECT
     COUNT(*)::int                                        AS total,
     COUNT(*) FILTER (WHERE type = 'wet')::int            AS wet,
     COUNT(*) FILTER (WHERE type = 'dirty')::int          AS dirty,
-    COUNT(*) FILTER (WHERE type = 'mixed')::int           AS mixed
+    COUNT(*) FILTER (WHERE type = 'mixed')::int          AS mixed
 FROM diapers
 WHERE deleted_at IS NULL
-  AND timestamp >= NOW()::date;
+  AND timestamp >= @boundary;
 
 -- name: GetLast24hDiapers :many
 -- Returns all diaper events in the last 24 hours ordered newest-first.

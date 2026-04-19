@@ -69,10 +69,10 @@ SELECT
     COUNT(*)::int                                        AS total,
     COUNT(*) FILTER (WHERE type = 'wet')::int            AS wet,
     COUNT(*) FILTER (WHERE type = 'dirty')::int          AS dirty,
-    COUNT(*) FILTER (WHERE type = 'mixed')::int           AS mixed
+    COUNT(*) FILTER (WHERE type = 'mixed')::int          AS mixed
 FROM diapers
 WHERE deleted_at IS NULL
-  AND timestamp >= NOW()::date
+  AND timestamp >= $1
 `
 
 type GetTodayDiaperAggregatesRow struct {
@@ -82,8 +82,8 @@ type GetTodayDiaperAggregatesRow struct {
 	Mixed int32
 }
 
-func (q *Queries) GetTodayDiaperAggregates(ctx context.Context) (*GetTodayDiaperAggregatesRow, error) {
-	row := q.db.QueryRow(ctx, getTodayDiaperAggregates)
+func (q *Queries) GetTodayDiaperAggregates(ctx context.Context, boundary pgtype.Timestamptz) (*GetTodayDiaperAggregatesRow, error) {
+	row := q.db.QueryRow(ctx, getTodayDiaperAggregates, boundary)
 	var i GetTodayDiaperAggregatesRow
 	err := row.Scan(
 		&i.Total,

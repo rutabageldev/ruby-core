@@ -29,7 +29,7 @@ FROM feedings f
 LEFT JOIN feeding_bottle_detail d ON d.feeding_id = f.id
 LEFT JOIN feeding_segments fs     ON fs.feeding_id = f.id
 WHERE f.deleted_at IS NULL
-  AND f.timestamp >= NOW() - INTERVAL '24 hours'
+  AND f.timestamp >= $1
 GROUP BY
     f.id, f.timestamp, f.source,
     d.amount_oz, d.breast_milk_oz, d.formula_oz
@@ -47,11 +47,11 @@ type GetLast24hFeedingsRow struct {
 	RightDurationS int32
 }
 
-// Returns all feedings in the last 24 hours with per-side breast durations
+// Returns all feedings since @boundary with per-side breast durations
 // and bottle amounts. Left/right duration_s are 0 for non-breast sessions.
 // COALESCE handles NULL oz columns from LEFT JOIN on non-bottle feedings.
-func (q *Queries) GetLast24hFeedings(ctx context.Context) ([]*GetLast24hFeedingsRow, error) {
-	rows, err := q.db.Query(ctx, getLast24hFeedings)
+func (q *Queries) GetLast24hFeedings(ctx context.Context, boundary pgtype.Timestamptz) ([]*GetLast24hFeedingsRow, error) {
+	rows, err := q.db.Query(ctx, getLast24hFeedings, boundary)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ SELECT
 FROM feedings f
 LEFT JOIN feeding_bottle_detail d ON d.feeding_id = f.id
 WHERE f.deleted_at IS NULL
-  AND f.timestamp >= NOW()::date
+  AND f.timestamp >= $1
 `
 
 type GetTodayFeedingAggregatesRow struct {
@@ -134,8 +134,8 @@ type GetTodayFeedingAggregatesRow struct {
 	FormulaOz    float64
 }
 
-func (q *Queries) GetTodayFeedingAggregates(ctx context.Context) (*GetTodayFeedingAggregatesRow, error) {
-	row := q.db.QueryRow(ctx, getTodayFeedingAggregates)
+func (q *Queries) GetTodayFeedingAggregates(ctx context.Context, boundary pgtype.Timestamptz) (*GetTodayFeedingAggregatesRow, error) {
+	row := q.db.QueryRow(ctx, getTodayFeedingAggregates, boundary)
 	var i GetTodayFeedingAggregatesRow
 	err := row.Scan(
 		&i.Count,

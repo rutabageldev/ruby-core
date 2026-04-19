@@ -28,12 +28,14 @@ ORDER BY end_time DESC LIMIT 1;
 
 -- name: GetTodaySleepAggregates :one
 SELECT
-    COALESCE(EXTRACT(EPOCH FROM SUM(end_time - start_time)) / 3600, 0)::float8 AS total_hours,
-    COUNT(*) FILTER (WHERE sleep_type = 'nap')::int                             AS nap_count
+    COALESCE(EXTRACT(EPOCH FROM SUM(
+        LEAST(COALESCE(end_time, NOW()), NOW()) - GREATEST(start_time, @boundary)
+    )) / 3600, 0)::float8 AS total_hours,
+    COUNT(*) FILTER (WHERE sleep_type = 'night')::int AS night_count,
+    COUNT(*) FILTER (WHERE sleep_type = 'nap')::int   AS nap_count
 FROM sleep_sessions
 WHERE deleted_at IS NULL
-  AND end_time IS NOT NULL
-  AND start_time >= NOW()::date;
+  AND (end_time IS NULL OR end_time > @boundary);
 
 -- name: GetLast24hSleepSessions :many
 -- Returns sleep sessions that started in the last 24 hours, newest-first.
