@@ -15,17 +15,19 @@ import (
 // eventRoutes maps the frontend event type string (from the "event" field in the
 // payload) to the NATS subject for that event type.
 var eventRoutes = map[string]string{
-	"ada.feeding.end":        schemas.AdaEventFeedingEnded,
-	"ada.feeding.log":        schemas.AdaEventFeedingLogged,
-	"ada.feeding.supplement": schemas.AdaEventFeedingSupplemented,
-	"ada.diaper.log":         schemas.AdaEventDiaperLogged,
-	"ada.sleep.start":        schemas.AdaEventSleepStarted,
-	"ada.sleep.end":          schemas.AdaEventSleepEnded,
-	"ada.sleep.log":          schemas.AdaEventSleepLogged,
-	"ada.tummy.end":          schemas.AdaEventTummyEnded,
-	"ada.tummy.log":          schemas.AdaEventTummyLogged,
-	"ada.feeding.log_past":   schemas.AdaEventFeedingLoggedPast,
-	"ada.born":               schemas.AdaEventBorn,
+	"ada.feeding.end":         schemas.AdaEventFeedingEnded,
+	"ada.feeding.log":         schemas.AdaEventFeedingLogged,
+	"ada.feeding.supplement":  schemas.AdaEventFeedingSupplemented,
+	"ada.diaper.log":          schemas.AdaEventDiaperLogged,
+	"ada.sleep.start":         schemas.AdaEventSleepStarted,
+	"ada.sleep.end":           schemas.AdaEventSleepEnded,
+	"ada.sleep.log":           schemas.AdaEventSleepLogged,
+	"ada.tummy.end":           schemas.AdaEventTummyEnded,
+	"ada.tummy.log":           schemas.AdaEventTummyLogged,
+	"ada.feeding.log_past":    schemas.AdaEventFeedingLoggedPast,
+	"ada.born":                schemas.AdaEventBorn,
+	"ada.caretaker.update":    schemas.AdaEventCaretakerUpdate,
+	"ada.config.tummy_target": schemas.AdaEventTummyTarget,
 }
 
 // Publish wraps payload in a CloudEvent and publishes to the appropriate
