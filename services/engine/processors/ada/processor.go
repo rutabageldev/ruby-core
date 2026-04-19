@@ -56,6 +56,8 @@ const (
 	sensorTodaySleepHours      = "sensor.ada_today_sleep_hours"
 	sensorTodaySleepNapCount   = "sensor.ada_today_sleep_nap_count"
 	sensorTodaySleepNightCount = "sensor.ada_today_sleep_night_count"
+	sensorTodaySleepNightHours = "sensor.ada_today_sleep_night_hours"
+	sensorTodaySleepNapHours   = "sensor.ada_today_sleep_nap_hours"
 	sensorTodayTummyMin        = "sensor.ada_today_tummy_time_min"
 	sensorTodayTummySessions   = "sensor.ada_today_tummy_time_sessions"
 	sensorSleepSessionMin      = "sensor.ada_sleep_session_min"
@@ -967,6 +969,8 @@ func (p *Processor) pushSleepEndedSensors(ctx context.Context, endTime time.Time
 			struct{ id, state string }{sensorTodaySleepHours, strconv.FormatFloat(agg.TotalHours, 'f', 2, 64)},
 			struct{ id, state string }{sensorTodaySleepNapCount, strconv.Itoa(int(agg.NapCount))},
 			struct{ id, state string }{sensorTodaySleepNightCount, strconv.Itoa(int(agg.NightCount))},
+			struct{ id, state string }{sensorTodaySleepNightHours, strconv.FormatFloat(agg.NightHours, 'f', 2, 64)},
+			struct{ id, state string }{sensorTodaySleepNapHours, strconv.FormatFloat(agg.NapHours, 'f', 2, 64)},
 		)
 	}
 	p.pushAll(ctx, pushes)
@@ -1076,6 +1080,8 @@ func (p *Processor) pushDailyAggregates(ctx context.Context) {
 			{sensorTodaySleepHours, strconv.FormatFloat(agg.TotalHours, 'f', 2, 64)},
 			{sensorTodaySleepNapCount, strconv.Itoa(int(agg.NapCount))},
 			{sensorTodaySleepNightCount, strconv.Itoa(int(agg.NightCount))},
+			{sensorTodaySleepNightHours, strconv.FormatFloat(agg.NightHours, 'f', 2, 64)},
+			{sensorTodaySleepNapHours, strconv.FormatFloat(agg.NapHours, 'f', 2, 64)},
 		})
 	} else {
 		p.log.Warn("ada: restore today sleep aggregates", slog.String("error", err.Error()))
