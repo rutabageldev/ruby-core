@@ -356,11 +356,12 @@ func TestBuildDiaperHistory_Empty(t *testing.T) {
 }
 
 func TestBuildDiaperHistory_Single(t *testing.T) {
-	rows := []*store.GetLast24hDiapersRow{
+	rows := []*store.GetTodayDiapersRow{
 		{
 			ID:        mustUUID("bbbbbbbb-0000-0000-0000-000000000001"),
 			Timestamp: mustTimestamptz("2026-04-01T10:00:00Z"),
 			Type:      "wet",
+			LoggedBy:  "test",
 		},
 	}
 	entries := buildDiaperHistory(rows)
@@ -386,12 +387,14 @@ func TestBuildSleepHistory_Empty(t *testing.T) {
 }
 
 func TestBuildSleepHistory_CompletedSession(t *testing.T) {
-	rows := []*store.GetLast24hSleepSessionsRow{
+	rows := []*store.GetTodaySleepSessionsRow{
 		{
-			ID:        mustUUID("cccccccc-0000-0000-0000-000000000001"),
-			StartTime: mustTimestamptz("2026-04-01T08:00:00Z"),
-			EndTime:   mustTimestamptz("2026-04-01T09:30:00Z"),
-			SleepType: "nap",
+			ID:         mustUUID("cccccccc-0000-0000-0000-000000000001"),
+			StartTime:  mustTimestamptz("2026-04-01T08:00:00Z"),
+			EndTime:    mustTimestamptz("2026-04-01T09:30:00Z"),
+			SleepType:  "nap",
+			LoggedBy:   "test",
+			IsComplete: true,
 		},
 	}
 	entries := buildSleepHistory(rows)
@@ -417,13 +420,17 @@ func TestBuildSleepHistory_CompletedSession(t *testing.T) {
 }
 
 func TestBuildSleepHistory_ActiveSession(t *testing.T) {
-	// Active sessions have EndTime.Valid=false; EndTime and DurationS must be omitted.
-	rows := []*store.GetLast24hSleepSessionsRow{
+	// Active sessions have IsComplete=false; EndTime and DurationS must be omitted.
+	// end_time is always populated by COALESCE(end_time, NOW()) in the query, so
+	// EndTime is always valid — IsComplete is the sole active-session discriminator.
+	rows := []*store.GetTodaySleepSessionsRow{
 		{
-			ID:        mustUUID("dddddddd-0000-0000-0000-000000000001"),
-			StartTime: mustTimestamptz("2026-04-01T22:00:00Z"),
-			EndTime:   pgtype.Timestamptz{Valid: false},
-			SleepType: "night",
+			ID:         mustUUID("dddddddd-0000-0000-0000-000000000001"),
+			StartTime:  mustTimestamptz("2026-04-01T22:00:00Z"),
+			EndTime:    mustTimestamptz("2026-04-01T22:45:00Z"), // simulates NOW() from COALESCE
+			SleepType:  "night",
+			LoggedBy:   "test",
+			IsComplete: false,
 		},
 	}
 	entries := buildSleepHistory(rows)
