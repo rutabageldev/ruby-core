@@ -28,8 +28,8 @@ var eventRoutes = map[string]string{
 	"ada.born":                schemas.AdaEventBorn,
 	"ada.caretaker.update":    schemas.AdaEventCaretakerUpdate,
 	"ada.config.tummy_target": schemas.AdaEventTummyTarget,
-	"ada.channel.add":         schemas.AdaEventAddChannel,
-	"ada.channel.remove":      schemas.AdaEventRemoveChannel,
+	"ada.add_channel":         schemas.AdaEventAddChannel,
+	"ada.remove_channel":      schemas.AdaEventRemoveChannel,
 }
 
 // Publish wraps payload in a CloudEvent and publishes to the appropriate
