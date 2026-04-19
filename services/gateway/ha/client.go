@@ -51,10 +51,11 @@ type haEntityState struct {
 
 // haUserEntry is one HA user account from the config/auth/list WebSocket response.
 type haUserEntry struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Username string `json:"username"`
-	IsActive bool   `json:"is_active"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Username        string `json:"username"`
+	IsActive        bool   `json:"is_active"`
+	SystemGenerated bool   `json:"system_generated"`
 }
 
 // Client connects to the Home Assistant WebSocket API, subscribes to
@@ -374,7 +375,7 @@ func (c *Client) syncUsers(ctx context.Context, conn *websocket.Conn, id int) er
 
 	users := make([]schemas.AdaHAUser, 0, len(haUsers))
 	for _, u := range haUsers {
-		if !u.IsActive {
+		if !u.IsActive || u.SystemGenerated {
 			continue
 		}
 		users = append(users, schemas.AdaHAUser{
