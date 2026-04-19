@@ -164,6 +164,8 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleTummyLogged(ctx, evt)
 	case schemas.AdaEventFeedingLoggedPast:
 		return p.handleFeedingLoggedPast(ctx, evt)
+	case schemas.AdaEventBorn:
+		return p.handleBornEvent(ctx, evt)
 	case "ha.events.input_number.ada_alert_threshold_h":
 		return p.handleThresholdChange(ctx, evt)
 	default:
@@ -528,6 +530,30 @@ func (p *Processor) insertTummyAndPush(ctx context.Context, startStr, endStr str
 	}
 
 	p.pushTummySensors(ctx)
+	return nil
+}
+
+// ── Birth profile handler ─────────────────────────────────────────────────────
+
+func (p *Processor) handleBornEvent(ctx context.Context, evt schemas.CloudEvent) error {
+	var d schemas.AdaBornData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode born: %w", err)
+	}
+
+	birthAt, err := time.Parse(time.RFC3339, d.BirthAt)
+	if err != nil {
+		return fmt.Errorf("ada: parse birth_at %q: %w", d.BirthAt, err)
+	}
+
+	if err := p.q.UpsertProfile(ctx, toTimestamptz(birthAt)); err != nil {
+		return fmt.Errorf("ada: upsert profile: %w", err)
+	}
+
+	p.log.Info("ada: birth profile saved",
+		slog.String("birth_at", birthAt.UTC().Format(time.RFC3339)),
+		slog.String("logged_by", d.LoggedBy),
+	)
 	return nil
 }
 

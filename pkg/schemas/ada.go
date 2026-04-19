@@ -12,6 +12,7 @@ const (
 	AdaEventTummyEnded          = "ha.events.ada.tummy_ended"
 	AdaEventTummyLogged         = "ha.events.ada.tummy_logged"
 	AdaEventFeedingLoggedPast   = "ha.events.ada.feeding_logged_past"
+	AdaEventBorn                = "ha.events.ada.born"
 )
 
 // AdaFeedingEndedData is the CloudEvent Data payload for a breast feeding session end.
@@ -97,6 +98,14 @@ type AdaTummyLoggedData struct {
 	EndTime   string `json:"end_time"`   // RFC3339; actual event time
 	DurationS int    `json:"duration_s"`
 	LoggedBy  string `json:"logged_by,omitempty"`
+}
+
+// AdaBornData is the payload for the ada.born event fired when birth is confirmed.
+// birth_at is a full RFC3339 timestamp constructed by the browser so that the
+// user's local timezone is preserved — no server-side timezone inference needed.
+type AdaBornData struct {
+	BirthAt  string `json:"birth_at"` // RFC3339, e.g. "2026-04-19T14:32:00-05:00"
+	LoggedBy string `json:"logged_by,omitempty"`
 }
 
 // AdaFeedingLoggedPastData is the payload for a past feeding logged in one step
