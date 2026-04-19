@@ -53,8 +53,9 @@ const (
 	sensorTodayDiaperMixed   = "sensor.ada_today_diaper_mixed"
 	sensorSleepState         = "sensor.ada_sleep_state"
 	sensorLastSleepChange    = "sensor.ada_last_sleep_change"
-	sensorTodaySleepHours    = "sensor.ada_today_sleep_hours"
-	sensorTodaySleepNapCount = "sensor.ada_today_sleep_nap_count"
+	sensorTodaySleepHours      = "sensor.ada_today_sleep_hours"
+	sensorTodaySleepNapCount   = "sensor.ada_today_sleep_nap_count"
+	sensorTodaySleepNightCount = "sensor.ada_today_sleep_night_count"
 	sensorTodayTummyMin      = "sensor.ada_today_tummy_time_min"
 	sensorTodayTummySessions = "sensor.ada_today_tummy_time_sessions"
 	sensorSleepSessionMin    = "sensor.ada_sleep_session_min"
@@ -914,7 +915,7 @@ func (p *Processor) pushDiaperSensors(ctx context.Context, lastDiaperTime time.T
 		)
 	}
 	p.pushAll(ctx, pushes)
-	p.pushDiaperHistory(ctx, btz)
+	p.pushDiaperHistory(ctx)
 }
 
 // pushSupplementOzSensor pushes today_feeding_oz and last_feeding_source after
@@ -944,8 +945,7 @@ func (p *Processor) pushSleepStartedSensors(ctx context.Context, startTime time.
 		{sensorLastSleepChange, startTime.UTC().Format(time.RFC3339)},
 		{sensorSleepSessionMin, strconv.Itoa(sleepElapsedMin(startTime))},
 	})
-	btz := p.todayBoundaryTz(ctx)
-	p.pushSleepHistory(ctx, btz)
+	p.pushSleepHistory(ctx)
 }
 
 // pushSleepEndedSensors pushes sensors after a sleep session ends.
@@ -966,10 +966,11 @@ func (p *Processor) pushSleepEndedSensors(ctx context.Context, endTime time.Time
 		pushes = append(pushes,
 			struct{ id, state string }{sensorTodaySleepHours, strconv.FormatFloat(agg.TotalHours, 'f', 2, 64)},
 			struct{ id, state string }{sensorTodaySleepNapCount, strconv.Itoa(int(agg.NapCount))},
+			struct{ id, state string }{sensorTodaySleepNightCount, strconv.Itoa(int(agg.NightCount))},
 		)
 	}
 	p.pushAll(ctx, pushes)
-	p.pushSleepHistory(ctx, btz)
+	p.pushSleepHistory(ctx)
 }
 
 // pushTummySensors pushes tummy time aggregate sensors.
@@ -1062,17 +1063,18 @@ func (p *Processor) pushDailyAggregates(ctx context.Context) {
 	} else {
 		p.log.Warn("ada: restore today diaper aggregates", slog.String("error", err.Error()))
 	}
-	p.pushDiaperHistory(ctx, btz)
+	p.pushDiaperHistory(ctx)
 
 	if agg, err := p.q.GetTodaySleepAggregates(ctx, btz); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
 			{sensorTodaySleepHours, strconv.FormatFloat(agg.TotalHours, 'f', 2, 64)},
 			{sensorTodaySleepNapCount, strconv.Itoa(int(agg.NapCount))},
+			{sensorTodaySleepNightCount, strconv.Itoa(int(agg.NightCount))},
 		})
 	} else {
 		p.log.Warn("ada: restore today sleep aggregates", slog.String("error", err.Error()))
 	}
-	p.pushSleepHistory(ctx, btz)
+	p.pushSleepHistory(ctx)
 
 	if agg, err := p.q.GetTodayTummyAggregates(ctx, btz); err == nil {
 		p.pushAll(ctx, []struct{ id, state string }{
@@ -1440,12 +1442,10 @@ func buildDiaperHistory(rows []*store.GetLast24hDiapersRow) []DiaperHistoryEntry
 	return entries
 }
 
-// pushDiaperHistory queries diaper events since @boundary and pushes them as
-// attributes on sensor.ada_diaper_history.
-func (p *Processor) pushDiaperHistory(ctx context.Context, btz pgtype.Timestamptz) {
-	// GetLast24hDiapers still uses the fixed 24h window — it's a display history,
-	// not an aggregate, so boundary is not passed here. It shows the last 24h
-	// regardless of boundary for context.
+// pushDiaperHistory queries the last 24h of diaper events and pushes them as
+// attributes on sensor.ada_diaper_history. Uses a fixed 24h window (not boundary)
+// so the history modal always shows recent context regardless of when Today started.
+func (p *Processor) pushDiaperHistory(ctx context.Context) {
 	rows, err := p.q.GetLast24hDiapers(ctx)
 	if err != nil {
 		p.log.Warn("ada: query diaper history", slog.String("error", err.Error()))
@@ -1494,10 +1494,10 @@ func buildSleepHistory(rows []*store.GetLast24hSleepSessionsRow) []SleepHistoryE
 	return entries
 }
 
-// pushSleepHistory queries sleep sessions since @boundary and pushes them as
-// attributes on sensor.ada_sleep_history. Active sessions are included.
-func (p *Processor) pushSleepHistory(ctx context.Context, btz pgtype.Timestamptz) {
-	// GetLast24hSleepSessions uses the fixed 24h window for display history context.
+// pushSleepHistory queries the last 24h of sleep sessions and pushes them as
+// attributes on sensor.ada_sleep_history. Uses a fixed 24h window (not boundary)
+// so the history modal always shows recent context regardless of when Today started.
+func (p *Processor) pushSleepHistory(ctx context.Context) {
 	rows, err := p.q.GetLast24hSleepSessions(ctx)
 	if err != nil {
 		p.log.Warn("ada: query sleep history", slog.String("error", err.Error()))

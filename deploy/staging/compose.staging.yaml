@@ -134,6 +134,7 @@ services:
       - VAULT_PG_PATH=secret/data/ruby-core/staging/postgres
       - VAULT_HA_PATH=secret/data/ruby-core/ha
       - RULES_DIR=/etc/ruby-core/rules
+      - TZ=America/New_York
 
   # ==========================================================================
   # Notifier Service (Staging)
