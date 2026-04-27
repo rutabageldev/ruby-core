@@ -63,6 +63,7 @@ const (
 	sensorSleepSessionMin      = "sensor.ada_sleep_session_min"
 	sensorDiaperHistory        = "sensor.ada_diaper_history"
 	sensorSleepHistory         = "sensor.ada_sleep_history"
+	sensorFeedingHistory       = "sensor.ada_feeding_history"
 	sensorTodayBoundary        = "sensor.ada_today_boundary"
 )
 
@@ -243,14 +244,24 @@ func (p *Processor) handleFeedingEnded(ctx context.Context, evt schemas.CloudEve
 		return fmt.Errorf("ada: decode feeding_ended: %w", err)
 	}
 
-	evtTime, err := parseRFC3339(evt.Time)
-	if err != nil {
-		return fmt.Errorf("ada: parse event time: %w", err)
+	// Use the frontend-provided start_time when available — it's the authoritative
+	// session start from the browser clock and avoids gateway-receive-time drift.
+	// Fall back to evtTime - totalDurationS for older clients that omit start_time.
+	var sessionStart time.Time
+	if d.StartTime != "" {
+		t, err := parseRFC3339(d.StartTime)
+		if err != nil {
+			return fmt.Errorf("ada: parse feeding start_time: %w", err)
+		}
+		sessionStart = t
+	} else {
+		evtTime, err := parseRFC3339(evt.Time)
+		if err != nil {
+			return fmt.Errorf("ada: parse event time: %w", err)
+		}
+		sessionStart = evtTime.Add(-time.Duration(d.TotalDurationS) * time.Second)
 	}
 
-	sessionStart := evtTime.Add(-time.Duration(d.TotalDurationS) * time.Second)
-
-	// Determine source from segments
 	source := breastSource(d.Segments)
 
 	feedingID, err := p.q.InsertFeeding(ctx, &store.InsertFeedingParams{
@@ -262,20 +273,63 @@ func (p *Processor) handleFeedingEnded(ctx context.Context, evt schemas.CloudEve
 		return fmt.Errorf("ada: insert feeding_ended: %w", err)
 	}
 
-	// Insert segments with reconstructed absolute timestamps (forward from start)
-	segStart := sessionStart
+	// Sum segment durations to detect zero-duration segments. When all segments
+	// report zero duration but pre-computed per-side totals are non-zero, the
+	// segment payload is malformed and we fall back to inserting synthetic segments
+	// from LeftTotalS / RightTotalS.
+	segDurSum := 0
 	for _, seg := range d.Segments {
-		segEnd := segStart.Add(time.Duration(seg.DurationS) * time.Second)
-		if err := p.q.InsertFeedingSegment(ctx, &store.InsertFeedingSegmentParams{
-			FeedingID: feedingID,
-			Side:      seg.Side,
-			StartedAt: toTimestamptz(segStart),
-			EndedAt:   toTimestamptz(segEnd),
-			DurationS: int32(seg.DurationS), //nolint:gosec // G115: bounded by session duration in seconds, never near int32 max
-		}); err != nil {
-			return fmt.Errorf("ada: insert feeding segment: %w", err)
+		segDurSum += seg.DurationS
+	}
+
+	segCursor := sessionStart
+	if segDurSum == 0 && (d.LeftTotalS > 0 || d.RightTotalS > 0) {
+		// Segments carried zero duration despite non-zero pre-computed totals.
+		// Insert one synthetic segment per non-zero side using the totals.
+		p.log.Warn("ada: segment durations all zero — falling back to pre-computed totals",
+			slog.Int("left_total_s", d.LeftTotalS),
+			slog.Int("right_total_s", d.RightTotalS),
+		)
+		if d.LeftTotalS > 0 {
+			segEnd := segCursor.Add(time.Duration(d.LeftTotalS) * time.Second)
+			if err := p.q.InsertFeedingSegment(ctx, &store.InsertFeedingSegmentParams{
+				FeedingID: feedingID,
+				Side:      "left",
+				StartedAt: toTimestamptz(segCursor),
+				EndedAt:   toTimestamptz(segEnd),
+				DurationS: int32(d.LeftTotalS), //nolint:gosec // G115: bounded by session duration in seconds
+			}); err != nil {
+				return fmt.Errorf("ada: insert fallback left segment: %w", err)
+			}
+			segCursor = segEnd
 		}
-		segStart = segEnd
+		if d.RightTotalS > 0 {
+			segEnd := segCursor.Add(time.Duration(d.RightTotalS) * time.Second)
+			if err := p.q.InsertFeedingSegment(ctx, &store.InsertFeedingSegmentParams{
+				FeedingID: feedingID,
+				Side:      "right",
+				StartedAt: toTimestamptz(segCursor),
+				EndedAt:   toTimestamptz(segEnd),
+				DurationS: int32(d.RightTotalS), //nolint:gosec // G115: bounded by session duration in seconds
+			}); err != nil {
+				return fmt.Errorf("ada: insert fallback right segment: %w", err)
+			}
+		}
+	} else {
+		// Normal path: insert segments with reconstructed absolute timestamps.
+		for _, seg := range d.Segments {
+			segEnd := segCursor.Add(time.Duration(seg.DurationS) * time.Second)
+			if err := p.q.InsertFeedingSegment(ctx, &store.InsertFeedingSegmentParams{
+				FeedingID: feedingID,
+				Side:      seg.Side,
+				StartedAt: toTimestamptz(segCursor),
+				EndedAt:   toTimestamptz(segEnd),
+				DurationS: int32(seg.DurationS), //nolint:gosec // G115: bounded by session duration in seconds
+			}); err != nil {
+				return fmt.Errorf("ada: insert feeding segment: %w", err)
+			}
+			segCursor = segEnd
+		}
 	}
 
 	p.pushFeedingSensors(ctx)
@@ -1011,6 +1065,9 @@ func (p *Processor) refreshAllSensors(ctx context.Context) {
 	p.pushPeopleList(ctx)
 	p.restoreAlertTimer(ctx)
 	p.pushTodayBoundary(ctx)
+	p.pushFeedingHistory(ctx)
+	p.pushDiaperHistory(ctx)
+	p.pushSleepHistory(ctx)
 }
 
 // pushLastEventSensors pushes sensors derived from the most recent event of each
@@ -1428,7 +1485,7 @@ func (p *Processor) pushFeedingHistory(ctx context.Context) {
 		"last_updated": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	if err := p.ha.PushState(ctx, "sensor.ada_feeding_history", strconv.Itoa(len(entries)), attributes); err != nil {
+	if err := p.ha.PushState(ctx, sensorFeedingHistory, strconv.Itoa(len(entries)), attributes); err != nil {
 		p.log.Warn("ada: push feeding history failed", slog.String("error", err.Error()))
 	}
 }
