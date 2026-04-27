@@ -23,19 +23,22 @@ const (
 )
 
 // AdaFeedingEndedData is the CloudEvent Data payload for a breast feeding session end.
-// Segments hold per-side timing; totals are pre-computed by the dashboard.
+// Segments hold per-side timing; totals are pre-computed by the dashboard as a fallback.
+// StartTime is the RFC3339 session start provided by the frontend clock; if absent, the
+// processor falls back to evtTime - TotalDurationS.
 type AdaFeedingEndedData struct {
 	Segments       []AdaFeedingSegment `json:"segments"`
 	TotalDurationS int                 `json:"total_duration_s"`
 	LeftTotalS     int                 `json:"left_total_s"`
 	RightTotalS    int                 `json:"right_total_s"`
+	StartTime      string              `json:"start_time,omitempty"`
 	LoggedBy       string              `json:"logged_by,omitempty"`
 }
 
 // AdaFeedingSegment is a single side + duration record within a breast feeding session.
 type AdaFeedingSegment struct {
 	Side      string `json:"side"`
-	DurationS int    `json:"dur"`
+	DurationS int    `json:"duration_s"`
 }
 
 // AdaFeedingLoggedData is the payload for a logged bottle or past breast feeding.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processors/ada/store"
 )
 
@@ -443,5 +444,58 @@ func TestBuildSleepHistory_ActiveSession(t *testing.T) {
 	}
 	if e.DurationS != nil {
 		t.Errorf("DurationS should be nil for active session, got %v", e.DurationS)
+	}
+}
+
+// ── breastSource ──────────────────────────────────────────────────────────────
+
+func TestBreastSource_LeftOnly(t *testing.T) {
+	segs := []schemas.AdaFeedingSegment{{Side: "left", DurationS: 600}}
+	if got := breastSource(segs); got != "breast_left" {
+		t.Errorf("breastSource(left only) = %q, want %q", got, "breast_left")
+	}
+}
+
+func TestBreastSource_RightOnly(t *testing.T) {
+	segs := []schemas.AdaFeedingSegment{{Side: "right", DurationS: 480}}
+	if got := breastSource(segs); got != "breast_right" {
+		t.Errorf("breastSource(right only) = %q, want %q", got, "breast_right")
+	}
+}
+
+func TestBreastSource_BothSides(t *testing.T) {
+	segs := []schemas.AdaFeedingSegment{
+		{Side: "left", DurationS: 600},
+		{Side: "right", DurationS: 420},
+	}
+	if got := breastSource(segs); got != "breast" {
+		t.Errorf("breastSource(both sides) = %q, want %q", got, "breast")
+	}
+}
+
+func TestBreastSource_MultipleSwitches(t *testing.T) {
+	// Multiple segments but only one unique side — should still be breast_left.
+	segs := []schemas.AdaFeedingSegment{
+		{Side: "left", DurationS: 300},
+		{Side: "left", DurationS: 300},
+	}
+	if got := breastSource(segs); got != "breast_left" {
+		t.Errorf("breastSource(left×2) = %q, want %q", got, "breast_left")
+	}
+}
+
+func TestBreastSource_ZeroDurationSidesStillClassify(t *testing.T) {
+	// Side classification must work even when DurationS=0 (pre-fix tag mismatch scenario).
+	// breastSource reads Side only — duration does not affect the result.
+	segs := []schemas.AdaFeedingSegment{{Side: "left", DurationS: 0}}
+	if got := breastSource(segs); got != "breast_left" {
+		t.Errorf("breastSource(left, dur=0) = %q, want %q", got, "breast_left")
+	}
+}
+
+func TestBreastSource_EmptySegments(t *testing.T) {
+	// No segments — default to "breast" rather than panicking.
+	if got := breastSource(nil); got != "breast" {
+		t.Errorf("breastSource(nil) = %q, want %q", got, "breast")
 	}
 }
