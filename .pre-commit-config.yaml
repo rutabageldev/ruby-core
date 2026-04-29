@@ -109,7 +109,7 @@ repos:
       - id: no-push-to-main
         name: Prevent direct push to main
         language: system
-        entry: bash -c 'b=$(git rev-parse --abbrev-ref HEAD 2>/dev/null); if [ "$b" = "main" ]; then echo "Direct push to main is not allowed. Open a PR." >&2; exit 1; fi'
+        entry: bash -c 'while IFS=" " read -r l ls r rs; do if [ "$r" = "refs/heads/main" ]; then echo "Direct push to main is not allowed. Open a PR." >&2; exit 1; fi; done; exit 0'
         stages: [pre-push]
         pass_filenames: false
         always_run: true
