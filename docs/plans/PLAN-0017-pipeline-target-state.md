@@ -70,6 +70,63 @@ flowchart TD
 
 ---
 
+## Safe push model — prerequisites
+
+This plan enables Claude to push feature and fix branches directly, removing the manual push step from the collaboration workflow. Two controls make this safe: a remote enforcement layer that cannot be bypassed, and a local enforcement layer that catches mistakes before they reach GitHub. Both must be in place before Claude is granted push credentials.
+
+### A. GitHub branch protection on `main` *(prerequisite — configure first)*
+
+GitHub branch protection is the authoritative enforcement layer. Even with `contents: write` on the repo, branch protection rules block direct push to `main` for all actors — no override exists at the PAT scope level.
+
+Configure in repo **Settings → Branches → Add branch protection rule**, pattern `main`:
+
+* [x] **Require a pull request before merging** — no direct push path
+* [x] **Require status checks to pass before merging** — add: `lint`, `unit-tests`, `integration-tests`
+* [x] **Require branches to be up to date before merging**
+* [x] **Do not allow bypassing the above settings** — this applies to admins too; the owner can temporarily disable the rule via the UI if an emergency bypass is ever needed
+
+This is the only control that is truly non-bypassable by Claude. The local hook (below) adds friction but cannot be relied upon alone — `--no-verify` defeats it.
+
+### B. Claude push credential *(prerequisite — set up before first Claude push)*
+
+Create a **fine-grained PAT** at github.com/settings/personal-access-tokens/new:
+
+* **Resource owner:** rutabageldev
+* **Repository access:** Only selected repositories → ruby-core
+* **Permissions:**
+  * Contents → **Read and Write** (enables branch create/push)
+  * Metadata → Read (implicitly required)
+  * Everything else → No access
+* **Expiry:** Set an expiry (90 days recommended); calendar a renewal
+
+Store in Vault using the ruby-core-writer token:
+
+```bash
+VAULT_ADDR=https://127.0.0.1:8200 \
+VAULT_CACERT=/opt/foundation/vault/tls/vault-ca.crt \
+VAULT_TOKEN=$VAULT_TOKEN_RUBY_CORE_WRITER \
+vault kv put secret/ruby-core/github push_token=ghp_...
+```
+
+Claude reads the token at push time using the standard ruby-core reader token from `deploy/dev/.env`. Push syntax:
+
+```bash
+PUSH_TOKEN=$(VAULT_ADDR=https://127.0.0.1:8200 \
+  VAULT_CACERT=/opt/foundation/vault/tls/vault-ca.crt \
+  vault kv get -field=push_token secret/ruby-core/github)
+
+git push "https://x-access-token:${PUSH_TOKEN}@github.com/rutabageldev/ruby-core.git" \
+  HEAD:refs/heads/<branch-name>
+```
+
+The fine-grained PAT cannot bypass branch protection even with `contents: write`. Attempting to push directly to `main` returns HTTP 403 from GitHub — the local hook (below) is belt-and-suspenders, not the primary control.
+
+### C. Local main-push guard *(belt-and-suspenders — catches accidental pushes before they reach GitHub)*
+
+Added to `.pre-commit-config.yaml` in the pre-push stage alongside the lint and test hooks (see Section 1). Raises an error immediately if the current branch is `main`, before any network call is made. Uses `always_run: true` so it fires even on doc-only pushes where no files match the Go type filter.
+
+---
+
 ## What changes
 
 ### 1. Local-first feedback — pre-push stage in `.pre-commit-config.yaml` *(new)*
@@ -87,6 +144,17 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 - repo: local
   hooks:
+    - id: no-push-to-main
+      name: Prevent direct push to main
+      language: system
+      entry: bash -c 'branch=$(git rev-parse --abbrev-ref HEAD);
+        if [ "$branch" = "main" ]; then
+          echo "ERROR: direct push to main is not allowed — open a PR.";
+          exit 1;
+        fi'
+      stages: [pre-push]
+      pass_filenames: false
+      always_run: true
     - id: golangci-lint-from-main
       name: golangci-lint (changed since main)
       language: system
@@ -103,7 +171,7 @@ Add to `.pre-commit-config.yaml`:
       pass_filenames: false
 ```
 
-fmt-check is omitted — it's already enforced at commit time by the existing golangci-lint hook. No need to repeat it on push.
+`no-push-to-main` uses `always_run: true` so it fires on every push regardless of file changes. It is listed first so it fails fast before lint or tests run. fmt-check is omitted — already enforced at commit time by the existing golangci-lint hook.
 
 One-time install after adding the hooks: `pre-commit install --hook-type pre-push`. Bypass for emergencies: `git push --no-verify`.
 
@@ -369,10 +437,12 @@ Each step is independently shippable and reversible. Steps 1, 2, 4, 5 can ship t
 
 | # | Change | Effort | Wall-clock impact | Risk |
 |---|---|---|---|---|
+| **0a** | **Enable branch protection on `main`** (GitHub Settings → Branches) — **do first** | 10 min | N/A — safety prerequisite | None |
+| **0b** | **Create fine-grained PAT + store in Vault** (`secret/ruby-core/github push_token`) — **do before first Claude push** | 10 min | N/A — Claude push prerequisite | None |
 | 1 | Gate `docker-build` on go filter + add gha caching | 20 min | −60s per Go PR run | None |
 | 2 | Drop `push: main` trigger | 2 min | −2:45 per merge | None — PR was the gate |
 | 3 | Add `paths-filter` to CI; move `configs/**` to go filter | 30 min | 0 to −2:30 per PR | Low |
-| 4 | Add pre-push stage to `.pre-commit-config.yaml`; `pre-commit install --hook-type pre-push` | 30 min | −1:00 effective wait time | None — bypassable |
+| 4 | Add pre-push stage to `.pre-commit-config.yaml` (including `no-push-to-main` guard); `pre-commit install --hook-type pre-push` | 30 min | −1:00 effective wait time | None — bypassable locally, but GitHub protection is non-bypassable |
 | 5 | Refactor version mgmt (`${VERSION:?}` in prod/staging compose, drop `.env.example` VERSION, derive from git in deploy scripts, delete `bump-version.sh`) | 1 hr | Eliminates "forgot to bump" reruns | Low — fail-loud is safer than current silent fallback |
 | **5a** | **Install GH runner as systemd service (`svc.sh install`)** — **prerequisite for Step 6** | 15 min | N/A — reliability prereq | None |
 | 6 | Wire `deploy-prod` after `deploy-staging` in release.yml | 1 hr | Removes the manual step | Low — auto-rollback already exists |
@@ -387,7 +457,13 @@ Each step is independently shippable and reversible. Steps 1, 2, 4, 5 can ship t
 
 ## Decisions you should make
 
-**1. Should the pre-push hook run integration tests?**
+**1. Claude push access — branch push yes, main push never.**
+Claude is granted `contents: write` on the repo via a fine-grained PAT stored in Vault. This enables pushing feature and fix branches without manual intervention. Main is protected by GitHub branch protection (non-bypassable) and a local pre-push hook (belt-and-suspenders). The PAT cannot bypass branch protection regardless of its scope — this is enforced at the GitHub API layer, not the credential layer.
+
+**2. PAT expiry — 90 days, calendar-driven renewal.**
+Fine-grained PATs can expire. 90 days is short enough to limit exposure if the token leaks, long enough not to be operationally disruptive. Set a calendar reminder. If the token expires, Claude falls back to asking the user to push manually until it's renewed.
+
+**3. Should the pre-push hook run integration tests?**
 No. They take 60–90s with testcontainer spin-up. Hooks should stay under 30s warm. Integration tests live in CI.
 
 **2. Stability watcher: notify-only or auto-rollback in v1?**
