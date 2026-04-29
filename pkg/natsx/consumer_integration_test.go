@@ -39,7 +39,17 @@ func startNATS(t *testing.T) *natsgo.Conn {
 		t.Fatalf("startNATS: connection string: %v", err)
 	}
 
-	nc, err := natsgo.Connect(connStr)
+	// Retry the connection: testcontainers marks the NATS container ready when
+	// port 4222 is open, but the server may not have completed its startup
+	// handshake yet. A short retry loop avoids the resulting EOF on first connect.
+	var nc *natsgo.Conn
+	for range 10 {
+		nc, err = natsgo.Connect(connStr, natsgo.MaxReconnects(0))
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if err != nil {
 		t.Fatalf("startNATS: connect: %v", err)
 	}
