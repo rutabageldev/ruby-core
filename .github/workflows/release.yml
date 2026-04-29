@@ -131,20 +131,6 @@ jobs:
             ${{ github.ref_name }} 600 \
             >> /var/log/ruby-core/stability.log 2>&1 &
 
-  # ==========================================================================
-  # Create GitHub Release
-  # Runs only after prod deploy succeeds. Skipped for -rc tags.
-  # ==========================================================================
-  create-release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    needs: deploy-prod
-    if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-rc')
-    permissions:
-      contents: write
-
-    steps:
-      - name: Create Release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
-        with:
-          generate_release_notes: true
+  # create-release removed — release-please owns GitHub Release creation.
+  # Merging a release-please PR creates the tag + release; that tag then
+  # triggers this workflow (build → staging → prod → stability watcher).
