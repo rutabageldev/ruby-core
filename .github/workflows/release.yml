@@ -126,10 +126,10 @@ jobs:
 
       - name: Start stability watcher
         run: |
-          systemd-run --user --no-block \
-            --unit=ruby-core-stability-watch-${{ github.ref_name }} \
-            /opt/ruby-core/scripts/stability-watch.sh \
-            ${{ github.ref_name }} 600
+          mkdir -p /var/log/ruby-core
+          nohup setsid /opt/ruby-core/scripts/stability-watch.sh \
+            ${{ github.ref_name }} 600 \
+            >> /var/log/ruby-core/stability.log 2>&1 &
 
   # ==========================================================================
   # Create GitHub Release
