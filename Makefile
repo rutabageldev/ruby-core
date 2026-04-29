@@ -12,7 +12,7 @@
         staging-up staging-down deploy-staging \
         docker-ps docker-images docker-volumes docker-clean \
         setup-creds setup-creds-force setup-staging-creds nats-validate \
-        bump-version db-seed db-seed-clear
+        db-seed db-seed-clear
 
 # Default target
 .DEFAULT_GOAL := help
@@ -241,13 +241,6 @@ setup-creds: ## Generate and store credentials (NKEYs + TLS) in Vault
 
 setup-creds-force: ## Regenerate ALL credentials (overwrites existing)
 	@( . deploy/dev/.env && VAULT_TOKEN="$$VAULT_TOKEN_RUBY_CORE_WRITER" FORCE_REGEN=true scripts/setup-credentials.sh )
-
-# =============================================================================
-# Versioning
-# =============================================================================
-
-bump-version: ## Bump semver (LEVEL=major|minor|patch — default: patch)
-	@scripts/bump-version.sh "$(LEVEL)"
 
 db-seed: ## Seed the Ada database with representative test data (all source/type combinations)
 	@scripts/seed-db.sh

@@ -99,3 +99,33 @@ repos:
         language: system
         types: [go]
         pass_filenames: false
+
+  # ==========================================================================
+  # Pre-push hooks — run once per push, not per commit (PLAN-0017)
+  # Install: pre-commit install --hook-type pre-push
+  # ==========================================================================
+  - repo: local
+    hooks:
+      - id: no-push-to-main
+        name: Prevent direct push to main
+        language: system
+        entry: bash -c 'b=$(git rev-parse --abbrev-ref HEAD 2>/dev/null); if [ "$b" = "main" ]; then echo "Direct push to main is not allowed. Open a PR." >&2; exit 1; fi'
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+
+      - id: golangci-lint-from-main
+        name: golangci-lint (changed since main)
+        language: system
+        entry: golangci-lint run --new-from-rev=origin/main --timeout=2m
+        types: [go]
+        stages: [pre-push]
+        pass_filenames: false
+
+      - id: go-test-fast-push
+        name: go test -tags=fast (pre-push)
+        language: system
+        entry: go test -tags=fast -race -short ./...
+        types: [go]
+        stages: [pre-push]
+        pass_filenames: false

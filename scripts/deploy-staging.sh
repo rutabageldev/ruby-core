@@ -43,15 +43,11 @@ VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
 echo "=== Deploying to staging ==="
 echo "    Version: ${VERSION}"
 
-# Always tear down on exit (clean state for next run).
-cleanup() {
-  echo "=== Tearing down staging stack ==="
-  docker compose -f "$STAGING_COMPOSE" down -v 2>/dev/null || true
-}
-trap cleanup EXIT
-
 # ---------------------------------------------------------------------------
 # Pull images and start services.
+# Staging stack is permanent (PLAN-0017 step 7). No teardown on exit — the
+# warm stack validates the rolling-restart path that prod will take. Smoke
+# IDs are millisecond-unique so persistent JetStream state doesn't pollute.
 # ---------------------------------------------------------------------------
 docker compose -f "$STAGING_COMPOSE" pull
 docker compose -f "$STAGING_COMPOSE" up -d

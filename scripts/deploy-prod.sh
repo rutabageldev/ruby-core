@@ -37,7 +37,11 @@ if [ -f "$ENV_FILE" ]; then
   done < "$ENV_FILE"
 fi
 
-VERSION="${VERSION:?ERROR: VERSION must be set in deploy/prod/.env or the environment}"
+# Derive VERSION from the latest git tag if not already set by caller or .env.
+if [ -z "${VERSION:-}" ]; then
+  VERSION="$(git -C "$REPO_ROOT" describe --tags --abbrev=0 2>/dev/null || true)"
+fi
+VERSION="${VERSION:?ERROR: VERSION not set and no git tag found — pass VERSION=vX.Y.Z or tag the commit}"
 VAULT_TOKEN="${VAULT_TOKEN:?ERROR: VAULT_TOKEN must be set in deploy/prod/.env or the environment}"
 VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
 VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
