@@ -126,7 +126,7 @@ jobs:
 
       - name: Start stability watcher
         run: |
-          systemd-run --no-block \
+          systemd-run --user --no-block \
             --unit=ruby-core-stability-watch-${{ github.ref_name }} \
             /opt/ruby-core/scripts/stability-watch.sh \
             ${{ github.ref_name }} 600
