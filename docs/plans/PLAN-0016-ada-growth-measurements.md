@@ -79,24 +79,21 @@ future use." Section 4 says chart tooltips show "exact value, percentile, date, 
 displayed in tooltips but not surfaced in summary views (e.g., the main-page latest
 measurement strip).
 
-### 5. Unit preference "per-user, not per-session" has no existing store
+### 5. Unit preference — resolved as localStorage, no ruby-core involvement
 
-The current system has no per-user preference store. The `ada_config` table is a flat
-key-value store with no user scoping. Implementing per-user preferences correctly requires
-either keyed config rows (`user.{ha_user_id}.unit_system`) or a separate table. This
-decision is deferred pending HA agent input on where the preference should live (see open
-questions). For the initial implementation, unit preference will be treated as a global
-config value in `ada_config`, not per-user.
+The original spec described this as a per-user server-side preference, which had no
+existing storage mechanism. This was resolved: unit preference lives in browser
+localStorage and is a frontend-only concern. Ruby-core has no work to do here.
 
 ---
 
 ## Pre-conditions
 
-* [ ] Branch `feat/ada-growth-measurements` created from `main`
+* [x] Branch `feat/ada-growth-measurements` created from `main`
 * [ ] Engine running and healthy in dev (`make dev-up`)
 * [ ] Ada profile (`birth_at`) is set in dev — required for percentile age calculation
-* [ ] WHO LMS table data files sourced from WHO website and converted to JSON
-      (girls weight-for-age, length-for-age, head-circumference-for-age, 0–24 months)
+* [x] WHO LMS table data files sourced from WHO CDN, converted to imperial units, committed
+      (`services/engine/processors/ada/who/` — 25 rows each, months 0–24)
 
 ---
 
@@ -228,15 +225,32 @@ SELECT id, measured_at, weight_oz, length_in, head_circumference_in,
        source, weight_pct, length_pct, head_pct, logged_by
 FROM growth_measurements
 WHERE deleted_at IS NULL
-ORDER BY measured_at ASC;
+ORDER BY measured_at DESC;
 ```
 
 Run `sqlc generate` from `services/engine/processors/ada/store/` to produce
 `growth.sql.go`.
 
+**Nullable parameter handling:** `InsertGrowthMeasurement` accepts nullable columns for
+all six optional fields (weight_oz, length_in, head_circumference_in, weight_pct,
+length_pct, head_pct). Add a small helper alongside the existing `numericFromFloat`:
+
+```go
+func numericFromFloatPtr(f *float64) pgtype.Numeric {
+    if f == nil {
+        return pgtype.Numeric{} // zero value = NULL
+    }
+    return numericFromFloat(*f)
+}
+```
+
+Use this when building the `InsertGrowthMeasurementParams` in the handler for any field
+sourced from a pointer in `AdaGrowthLoggedData` or a percentile that may not have been
+computed.
+
 **Verification:** Generated file compiles (`go build ./...`). Inspect generated code to
-confirm parameter types match the schema (nullable columns use `pgtype.Numeric` or
-`pgtype.Float8`).
+confirm nullable columns produce `pgtype.Numeric` parameters. Confirm
+`numericFromFloatPtr(nil)` produces a `pgtype.Numeric` with `Valid = false`.
 
 ---
 
@@ -320,12 +334,19 @@ func (t Table) Interpolate(ageDays float64) (L, M, S float64, err error) { ... }
 
 // Percentile computes the WHO LMS percentile for a given measurement value and age.
 // Returns 0–100.
+// When |L| < 1e-6 (L approaches 0), uses the limit form Z = ln(value/M) / S to avoid
+// a 0/0 division. This applies to weight-for-age around months 3–5 where L crosses zero.
 func Percentile(t Table, ageDays, value float64) (float64, error) {
     L, M, S, err := t.Interpolate(ageDays)
     if err != nil {
         return 0, err
     }
-    z := (math.Pow(value/M, L) - 1) / (L * S)
+    var z float64
+    if math.Abs(L) < 1e-6 {
+        z = math.Log(value / M) / S
+    } else {
+        z = (math.Pow(value/M, L) - 1) / (L * S)
+    }
     return phi(z) * 100, nil
 }
 
@@ -373,12 +394,14 @@ Implement `handleGrowthLogged`:
 
 1. Unmarshal the payload into `AdaGrowthLoggedData`.
 2. Parse `Timestamp` as RFC3339; return error on parse failure.
-3. Load Ada's birth date from `ada_profile` (call `GetProfile`). If no profile exists, log
-   a warning and return nil (soft-fail — can't compute age without birth date; measurement
-   is still useful to store without a percentile).
+3. Load Ada's birth date from `ada_profile` (call `GetProfile`). On `pgx.ErrNoRows` OR
+   any DB error, log a warning and return nil (soft-fail — measurement persists without a
+   percentile; don't propagate a DB error that would cause an unnecessary NAK+retry).
 4. Compute `ageDays = measuredAt.Sub(birthAt).Hours() / 24`.
-5. For each provided measurement, compute percentile using the appropriate WHO table. Log
-   a warning (but don't fail) if age is outside the table range (>730 days).
+5. If `ageDays < 0` (measurement backdated before birth date), log a warning and store nil
+   percentiles — don't attempt LMS computation on a negative age.
+   If `ageDays > 730`, log a warning and store nil percentiles — outside the WHO table range.
+   Otherwise, compute percentile using the appropriate WHO table for each provided measurement.
 6. Call `InsertGrowthMeasurement` with raw values and computed percentiles.
 7. Call `pushGrowthSensors(ctx)`.
 
@@ -408,7 +431,6 @@ Implement `pushGrowthSensors(ctx)`:
 
 * Query `GetLatestWeight`, `GetLatestLength`, `GetLatestHeadCircumference`.
 * If a query returns `pgx.ErrNoRows`, skip that sensor (no data yet — not an error).
-* For weight: compute `weight_lb = floor(weight_oz / 16)` and `weight_rem_oz = weight_oz mod 16`.
 * Percentile values are rounded to 1 decimal place before push.
 * Push each sensor with the following exact shapes:
 
@@ -466,22 +488,21 @@ developer tools with correct state and attributes.
 
 **Action:** Add constant `sensorGrowthHistory = "sensor.ada_growth_history"`.
 
-Update `GetAllGrowthMeasurements` query (Step 4) to sort **descending** by `measured_at`
-(spec v2 requirement — the history list renders directly without client-side re-sort).
+The `GetAllGrowthMeasurements` query was already written in Step 4 as `ORDER BY measured_at DESC`.
 
 Implement `pushGrowthHistory(ctx)`:
 
 * Call `GetAllGrowthMeasurements` (all-time, descending by `measured_at`).
 * Partition results into three separate slices: one per measurement type. A single DB
-  row that has weight, length, and head circumference all populated produces **one entry
-  in each relevant slice** — not one combined entry in a flat list.
+  row with all three values populated produces **one entry in each relevant slice**. A
+  weight-only row produces one entry in `weight` only.
 * Each slice contains only fields relevant to that type. No cross-type fields, no null
   or zero placeholders.
 
 **`sensor.ada_growth_history`**
 
 ```
-state: "12"   // total count of all measurements rows
+state: "12"   // count of distinct DB rows (measurement events), not total entries across arrays
 attributes: {
   "weight": [
     {"id": "uuid", "measured_at": "2026-09-15T14:30:00Z", "weight_oz": 134.5, "percentile": 55.2, "source": "home"},
@@ -510,7 +531,11 @@ Key invariants:
 * `id` is always present (UUID string) — needed for chart ↔ list highlight interaction.
 * `source` is always present.
 
-Add `pushGrowthHistory(ctx)` to `pushGrowthSensors(ctx)` and `refreshAllSensors(ctx)`.
+Call `pushGrowthHistory(ctx)` from inside `pushGrowthSensors(ctx)` (so it fires on every
+new measurement event). In `refreshAllSensors`, call `pushGrowthSensors` directly — do
+NOT also call `pushGrowthHistory` directly from `refreshAllSensors`, as that would fire
+it twice per refresh. The call chain is: `refreshAllSensors → pushGrowthSensors →
+pushGrowthHistory`.
 
 **Verification:** In dev, log several growth measurements (weight-only, all-three, one
 pediatrician) and verify:
@@ -529,10 +554,17 @@ On engine startup (called once from `refreshAllSensors`), push BOTH the raw LMS 
 AND precomputed band values. The LMS tables are required by the HA frontend for client-side
 percentile computation during input validation. The band values are required for chart rendering.
 
-**Band computation:** Sample at 7-day intervals for 0–91 days (14 points) then 30-day
-intervals for 121–730 days (21 points) = 35 data points per curve. Use the inverse LMS
-formula: `value = M * (1 + L * S * Z)^(1/L)` where Z = probit(percentile/100). Implement
+**Band computation:** Sample at 7-day intervals for 0–91 days (days 0, 7, 14, …, 91 →
+14 points), then 30-day intervals from 91–730 days (days 91, 121, 152, …, 730 → 22
+points) = 36 data points per curve. The 30-day series starts at 91 (not 121) so there is
+no gap at the 3-month transition. Use the inverse LMS formula:
+`value = M * (1 + L * S * Z)^(1/L)` where Z = probit(percentile/100). Apply the same
+L→0 guard as in `Percentile`: when |L| < 1e-6, use `value = M * exp(Z * S)`. Implement
 `probit(p)` via rational approximation (Beasley-Springer-Moro) — no external dependency.
+
+Implement `pushGrowthCurves(ctx)` and call it explicitly from `refreshAllSensors` (after
+`pushGrowthSensors`). It fires on engine startup, HA reconnect, and the 4-hour safety net
+— all via `refreshAllSensors`. The data is static so repeated pushes are harmless.
 
 **`sensor.ada_growth_curves`**
 
@@ -574,9 +606,11 @@ Value units and precision:
 **Verification:** Inspect `sensor.ada_growth_curves` attributes in HA developer tools after
 engine startup. Spot-checks:
 
-* `weight.lms[0].M` ≈ `3.2322` (WHO girls weight-for-age month 0)
-* `weight.bands.p50[0]` ≈ `[0, 113.76]` (WHO: 3.2322 kg = 113.6 oz at 50th pct)
+* `weight.lms[0].M` ≈ `114.01` (oz — WHO 3.2322 kg × 35.274; NOT kg)
+* `weight.bands.p50[0]` ≈ `[0, 114.01]` (50th percentile at birth = the median = M)
+* `length.lms[0].M` ≈ `19.35` (inches — WHO 49.15 cm ÷ 2.54)
 * Confirm `lms`, `bands`, all 5 percentile keys, and all 3 measurement types are present
+* Confirm `weight.bands` has 36 data points; first at age 0, transition at 91, last at 730
 
 ---
 
