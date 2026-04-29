@@ -380,13 +380,16 @@ func buildSamplePoints() []float64 {
 // ── pgtype helpers ────────────────────────────────────────────────────────────
 
 // numericToFloat converts a pgtype.Numeric to float64, returning 0 for invalid/NULL.
+// Uses Float64Value() — n.Scan(&f) fills n FROM f, not the reverse.
 func numericToFloat(n pgtype.Numeric) float64 {
 	if !n.Valid {
 		return 0
 	}
-	var f float64
-	_ = n.Scan(&f)
-	return f
+	f8, err := n.Float64Value()
+	if err != nil || !f8.Valid {
+		return 0
+	}
+	return f8.Float64
 }
 
 // numericToFloatOk converts a pgtype.Numeric to float64, reporting whether the value
@@ -395,9 +398,11 @@ func numericToFloatOk(n pgtype.Numeric) (float64, bool) {
 	if !n.Valid {
 		return 0, false
 	}
-	var f float64
-	_ = n.Scan(&f)
-	return math.Round(f*10) / 10, true
+	f8, err := n.Float64Value()
+	if err != nil || !f8.Valid {
+		return 0, false
+	}
+	return math.Round(f8.Float64*10) / 10, true
 }
 
 // isNoRows reports whether an error is a pgx "no rows" sentinel.
