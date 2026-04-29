@@ -24,7 +24,16 @@ SERVICES=(gateway engine notifier presence audit-sink)
 
 VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
 VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
-VAULT_TOKEN="${VAULT_TOKEN:?VAULT_TOKEN is required}"
+
+# VAULT_TOKEN may not be inherited when launched via systemd-run --user.
+# Fall back to the prod .env file so the script works in both contexts.
+if [ -z "${VAULT_TOKEN:-}" ]; then
+  PROD_ENV="/opt/ruby-core/deploy/prod/.env"
+  if [ -f "$PROD_ENV" ]; then
+    VAULT_TOKEN="$(grep '^VAULT_TOKEN=' "$PROD_ENV" 2>/dev/null | cut -d= -f2-)"
+  fi
+fi
+VAULT_TOKEN="${VAULT_TOKEN:?VAULT_TOKEN is required — set in environment or deploy/prod/.env}"
 export VAULT_ADDR VAULT_CACERT VAULT_TOKEN
 
 HA_URL=$(vault kv get -field=url secret/ruby-core/ha)
