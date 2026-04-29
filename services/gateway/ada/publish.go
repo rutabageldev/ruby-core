@@ -31,6 +31,7 @@ var eventRoutes = map[string]string{
 	"ada.channel.add":         schemas.AdaEventAddChannel,
 	"ada.channel.remove":      schemas.AdaEventRemoveChannel,
 	"ada.config.bedtime":      schemas.AdaEventBedtimeConfig,
+	"ada.growth.log":          schemas.AdaEventGrowthLogged,
 }
 
 // Publish wraps payload in a CloudEvent and publishes to the appropriate

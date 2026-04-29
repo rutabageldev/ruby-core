@@ -65,6 +65,13 @@ const (
 	sensorSleepHistory         = "sensor.ada_sleep_history"
 	sensorFeedingHistory       = "sensor.ada_feeding_history"
 	sensorTodayBoundary        = "sensor.ada_today_boundary"
+
+	// Growth measurement sensors
+	sensorLatestWeight            = "sensor.ada_latest_weight"
+	sensorLatestLength            = "sensor.ada_latest_length"
+	sensorLatestHeadCircumference = "sensor.ada_latest_head_circumference"
+	sensorGrowthHistory           = "sensor.ada_growth_history"
+	sensorGrowthCurves            = "sensor.ada_growth_curves"
 )
 
 // adaBoundaryCrossingsTotal counts bedtime boundary crossings that trigger a
@@ -107,6 +114,7 @@ func (p *Processor) Subscriptions() []string {
 		"ha.events.input_number.ada_alert_threshold_h",
 		// Note: gateway.health is a bare NATS publish (not on HA_EVENTS JetStream)
 		// and is handled via a bare nc.Subscribe in Initialize, not listed here.
+		// Note: ha.events.ada.> covers growth_logged — no additional entry needed.
 	}
 }
 
@@ -211,6 +219,8 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleTummyTarget(ctx, evt)
 	case schemas.AdaEventBedtimeConfig:
 		return p.handleBedtimeConfig(ctx, evt)
+	case schemas.AdaEventGrowthLogged:
+		return p.handleGrowthLogged(ctx, evt)
 	case "ha.events.input_number.ada_alert_threshold_h":
 		return p.handleThresholdChange(ctx, evt)
 	default:
@@ -1068,6 +1078,8 @@ func (p *Processor) refreshAllSensors(ctx context.Context) {
 	p.pushFeedingHistory(ctx)
 	p.pushDiaperHistory(ctx)
 	p.pushSleepHistory(ctx)
+	p.pushGrowthSensors(ctx) // includes pushGrowthHistory
+	p.pushGrowthCurves(ctx)
 }
 
 // pushLastEventSensors pushes sensors derived from the most recent event of each
@@ -1794,6 +1806,15 @@ func numericFromFloat(f float64) pgtype.Numeric {
 	var n pgtype.Numeric
 	_ = n.Scan(strconv.FormatFloat(f, 'f', 2, 64))
 	return n
+}
+
+// numericFromFloatPtr converts a *float64 to pgtype.Numeric.
+// A nil pointer produces a NULL numeric (Valid = false).
+func numericFromFloatPtr(f *float64) pgtype.Numeric {
+	if f == nil {
+		return pgtype.Numeric{}
+	}
+	return numericFromFloat(*f)
 }
 
 // breastSource derives a feeding source string from breast feeding segments.
