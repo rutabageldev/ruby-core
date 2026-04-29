@@ -56,6 +56,21 @@ type FeedingSegment struct {
 	DurationS int32
 }
 
+type GrowthMeasurement struct {
+	ID                  pgtype.UUID
+	MeasuredAt          pgtype.Timestamptz
+	WeightOz            pgtype.Numeric
+	LengthIn            pgtype.Numeric
+	HeadCircumferenceIn pgtype.Numeric
+	Source              string
+	WeightPct           pgtype.Numeric
+	LengthPct           pgtype.Numeric
+	HeadPct             pgtype.Numeric
+	LoggedBy            string
+	DeletedAt           pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+}
+
 type Person struct {
 	ID          pgtype.UUID
 	HaUserID    string

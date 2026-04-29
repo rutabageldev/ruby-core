@@ -20,6 +20,7 @@ const (
 	AdaEventAddChannel          = "ha.events.ada.add_channel"
 	AdaEventRemoveChannel       = "ha.events.ada.remove_channel"
 	AdaEventBedtimeConfig       = "ha.events.ada.config_bedtime"
+	AdaEventGrowthLogged        = "ha.events.ada.growth_logged"
 )
 
 // AdaFeedingEndedData is the CloudEvent Data payload for a breast feeding session end.
@@ -182,4 +183,18 @@ type AdaFeedingLoggedPastData struct {
 	BreastMilkML float64 `json:"breast_milk_ml,omitempty"`
 	FormulaML    float64 `json:"formula_ml,omitempty"`
 	LoggedBy     string  `json:"logged_by,omitempty"`
+}
+
+// AdaGrowthLoggedData is the payload for a logged growth measurement.
+// Optional fields use pointer types — nil means "not provided," not zero.
+// A weight-only entry has nil LengthIn and HeadCircumferenceIn.
+// Timestamp is the measurement date/time (RFC3339) and supports backdating.
+// Source is "home" or "pediatrician".
+type AdaGrowthLoggedData struct {
+	WeightOz            *float64 `json:"weight_oz,omitempty"`
+	LengthIn            *float64 `json:"length_in,omitempty"`
+	HeadCircumferenceIn *float64 `json:"head_circumference_in,omitempty"`
+	Source              string   `json:"source"`
+	Timestamp           string   `json:"timestamp"`
+	LoggedBy            string   `json:"logged_by,omitempty"`
 }
