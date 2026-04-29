@@ -121,6 +121,8 @@ git push "https://x-access-token:${PUSH_TOKEN}@github.com/rutabageldev/ruby-core
 
 The fine-grained PAT cannot bypass branch protection even with `contents: write`. Attempting to push directly to `main` returns HTTP 403 from GitHub — the local hook (below) is belt-and-suspenders, not the primary control.
 
+**Workflow file constraint:** GitHub requires an additional `workflow` scope to push changes to `.github/workflows/`. The PAT intentionally omits this scope — keeping CI/CD pipeline modifications in human hands is the right security boundary. Branches that touch `.github/workflows/` must be pushed manually by the owner. All other branches (Go code, scripts, configs, docs) can be pushed by Claude via the PAT.
+
 ### C. Local main-push guard *(belt-and-suspenders — catches accidental pushes before they reach GitHub)*
 
 Added to `.pre-commit-config.yaml` in the pre-push stage alongside the lint and test hooks (see Section 1). Raises an error immediately if the current branch is `main`, before any network call is made. Uses `always_run: true` so it fires even on doc-only pushes where no files match the Go type filter.
