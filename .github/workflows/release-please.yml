@@ -1,0 +1,32 @@
+# Release Please — automated release PR management (PLAN-0017 Step 10)
+#
+# On every push to main, release-please inspects conventional commits since the
+# last tag and opens (or updates) a "chore: release vX.Y.Z" PR with a changelog.
+# When that PR is merged, release-please creates the tag and GitHub Release.
+# The tag then triggers release.yml (build → staging → prod → stability watcher).
+#
+# Token: RUBY_CORE_RELEASE_PLEASE must be a fine-grained PAT with
+#   Contents: Read and Write, Pull requests: Read and Write.
+# Using a PAT (not GITHUB_TOKEN) ensures CI runs on the release PR.
+
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RUBY_CORE_RELEASE_PLEASE }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
