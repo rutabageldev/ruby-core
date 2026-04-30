@@ -78,5 +78,6 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
 done
 
 echo "$(date -Iseconds) stability-watch: ${VERSION} — ${DURATION}s window clean"
+mkdir -p /var/log/ruby-core
 echo "$(date -Iseconds) ${VERSION} stable" >> /var/log/ruby-core/stability.log
 notify_ha "ruby-core ${VERSION} stable" "${DURATION}s post-deploy window clean"
