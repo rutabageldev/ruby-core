@@ -94,25 +94,34 @@ vault kv put secret/ruby-core/nats/engine \
 
 ### TLS Certificates
 
-For development, generate certificates with mkcert (see `deploy/base/nats/certs/README.md`).
+**Dev now uses direct-PKI issuance** (PLAN-0008 Stage 2; ADR-0030). At service
+startup, `pkg/boot/pki.go` AppRole-logs in via mounted role-id + secret-id files
+and issues a cert directly from `pki_int/issue/ruby-core-<svc>`. An in-process
+goroutine renews at TTL/2. No mkcert dependency; no operator action for routine
+rotation.
 
-For production, use Vault's PKI engine:
+The Vault-side state (AppRoles + PKI roles + scoped policies + role-id files on
+disk) is created by foundation's `make setup-pki-ruby-core-roles` +
+`make setup-foundation-agent-ruby-core-roles` (PLAN-0008 Stage 1, foundation
+PR #78). The compose file bind-mounts the resulting role-id + secret-id files
+into each ruby-core container.
+
+**Rollback path (legacy mkcert KV bundle):** still callable when `VAULT_PKI_ROLE`
+is unset in compose. `make setup-creds` repopulates `secret/ruby-core/tls/*`
+from mkcert. Retained as the durable rollback target until Phase 17.7.
+
+**Historical note (Phase 2 design — superseded by Phase 17.6):** the original
+plan was to use mkcert in dev and Vault's PKI engine only in prod, with a
+forward-looking sketch like:
 
 ```bash
-# Enable PKI secrets engine
 vault secrets enable pki
-
-# Generate root CA
 vault write pki/root/generate/internal \
   common_name="Ruby Core CA" \
   ttl=87600h
-
-# Configure CA and CRL URLs
 vault write pki/config/urls \
   issuing_certificates="http://vault:8200/v1/pki/ca" \
   crl_distribution_points="http://vault:8200/v1/pki/crl"
-
-# Create a role for issuing certificates
 vault write pki/roles/ruby-core-service \
   allowed_domains="ruby-core.local" \
   allow_subdomains=true \
@@ -131,9 +140,12 @@ vault kv get secret/ruby-core/nats/gateway
 vault kv get -field=seed secret/ruby-core/nats/gateway
 ```
 
-## Known Limitations (Phase 2)
+## Known Limitations (Phase 2 — partly resolved by Phase 17.6)
 
-- **Static VAULT_TOKEN:** Services authenticate to Vault using a static token passed via environment variable. This is acceptable for Phase 2 but should be migrated to AppRole or Kubernetes auth in a future phase (ADR-0015).
+- **Static VAULT_TOKEN:** Services still authenticate via static token for the
+  NKEY + HA + Postgres KV reads. The TLS path moved to AppRole in Phase 17.6
+  (PLAN-0008 Stage 2; ADR-0030). The remaining KV reads will follow in
+  Phase 17.7 or later as a separate effort.
 
 ## Security Notes
 
