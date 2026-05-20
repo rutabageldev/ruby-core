@@ -36,10 +36,14 @@ CONTAINER_PREFIX="ruby-core-dev"
 export VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
 export VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
 
-# Expected log messages (slog JSON format, from services/gateway/main.go and services/engine/main.go)
+# Expected log messages (slog JSON format).
+# PLAN-0008 (Phase 17.6) split the TLS-material log into two possible lines:
+#   "pki: cert issued"               — direct-PKI path (VAULT_PKI_ROLE set)
+#   "vault: fetched TLS material"    — legacy KV path (rollback target)
+# The grep uses extended regex alternation to accept either.
 EXPECTED_LOGS=(
     "vault: fetched NATS seed"
-    "vault: fetched TLS material"
+    "pki: cert issued\|vault: fetched TLS material"
     "connected to NATS"
 )
 
@@ -117,7 +121,11 @@ preflight() {
 
 start_services() {
     log_info "Building and starting services..."
-    compose --profile services up -d --build gateway engine
+    # --force-recreate ensures fresh log buffers so the verify checks (which
+    # match against startup log lines) don't have to scan months of accumulated
+    # output. Without this, a long-running container with 100MB+ of logs trips
+    # the pipefail+SIGPIPE interaction in verify() below — see the comment there.
+    compose --profile services up -d --build --force-recreate gateway engine
 }
 
 # =============================================================================
@@ -147,7 +155,14 @@ verify() {
             local svc_ok=true
 
             for expected in "${EXPECTED_LOGS[@]}"; do
-                if ! echo "${logs}" | grep -q "${expected}"; then
+                # Use here-string (<<<) instead of `echo "$logs" | grep`.
+                # With `set -o pipefail`, a fast `grep -q` that exits on first
+                # match closes its stdin, SIGPIPE-killing the upstream echo;
+                # pipefail then reports the pipeline as failed even though the
+                # match succeeded — silently turning every match into a MISS
+                # for any service with non-trivial log volume. Here-strings
+                # bypass the pipe entirely.
+                if ! grep -q "${expected}" <<< "${logs}"; then
                     svc_ok=false
                     break
                 fi

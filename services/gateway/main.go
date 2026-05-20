@@ -37,16 +37,15 @@ func main() {
 	}
 	logger.Info("vault: fetched NATS seed", slog.String("path", cfg.VaultNKEYPath))
 
-	tlsMat, err := boot.FetchNATSTLS(cfg.VaultAddr, cfg.VaultToken, cfg.VaultTLSPath)
-	if err != nil {
-		logger.Error("vault: fetch TLS material failed", slog.String("error", err.Error()))
-		os.Exit(1)
-	}
-	logger.Info("vault: fetched TLS material", slog.String("path", cfg.VaultTLSPath))
+	// ctx scopes the renewal goroutine started by BootstrapNATSTLS when the
+	// direct-PKI path is enabled. Canceling it at shutdown lets RenewLoop exit
+	// cleanly. The signal handler installed below cancels it.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	nc, err := boot.ConnectNATS(cfg, "ruby-core-gateway", seed, tlsMat)
+	nc, err := boot.BootstrapNATSTLS(ctx, cfg, "ruby-core-gateway", seed)
 	if err != nil {
-		logger.Error("nats: connect failed", slog.String("error", err.Error()))
+		logger.Error("nats: bootstrap failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 	defer nc.Close()
@@ -75,9 +74,6 @@ func main() {
 		logger.Error("gateway: init failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

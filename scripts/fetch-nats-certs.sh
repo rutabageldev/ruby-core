@@ -2,18 +2,36 @@
 #
 # Ruby Core - Fetch NATS Server Certificates and Generate auth.conf from Vault
 #
-# Used as the entrypoint for the nats-init container. Fetches server TLS
-# certificates and service NKEY public keys from Vault, then writes them to a
-# shared Docker volume that the NATS container reads from.
+# Used as the entrypoint for the nats-init container. Fetches the NATS server
+# TLS material and the service NKEY public keys from Vault, then writes them
+# to a shared Docker volume that the NATS container reads from.
+#
+# Two cert paths supported (PLAN-0008, Phase 17.6):
+#
+#   1. Direct-PKI (preferred). When VAULT_PKI_ROLE is set, the container
+#      AppRole-logs in via the mounted role-id + secret-id files and issues
+#      a fresh server cert from pki_int/issue/<role>. Output mirrors path 2's
+#      file layout (server-cert.pem / server-key.pem / ca.pem). Requires jq
+#      (installed inline below — vault:1.15 Alpine image doesn't ship it).
+#
+#   2. Legacy KV bundle. When VAULT_PKI_ROLE is unset, the script reads the
+#      pre-PKI mkcert bundle from secret/ruby-core/tls/nats-server. Retained
+#      as the rollback target until Phase 17.7's decommission.
 #
 # Environment variables:
-#   VAULT_ADDR   - Vault address (required, set by compose)
-#   VAULT_TOKEN  - Vault token (required, set by compose)
-#   CERTS_DIR    - Output directory (default: /certs)
+#   VAULT_ADDR             - Vault address (required, set by compose)
+#   VAULT_TOKEN            - Vault token (required for path 2; ignored on path 1)
+#   VAULT_PKI_ROLE         - When set, switches to direct-PKI path
+#   VAULT_ROLE_ID_PATH     - Path to AppRole role-id file (default /vault/role-id)
+#   VAULT_SECRET_ID_PATH   - Path to AppRole secret-id file (default /vault/secret-id)
+#   VAULT_PKI_TTL          - Cert TTL (default 720h — matches pki_int role default)
+#   VAULT_PKI_IP_SANS      - IP SANs (default 127.0.0.1)
+#   CERTS_DIR              - Output directory (default /certs)
 #
 # Vault paths:
-#   secret/ruby-core/tls/nats-server  — fields: cert, key, ca
-#   secret/ruby-core/nats/<service>   — field:  public_key
+#   pki_int/issue/<VAULT_PKI_ROLE>    — direct-PKI issuance (path 1)
+#   secret/ruby-core/tls/nats-server  — legacy KV bundle (path 2)
+#   secret/ruby-core/nats/<service>   — NKEY public keys (both paths; KV-only)
 #
 
 set -eu
@@ -21,10 +39,20 @@ set -eu
 CERTS_DIR="${CERTS_DIR:-/certs}"
 TLS_PATH="${TLS_PATH:-secret/ruby-core/tls/nats-server}"
 NKEY_BASE="${NKEY_BASE:-secret/ruby-core/nats}"
+PKI_ROLE="${VAULT_PKI_ROLE:-}"
+ROLE_ID_PATH="${VAULT_ROLE_ID_PATH:-/vault/role-id}"
+SECRET_ID_PATH="${VAULT_SECRET_ID_PATH:-/vault/secret-id}"
+PKI_TTL="${VAULT_PKI_TTL:-720h}"
+PKI_IP_SANS="${VAULT_PKI_IP_SANS:-127.0.0.1}"
 MAX_RETRIES=5
 RETRY_DELAY=2
 
 echo "[nats-init] Vault: ${VAULT_ADDR}"
+if [ -n "${PKI_ROLE}" ]; then
+    echo "[nats-init] mode: direct-PKI (role=${PKI_ROLE})"
+else
+    echo "[nats-init] mode: legacy KV (PLAN-0008 rollback path)"
+fi
 
 # Wait for Vault to become available
 attempt=1
@@ -50,17 +78,65 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 # TLS Certificates
 # =============================================================================
 
-echo "[nats-init] Fetching NATS server certificates from Vault (${TLS_PATH})..."
+if [ -n "${PKI_ROLE}" ]; then
+    # ── Path 1: direct-PKI via AppRole ────────────────────────────────────
+    echo "[nats-init] Issuing NATS server cert from pki_int/issue/${PKI_ROLE}..."
 
-if ! vault kv get "${TLS_PATH}" >/dev/null 2>&1; then
-    echo "[nats-init] ERROR: Secret not found at ${TLS_PATH}"
-    echo "[nats-init] Run 'make setup-creds' first (with Vault running and VAULT_TOKEN set)."
-    exit 2
+    # jq is needed to extract three fields from one issuance response without
+    # re-issuing. vault:1.15 Alpine doesn't ship jq; apk-add is idempotent and
+    # cheap (~1s on first run, no-op afterward).
+    if ! command -v jq >/dev/null 2>&1; then
+        apk add --no-cache jq >/dev/null
+    fi
+
+    if [ ! -s "${ROLE_ID_PATH}" ]; then
+        echo "[nats-init] ERROR: role-id file missing or empty at ${ROLE_ID_PATH}"
+        exit 1
+    fi
+    if [ ! -s "${SECRET_ID_PATH}" ]; then
+        echo "[nats-init] ERROR: secret-id file missing or empty at ${SECRET_ID_PATH}"
+        exit 1
+    fi
+
+    ROLE_ID=$(tr -d '[:space:]' < "${ROLE_ID_PATH}")
+    SECRET_ID=$(tr -d '[:space:]' < "${SECRET_ID_PATH}")
+
+    # AppRole login — returns a short-lived token scoped to the
+    # foundation-agent-ruby-core-nats-server policy.
+    APPROLE_TOKEN=$(vault write -field=token auth/approle/login \
+        role_id="${ROLE_ID}" secret_id="${SECRET_ID}")
+    if [ -z "${APPROLE_TOKEN}" ]; then
+        echo "[nats-init] ERROR: AppRole login returned empty token"
+        exit 1
+    fi
+
+    # Issue once; capture full JSON so we can extract all three fields from
+    # the same cert/key pair without triggering additional issuances.
+    VAULT_TOKEN="${APPROLE_TOKEN}" vault write -format=json \
+        "pki_int/issue/${PKI_ROLE}" \
+        common_name=nats \
+        ip_sans="${PKI_IP_SANS}" \
+        ttl="${PKI_TTL}" \
+        > "${TMP_DIR}/issue-resp.json"
+
+    jq -r '.data.certificate' "${TMP_DIR}/issue-resp.json" > "${TMP_DIR}/server-cert.pem"
+    jq -r '.data.private_key' "${TMP_DIR}/issue-resp.json" > "${TMP_DIR}/server-key.pem"
+    jq -r '.data.issuing_ca'  "${TMP_DIR}/issue-resp.json" > "${TMP_DIR}/ca.pem"
+    rm -f "${TMP_DIR}/issue-resp.json"
+else
+    # ── Path 2: legacy KV bundle (rollback target) ────────────────────────
+    echo "[nats-init] Fetching NATS server certificates from Vault (${TLS_PATH})..."
+
+    if ! vault kv get "${TLS_PATH}" >/dev/null 2>&1; then
+        echo "[nats-init] ERROR: Secret not found at ${TLS_PATH}"
+        echo "[nats-init] Run 'make setup-creds' first (with Vault running and VAULT_TOKEN set)."
+        exit 2
+    fi
+
+    vault kv get -field=cert "${TLS_PATH}" > "${TMP_DIR}/server-cert.pem"
+    vault kv get -field=key  "${TLS_PATH}" > "${TMP_DIR}/server-key.pem"
+    vault kv get -field=ca   "${TLS_PATH}" > "${TMP_DIR}/ca.pem"
 fi
-
-vault kv get -field=cert "${TLS_PATH}" > "${TMP_DIR}/server-cert.pem"
-vault kv get -field=key  "${TLS_PATH}" > "${TMP_DIR}/server-key.pem"
-vault kv get -field=ca   "${TLS_PATH}" > "${TMP_DIR}/ca.pem"
 
 for f in server-cert.pem server-key.pem ca.pem; do
     if [ ! -s "${TMP_DIR}/${f}" ]; then
