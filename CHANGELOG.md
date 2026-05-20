@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/rutabageldev/ruby-core/compare/v0.12.0...v0.13.0) (2026-05-20)
+
+
+### Features
+
+* **boot:** direct-PKI cert issuance via AppRole + in-process renewal (Phase 17.6.2) ([11d760b](https://github.com/rutabageldev/ruby-core/commit/11d760b94bee9ae6c123061251ada56fea01af59))
+* **boot:** direct-PKI cert issuance via AppRole + in-process renewal (Phase 17.6.2) ([c4f9af9](https://github.com/rutabageldev/ruby-core/commit/c4f9af989d9b2ea90167a1f7a64730092b0fd06f))
+
 ## [0.12.0](https://github.com/rutabageldev/ruby-core/compare/v0.11.4...v0.12.0) (2026-04-30)
 
 
