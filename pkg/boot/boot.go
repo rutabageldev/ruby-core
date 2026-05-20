@@ -19,12 +19,25 @@ import (
 
 // Config holds bootstrap configuration read from environment variables.
 type Config struct {
+	// Service is the short service name passed to LoadConfig. Used as the
+	// PKI common name when direct-PKI issuance is enabled.
+	Service string
+
 	VaultAddr       string
 	VaultToken      string
 	NATSUrl         string
 	VaultNKEYPath   string
 	VaultTLSPath    string
 	NATSRequireMTLS bool
+
+	// Direct-PKI fields (PLAN-0008, Phase 17.6). When VaultPKIRole is set,
+	// services authenticate via AppRole and issue TLS material directly from
+	// pki_int/issue/<role> instead of reading the legacy KV bundle at
+	// VaultTLSPath. The legacy path remains as the rollback target.
+	VaultPKIRole      string
+	VaultRoleIDPath   string
+	VaultSecretIDPath string
+	VaultPKITTL       string
 }
 
 // TLSMaterial holds PEM-encoded TLS certificate material fetched from Vault.
@@ -43,12 +56,17 @@ type vaultReader interface {
 func LoadConfig(service string) Config {
 	requireMTLS, _ := strconv.ParseBool(os.Getenv("NATS_REQUIRE_MTLS"))
 	cfg := Config{
-		VaultAddr:       envOrDefault("VAULT_ADDR", "http://127.0.0.1:8200"),
-		VaultToken:      os.Getenv("VAULT_TOKEN"),
-		NATSUrl:         envOrDefault("NATS_URL", "tls://localhost:4222"),
-		VaultNKEYPath:   envOrDefault("VAULT_NKEY_PATH", "secret/data/ruby-core/nats/"+service),
-		VaultTLSPath:    envOrDefault("VAULT_TLS_PATH", "secret/data/ruby-core/tls/"+service),
-		NATSRequireMTLS: requireMTLS,
+		Service:           service,
+		VaultAddr:         envOrDefault("VAULT_ADDR", "http://127.0.0.1:8200"),
+		VaultToken:        os.Getenv("VAULT_TOKEN"),
+		NATSUrl:           envOrDefault("NATS_URL", "tls://localhost:4222"),
+		VaultNKEYPath:     envOrDefault("VAULT_NKEY_PATH", "secret/data/ruby-core/nats/"+service),
+		VaultTLSPath:      envOrDefault("VAULT_TLS_PATH", "secret/data/ruby-core/tls/"+service),
+		NATSRequireMTLS:   requireMTLS,
+		VaultPKIRole:      os.Getenv("VAULT_PKI_ROLE"),
+		VaultRoleIDPath:   envOrDefault("VAULT_ROLE_ID_PATH", "/vault/role-id"),
+		VaultSecretIDPath: envOrDefault("VAULT_SECRET_ID_PATH", "/vault/secret-id"),
+		VaultPKITTL:       envOrDefault("VAULT_PKI_TTL", "720h"),
 	}
 
 	// Reject plaintext Vault in production (ADR-0015)

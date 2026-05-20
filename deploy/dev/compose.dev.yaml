@@ -20,10 +20,19 @@ services:
       - nats-certs:/certs
       - ../../scripts/fetch-nats-certs.sh:/scripts/fetch-nats-certs.sh:ro
       - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+      # AppRole material for direct-PKI (PLAN-0008). The fetch-nats-certs.sh
+      # script picks the PKI path when VAULT_PKI_ROLE is set; the legacy KV
+      # path is unreachable unless VAULT_PKI_ROLE is unset.
+      - /opt/foundation/vault/role-id-foundation-agent-ruby-core-nats-server:/vault/role-id:ro
+      - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-nats-server:/vault/secret-id:ro
     environment:
       - VAULT_ADDR=https://vault:8200
       - VAULT_CACERT=/vault/tls/vault-ca.crt
+      # VAULT_TOKEN retained as rollback path (consumed only when VAULT_PKI_ROLE
+      # is unset). PLAN-0008 §Stage 2 cutover; remove in Phase 17.7.
       - VAULT_TOKEN=${VAULT_TOKEN:-root}
+      - VAULT_PKI_ROLE=ruby-core-nats-server
+      - VAULT_PKI_IP_SANS=127.0.0.1
     networks:
       - vault-ruby-core-dev
 
@@ -87,6 +96,9 @@ services:
         condition: service_healthy
     volumes:
       - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+      # AppRole material for direct-PKI client cert (PLAN-0008).
+      - /opt/foundation/vault/role-id-foundation-agent-ruby-core-gateway:/vault/role-id:ro
+      - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-gateway:/vault/secret-id:ro
     environment:
       - ENVIRONMENT=development
       - VAULT_ADDR=https://vault:8200
@@ -95,7 +107,10 @@ services:
       - NATS_URL=tls://nats:4222
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=secret/data/ruby-core/nats/gateway
+      # VAULT_TLS_PATH is the legacy KV bundle, retained as rollback (PLAN-0008).
+      # When VAULT_PKI_ROLE is set, boot.go ignores this and issues from PKI.
       - VAULT_TLS_PATH=secret/data/ruby-core/tls/gateway
+      - VAULT_PKI_ROLE=ruby-core-gateway
       - HTTP_ADDR=:8080
 
   # ==========================================================================
@@ -111,11 +126,19 @@ services:
     networks:
       - default
       - vault-ruby-core-dev
+      # engine's `ada` processor uses foundation-postgres; prod's compose joins
+      # this network too. Adding here makes dev parity with prod and unblocks
+      # `make dev-verify` (which was failing on the postgres DNS lookup before
+      # this PR — drift unrelated to PLAN-0008 but easy to fix inline).
+      - postgres
     depends_on:
       nats:
         condition: service_healthy
     volumes:
       - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+      # AppRole material for direct-PKI client cert (PLAN-0008).
+      - /opt/foundation/vault/role-id-foundation-agent-ruby-core-engine:/vault/role-id:ro
+      - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-engine:/vault/secret-id:ro
       # Rule files (YAML): loaded at startup, published to NATS KV (ADR-0006)
       - ../../configs/rules:/etc/ruby-core/rules:ro
     environment:
@@ -127,6 +150,7 @@ services:
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=secret/data/ruby-core/nats/engine
       - VAULT_TLS_PATH=secret/data/ruby-core/tls/engine
+      - VAULT_PKI_ROLE=ruby-core-engine
       - RULES_DIR=/etc/ruby-core/rules
       - VAULT_PG_PATH=secret/data/ruby-core/postgres
       - VAULT_HA_PATH=secret/data/ruby-core/ha
@@ -151,6 +175,9 @@ services:
         condition: service_healthy
     volumes:
       - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+      # AppRole material for direct-PKI client cert (PLAN-0008).
+      - /opt/foundation/vault/role-id-foundation-agent-ruby-core-notifier:/vault/role-id:ro
+      - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-notifier:/vault/secret-id:ro
     environment:
       - ENVIRONMENT=development
       - VAULT_ADDR=https://vault:8200
@@ -160,6 +187,7 @@ services:
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=secret/data/ruby-core/nats/notifier
       - VAULT_TLS_PATH=secret/data/ruby-core/tls/notifier
+      - VAULT_PKI_ROLE=ruby-core-notifier
 
   # ==========================================================================
   # Presence Service (profile: services)
@@ -181,6 +209,9 @@ services:
         condition: service_healthy
     volumes:
       - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+      # AppRole material for direct-PKI client cert (PLAN-0008).
+      - /opt/foundation/vault/role-id-foundation-agent-ruby-core-presence:/vault/role-id:ro
+      - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-presence:/vault/secret-id:ro
     environment:
       - ENVIRONMENT=development
       - VAULT_ADDR=https://vault:8200
@@ -190,6 +221,7 @@ services:
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=secret/data/ruby-core/nats/presence
       - VAULT_TLS_PATH=secret/data/ruby-core/tls/presence
+      - VAULT_PKI_ROLE=ruby-core-presence
       - VAULT_HA_PATH=secret/data/ruby-core/ha
       - PRESENCE_PERSON_ID=katie
       - PRESENCE_PHONE_ENTITY=phone.katie
@@ -223,10 +255,14 @@ services:
       - NATS_REQUIRE_MTLS=true
       - VAULT_NKEY_PATH=secret/data/ruby-core/nats/audit-sink
       - VAULT_TLS_PATH=secret/data/ruby-core/tls/audit-sink
+      - VAULT_PKI_ROLE=ruby-core-audit-sink
       - AUDIT_DATA_DIR=/data/audit
     volumes:
       - ruby-core-dev-audit-data:/data/audit
       - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+      # AppRole material for direct-PKI client cert (PLAN-0008).
+      - /opt/foundation/vault/role-id-foundation-agent-ruby-core-audit-sink:/vault/role-id:ro
+      - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-audit-sink:/vault/secret-id:ro
 
 # ==========================================================================
 # Networks
@@ -242,6 +278,11 @@ networks:
   event-bus-dev:
     external: true
     name: event-bus-dev
+  # Foundation's shared Postgres network. Engine's `ada` processor connects via
+  # this network to foundation-postgres. Same network as prod uses.
+  postgres:
+    external: true
+    name: postgres
 
 # ==========================================================================
 # Named Volumes
