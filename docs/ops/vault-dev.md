@@ -100,11 +100,19 @@ and issues a cert directly from `pki_int/issue/ruby-core-<svc>`. An in-process
 goroutine renews at TTL/2. No mkcert dependency; no operator action for routine
 rotation.
 
+**NATS server cert is also auto-renewed** by the `nats-cert-renewer` sidecar
+(PLAN-0008 follow-up). It's a long-running Vault Agent that uses the same
+`foundation-agent-ruby-core-nats-server` AppRole, re-issues the server cert at
+TTL/2, writes cert/key/ca atomically into the shared `nats-certs` volume, and
+SIGHUPs NATS via the Docker API. NATS reloads its TLS config in-place (~40ms);
+existing mTLS connections are unaffected — only new TLS handshakes use the
+rotated cert. Config under `deploy/dev/vault-agent/`.
+
 The Vault-side state (AppRoles + PKI roles + scoped policies + role-id files on
 disk) is created by foundation's `make setup-pki-ruby-core-roles` +
 `make setup-foundation-agent-ruby-core-roles` (PLAN-0008 Stage 1, foundation
 PR #78). The compose file bind-mounts the resulting role-id + secret-id files
-into each ruby-core container.
+into each ruby-core container — including the `nats-cert-renewer` sidecar.
 
 **Rollback path (legacy mkcert KV bundle):** still callable when `VAULT_PKI_ROLE`
 is unset in compose. `make setup-creds` repopulates `secret/ruby-core/tls/*`
