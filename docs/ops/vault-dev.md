@@ -114,15 +114,16 @@ disk) is created by foundation's `make setup-pki-ruby-core-roles` +
 PR #78). The compose file bind-mounts the resulting role-id + secret-id files
 into each ruby-core container — including the `nats-cert-renewer` sidecar.
 
-**Staging** uses the same flow (PLAN-0008 Stage 3; `deploy/staging/vault-agent/`)
-with a transitional difference: NATS's `ca.pem` is bundled with both the
-`pki_int` intermediate CA **and** the legacy mkcert root CA. This is purely so
-the smoke test (which still uses `admin`'s mkcert-signed cert from the legacy
-KV path) can complete its mTLS handshake. The 5 services + NATS server cert are
-100% pki_int-signed — the mkcert anchor is an additive trust anchor for the one
-out-of-scope principal (admin). Stage 4 (prod migration) folds in admin's
-migration to PKI and removes the bundle entirely; each transitional block in
-the affected files carries an explicit `REMOVE in Stage 4` marker.
+**Staging and Production** use the same flow (PLAN-0008 Stages 3 + 4.A;
+`deploy/{staging,prod}/vault-agent/`) with a transitional difference: NATS's
+`ca.pem` is bundled with both the `pki_int` intermediate CA **and** the
+legacy mkcert root CA. This is purely so the smoke test (which still uses
+`admin`'s mkcert-signed cert from the legacy KV path) can complete its mTLS
+handshake. The 5 services + NATS server cert are 100% pki_int-signed — the
+mkcert anchor is an additive trust anchor for the one out-of-scope principal
+(admin). Stage 4.B folds in admin's migration to PKI and removes the bundle
+entirely; each transitional block in the affected files carries an explicit
+`REMOVE in Stage 4` marker.
 
 **Rollback path (legacy mkcert KV bundle):** still callable when `VAULT_PKI_ROLE`
 is unset in compose. `make setup-creds` repopulates `secret/ruby-core/tls/*`
