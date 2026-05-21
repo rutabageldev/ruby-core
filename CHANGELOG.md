@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.1](https://github.com/rutabageldev/ruby-core/compare/v0.15.0...v0.15.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **deploy-prod:** force-recreate nats-cert-renewer to pick up script changes ([95ef550](https://github.com/rutabageldev/ruby-core/commit/95ef5509b5abf62d9a9b372defda15ea6a13152f))
+* **deploy-prod:** force-recreate nats-cert-renewer to pick up script changes (closes [#66](https://github.com/rutabageldev/ruby-core/issues/66)) ([465a2b3](https://github.com/rutabageldev/ruby-core/commit/465a2b3cb1737319d32d531d78a800514f1020e7))
+
 ## [0.15.0](https://github.com/rutabageldev/ruby-core/compare/v0.14.0...v0.15.0) (2026-05-21)
 
 
