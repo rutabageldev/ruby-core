@@ -72,6 +72,22 @@ docker compose -f "$PROD_COMPOSE" pull
 docker compose -f "$PROD_COMPOSE" up -d
 
 # ---------------------------------------------------------------------------
+# Force-recreate nats-cert-renewer to pick up any post-render.sh changes.
+#
+# The renewer bind-mounts post-render.sh as a single file. `git checkout`
+# (above, in this script's caller) replaces the file with a new inode rather
+# than editing in place, so the running container keeps a reference to the
+# original (now-orphaned) inode and never sees script changes — even though
+# the file on disk is updated. `compose up -d` won't recreate the renewer
+# because its compose config didn't change.
+#
+# Recycling it here is a sub-second sidecar restart: cert+key on disk persist,
+# NATS keeps running, the next render uses the latest script. See drift #66.
+# ---------------------------------------------------------------------------
+echo "=== Recreating nats-cert-renewer to pick up any script changes ==="
+docker compose -f "$PROD_COMPOSE" up -d --force-recreate --no-deps nats-cert-renewer
+
+# ---------------------------------------------------------------------------
 # Reload NATS auth configuration.
 # nats-init may have refreshed auth.conf on the named volume; SIGHUP applies it.
 # ---------------------------------------------------------------------------
@@ -105,6 +121,7 @@ fi
 
 # Roll back by re-deploying with the old version tag (uses cached images; no pull).
 VERSION="$PREV_VERSION" docker compose -f "$PROD_COMPOSE" up -d
+VERSION="$PREV_VERSION" docker compose -f "$PROD_COMPOSE" up -d --force-recreate --no-deps nats-cert-renewer
 docker wait ruby-core-prod-nats-init 2>/dev/null || true
 docker kill --signal=SIGHUP ruby-core-prod-nats
 
