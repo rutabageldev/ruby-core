@@ -88,6 +88,12 @@ services:
   # zero new Vault state required.
   nats-cert-renewer:
     image: foundation/vault-agent:1.21.4
+    # Local-only image (built via foundation's `make build-vault-agent-image`,
+    # never pushed to a registry per the Dockerfile comment in /opt/foundation/
+    # vault-agent/Dockerfile). pull_policy: never skips it during compose pull
+    # and uses the host's local image on up -d. The self-hosted GH runner IS
+    # this host, so the image is reliably present.
+    pull_policy: never
     container_name: ruby-core-staging-nats-cert-renewer
     restart: unless-stopped
     read_only: true
