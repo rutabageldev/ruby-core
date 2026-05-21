@@ -123,6 +123,32 @@ if [ -n "${PKI_ROLE}" ]; then
     jq -r '.data.private_key' "${TMP_DIR}/issue-resp.json" > "${TMP_DIR}/server-key.pem"
     jq -r '.data.issuing_ca'  "${TMP_DIR}/issue-resp.json" > "${TMP_DIR}/ca.pem"
     rm -f "${TMP_DIR}/issue-resp.json"
+
+    # ───────────────────────────────────────────────────────────────────────
+    # TRANSITIONAL: bundle the legacy mkcert CA into ca.pem so admin
+    # (still mkcert-signed via KV) can pass mTLS during the staged rollout.
+    # Without this, NATS would only trust pki_int-signed clients, breaking
+    # the smoke test (which uses admin) until admin migrates to PKI.
+    #
+    # The 5 service certs (gateway/engine/notifier/presence/audit-sink) AND
+    # the NATS server cert remain pki_int-signed; the mkcert CA here is an
+    # ADDITIVE trust anchor purely so the admin smoke path keeps working.
+    # Service-to-service traffic does not depend on the mkcert anchor.
+    #
+    # *** REMOVE in PLAN-0008 Stage 4 (prod migration) ***
+    # Stage 4 migrates admin to PKI; once admin's smoke path is PKI-signed,
+    # NATS no longer needs the mkcert anchor and this block becomes dead
+    # weight. Delete from line 127 to the matching marker below.
+    # ───────────────────────────────────────────────────────────────────────
+    if vault kv get "${TLS_PATH}" >/dev/null 2>&1; then
+        echo "[nats-init] bundling legacy mkcert CA from ${TLS_PATH} (transitional — remove in Stage 4)"
+        printf '\n' >> "${TMP_DIR}/ca.pem"
+        vault kv get -field=ca "${TLS_PATH}" >> "${TMP_DIR}/ca.pem"
+    else
+        echo "[nats-init] WARNING: legacy KV bundle at ${TLS_PATH} not found; admin smoke will fail"
+        echo "[nats-init] (this is benign once Stage 4 migrates admin to PKI)"
+    fi
+    # *** END TRANSITIONAL BLOCK — REMOVE in Stage 4 ***
 else
     # ── Path 2: legacy KV bundle (rollback target) ────────────────────────
     echo "[nats-init] Fetching NATS server certificates from Vault (${TLS_PATH})..."
