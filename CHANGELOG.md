@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/rutabageldev/ruby-core/compare/v0.13.0...v0.14.0) (2026-05-21)
+
+
+### Features
+
+* **deploy/prod:** direct-PKI + nats-cert-renewer (PLAN-0008 Stage 4.A) ([3d05d35](https://github.com/rutabageldev/ruby-core/commit/3d05d3539ba37f1167544f41c21e9c2dc1885903))
+* **deploy/prod:** direct-PKI + nats-cert-renewer (PLAN-0008 Stage 4.A) ([f483d14](https://github.com/rutabageldev/ruby-core/commit/f483d1445b6d59f7bf4e5ef9d561bf673daa794b))
+
 ## [0.13.0](https://github.com/rutabageldev/ruby-core/compare/v0.12.0...v0.13.0) (2026-05-21)
 
 
