@@ -93,7 +93,7 @@ HTTP_CODE=$(curl --silent --unix-socket /var/run/docker.sock \
 
 case "$HTTP_CODE" in
   204)
-    echo "post-render: cert+key+ca written to ${CERTS_DIR}; SIGHUP sent to ${NATS_CONTAINER}"
+    echo "post-render: cert+key written to ${CERTS_DIR} (ca.pem preserved from nats-init); SIGHUP sent to ${NATS_CONTAINER}"
     ;;
   *)
     echo "post-render: write OK but SIGHUP call returned HTTP $HTTP_CODE" >&2
