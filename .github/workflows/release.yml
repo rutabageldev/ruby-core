@@ -60,7 +60,13 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/ruby-core-${{ matrix.service }}
           tags: |
-            type=semver,pattern=v{{version}},value=${{ inputs.version || github.ref_name }}
+            # Always emit the raw ref/version as a tag — preserves the `v` prefix.
+            # The docker/metadata-action's `pattern=v{{version}}` quietly skips the
+            # v-prefix form for prereleases (rc/alpha/beta) because {{version}} is
+            # parsed via semver which strips the v; type=raw is the unambiguous form.
+            # Pulls in deploy/staging|prod/compose.*.yaml use ${VERSION} which is the
+            # raw ref_name, so this tag must always match.
+            type=raw,value=${{ inputs.version || github.ref_name }}
             type=semver,pattern={{version}},value=${{ inputs.version || github.ref_name }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version || github.ref_name }}
             type=sha,prefix=
