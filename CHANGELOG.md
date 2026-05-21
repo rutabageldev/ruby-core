@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.13.0](https://github.com/rutabageldev/ruby-core/compare/v0.12.0...v0.13.0) (2026-05-21)
+
+
+### Features
+
+* **boot:** direct-PKI cert issuance via AppRole + in-process renewal (Phase 17.6.2) ([11d760b](https://github.com/rutabageldev/ruby-core/commit/11d760b94bee9ae6c123061251ada56fea01af59))
+* **boot:** direct-PKI cert issuance via AppRole + in-process renewal (Phase 17.6.2) ([c4f9af9](https://github.com/rutabageldev/ruby-core/commit/c4f9af989d9b2ea90167a1f7a64730092b0fd06f))
+* **deploy/dev:** nats-cert-renewer sidecar for automatic NATS server cert rotation ([ea75b27](https://github.com/rutabageldev/ruby-core/commit/ea75b27eee5ec52bedc34090ea7aab792693a4dd))
+* **deploy/dev:** nats-cert-renewer sidecar for automatic NATS server cert rotation ([b29541c](https://github.com/rutabageldev/ruby-core/commit/b29541c2ee98200e131c44fd03cb46b188a46cea))
+* **deploy/staging:** direct-PKI + nats-cert-renewer (PLAN-0008 Stage 3) ([ed2a722](https://github.com/rutabageldev/ruby-core/commit/ed2a722e964a4a9efebdbcf2490650fb20a90114))
+* **deploy/staging:** direct-PKI + nats-cert-renewer (PLAN-0008 Stage 3) ([415dc19](https://github.com/rutabageldev/ruby-core/commit/415dc1937d7b8f29fc57e552c216a0cd14269749))
+
+
+### Bug Fixes
+
+* **deploy/staging:** pull_policy=never on nats-cert-renewer (local-only image) ([c488686](https://github.com/rutabageldev/ruby-core/commit/c48868617af3e71a41c60fe67b327adb12cdd135))
+* **pki:** bundle mkcert CA into NATS ca.pem + smoke-test trust bundle ([7ad23d2](https://github.com/rutabageldev/ruby-core/commit/7ad23d2b7eaf83da6b70e234afcde3a0d31570db))
+* **release:** always emit raw v-prefix tag (unblocks prerelease deploys) ([b8ebb7e](https://github.com/rutabageldev/ruby-core/commit/b8ebb7e9799fc30f0e8b8cd34aa6d708bcc85160))
+
 ## [0.12.0](https://github.com/rutabageldev/ruby-core/compare/v0.11.4...v0.12.0) (2026-04-30)
 
 
