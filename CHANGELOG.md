@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/rutabageldev/ruby-core/compare/v0.14.0...v0.15.0) (2026-05-21)
+
+
+### Features
+
+* admin PKI migration + mkcert decommission (PLAN-0008 Stage 4.B) ([74754f8](https://github.com/rutabageldev/ruby-core/commit/74754f872f76e1b06f2dad440c3311d792fd4ee4))
+* admin PKI migration + mkcert decommission (PLAN-0008 Stage 4.B) ([f24c5fb](https://github.com/rutabageldev/ruby-core/commit/f24c5fb8d237e007c8cb03ded41163957def6e7d))
+
 ## [0.14.0](https://github.com/rutabageldev/ruby-core/compare/v0.13.0...v0.14.0) (2026-05-21)
 
 
