@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
 #
-# Ruby Core - Credentials Setup
+# Ruby Core - Credentials Setup (NKEY-only as of PLAN-0008 Stage 4.B)
 #
-# Generates and stores all credentials needed for dev and prod environments
-# in compliance with ADR-0015 (Vault for secrets), ADR-0017 (NKEY auth), and
-# ADR-0018 (TLS everywhere).
+# Generates and stores NKEY seeds for each ruby-core service in compliance
+# with ADR-0015 (Vault for secrets) and ADR-0017 (NKEY auth).
 #
 # What this script does:
 #   1. Verifies the general-purpose Vault is reachable
 #   2. Generates NKEY pairs for each service (if missing), stores seeds in Vault
-#   3. Generates TLS certificates (all stored in Vault, nothing on disk)
-#   4. Validates the setup
+#   3. Validates the setup
 #
-# Note: auth.conf is no longer generated here. It is generated at container
-# startup by the nats-init container (scripts/fetch-nats-certs.sh) which reads
-# NKEY public keys directly from Vault.
+# Notes:
+#   - TLS certificates are NO LONGER generated here. As of PLAN-0008
+#     Stage 4.B, all ruby-core TLS material (5 services + nats-server +
+#     admin) is issued directly from Vault PKI (pki_int) at runtime via
+#     AppRole. See deploy/{dev,staging,prod}/compose.*.yaml for the
+#     VAULT_PKI_ROLE wiring and ADR-0030 for the architectural decision.
+#   - auth.conf is also not generated here. It is rendered at container
+#     startup by nats-init (scripts/fetch-nats-certs.sh) which reads NKEY
+#     public keys directly from Vault.
 #
 # Prerequisites:
 #   - General-purpose Vault running on the node
 #   - nk tool: go install github.com/nats-io/nkeys/nk@latest
-#   - mkcert: brew install mkcert (macOS) or see https://github.com/FiloSottile/mkcert
 #   - jq: for JSON parsing
 #   - vault: HashiCorp Vault CLI
 #
@@ -30,7 +33,7 @@
 #   VAULT_ADDR    - Vault address (default: https://127.0.0.1:8200)
 #   VAULT_CACERT  - Path to Vault CA cert (default: /opt/foundation/vault/tls/vault-ca.crt)
 #   VAULT_TOKEN   - Vault token (default: root)
-#   FORCE_REGEN   - Set to "true" to regenerate all credentials
+#   FORCE_REGEN   - Set to "true" to regenerate all NKEY seeds
 #
 
 set -euo pipefail
@@ -51,11 +54,9 @@ export VAULT_TOKEN="${VAULT_TOKEN:-root}"
 #   VAULT_SECRET_PREFIX=secret/ruby-core/staging ./scripts/setup-credentials.sh
 VAULT_SECRET_PREFIX="${VAULT_SECRET_PREFIX:-secret/ruby-core}"
 
-# Extra NATS server TLS SANs appended to the base list — set for staging:
-#   EXTRA_NATS_SANS=ruby-core-staging-nats ./scripts/setup-credentials.sh
-EXTRA_NATS_SANS="${EXTRA_NATS_SANS:-}"
-
-# Services that need NKEYs
+# Services that need NKEYs.
+# TLS material is issued from Vault PKI directly at runtime (PLAN-0008
+# Stage 4.B) — no TLS generation in this script anymore.
 SERVICES=("gateway" "engine" "notifier" "presence" "admin" "audit-sink")
 
 # Color output
@@ -104,7 +105,6 @@ check_prerequisites() {
     local missing=0
 
     check_command "nk" "go install github.com/nats-io/nkeys/nk@latest" || missing=1
-    check_command "mkcert" "brew install mkcert (macOS) or see https://github.com/FiloSottile/mkcert" || missing=1
     check_command "jq" "brew install jq (macOS) or apt-get install jq (Linux)" || missing=1
     check_command "vault" "brew install vault (macOS) or see https://developer.hashicorp.com/vault/downloads" || missing=1
 
@@ -223,114 +223,6 @@ generate_nkeys() {
 }
 
 # =============================================================================
-# TLS Certificate Generation
-# =============================================================================
-
-generate_tls_certs() {
-    log_info "Generating TLS certificates..."
-
-    # Check if we should skip — all certs (server + client) already in Vault
-    if [[ "${FORCE_REGEN:-false}" != "true" ]]; then
-        local all_in_vault=true
-        # Check server cert
-        if ! vault kv get "${VAULT_SECRET_PREFIX}/tls/nats-server" &> /dev/null; then
-            all_in_vault=false
-        fi
-        # Check client certs
-        if [[ "${all_in_vault}" == "true" ]]; then
-            for service in "${SERVICES[@]}"; do
-                if ! vault kv get "${VAULT_SECRET_PREFIX}/tls/${service}" &> /dev/null; then
-                    all_in_vault=false
-                    break
-                fi
-            done
-        fi
-        if [[ "${all_in_vault}" == "true" ]]; then
-            log_info "TLS certificates already exist in Vault (use FORCE_REGEN=true to regenerate)"
-            return 0
-        fi
-    fi
-
-    # Install mkcert CA if not already done
-    log_info "  Installing mkcert local CA (may require sudo)..."
-    mkcert -install 2>/dev/null || true
-
-    # Get the CA root path
-    local ca_root
-    ca_root=$(mkcert -CAROOT)
-
-    # All cert generation uses a temp directory — nothing written to the repo
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-    # shellcheck disable=SC2064  # We want immediate expansion here since tmp_dir is local
-    trap "rm -rf ${tmp_dir}" EXIT
-
-    # Generate NATS server certificate
-    # Include both dev and prod container names as SANs
-    log_info "  Generating NATS server certificate..."
-    (
-        cd "${tmp_dir}"
-        # shellcheck disable=SC2086  # EXTRA_NATS_SANS is intentionally word-split
-        mkcert -cert-file server-cert.pem -key-file server-key.pem \
-            localhost 127.0.0.1 ::1 nats ruby-core-dev-nats ruby-core-prod-nats ${EXTRA_NATS_SANS}
-    )
-    log_success "  Server certificate generated"
-
-    # Copy CA certificate to temp dir
-    cp "${ca_root}/rootCA.pem" "${tmp_dir}/ca.pem"
-
-    # Read server cert material
-    local server_cert_content
-    local server_key_content
-    local ca_content
-    server_cert_content=$(cat "${tmp_dir}/server-cert.pem")
-    server_key_content=$(cat "${tmp_dir}/server-key.pem")
-    ca_content=$(cat "${tmp_dir}/ca.pem")
-
-    # Store server cert in Vault
-    vault kv put "${VAULT_SECRET_PREFIX}/tls/nats-server" \
-        cert="${server_cert_content}" \
-        key="${server_key_content}" \
-        ca="${ca_content}" \
-        service="nats-server" \
-        created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    log_success "  Server certificate stored in Vault at ${VAULT_SECRET_PREFIX}/tls/nats-server"
-
-    # Generate client certificates and store in Vault
-    log_info "  Generating client certificates..."
-
-    for service in "${SERVICES[@]}"; do
-        local vault_path="${VAULT_SECRET_PREFIX}/tls/${service}"
-
-        # Generate client cert
-        (
-            cd "${tmp_dir}"
-            mkcert -client -cert-file "${service}-cert.pem" -key-file "${service}-key.pem" \
-                "${service}" "${service}.ruby-core.local"
-        )
-
-        # Read cert and key
-        local cert_content
-        local key_content
-        cert_content=$(cat "${tmp_dir}/${service}-cert.pem")
-        key_content=$(cat "${tmp_dir}/${service}-key.pem")
-
-        # Store in Vault
-        vault kv put "${vault_path}" \
-            cert="${cert_content}" \
-            key="${key_content}" \
-            ca="${ca_content}" \
-            service="${service}" \
-            created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-        log_success "  ${service}: client certificate stored in Vault at ${vault_path}"
-    done
-
-    # Clean up temp files (trap handles this)
-    log_success "TLS certificates generated and stored in Vault"
-}
-
-# =============================================================================
 # Validation
 # =============================================================================
 
@@ -339,26 +231,10 @@ validate_setup() {
 
     local errors=0
 
-    # Check NATS server certs exist in Vault
-    if vault kv get "${VAULT_SECRET_PREFIX}/tls/nats-server" &> /dev/null; then
-        log_success "Server certificate found in Vault at ${VAULT_SECRET_PREFIX}/tls/nats-server"
-    else
-        log_error "Missing server certificate in Vault: ${VAULT_SECRET_PREFIX}/tls/nats-server"
-        errors=$((errors + 1))
-    fi
-
     # Check all NKEY seeds are in Vault
     for service in "${SERVICES[@]}"; do
         if ! vault kv get "${VAULT_SECRET_PREFIX}/nats/${service}" &> /dev/null; then
             log_error "Missing NKEY seed in Vault: ${VAULT_SECRET_PREFIX}/nats/${service}"
-            errors=$((errors + 1))
-        fi
-    done
-
-    # Check all client certs are in Vault
-    for service in "${SERVICES[@]}"; do
-        if ! vault kv get "${VAULT_SECRET_PREFIX}/tls/${service}" &> /dev/null; then
-            log_error "Missing client cert in Vault: ${VAULT_SECRET_PREFIX}/tls/${service}"
             errors=$((errors + 1))
         fi
     done
@@ -397,18 +273,15 @@ print_summary() {
         echo "    ${VAULT_SECRET_PREFIX}/nats/${service}"
     done
     echo ""
-    echo "  TLS Certificates:"
-    echo "    ${VAULT_SECRET_PREFIX}/tls/nats-server  (NATS server cert)"
-    for service in "${SERVICES[@]}"; do
-        echo "    ${VAULT_SECRET_PREFIX}/tls/${service}"
-    done
+    echo "  TLS Certificates:  issued from Vault PKI at runtime (pki_int/issue/ruby-core-<svc>)."
+    echo "                     See deploy/{dev,staging,prod}/compose.*.yaml for the AppRole wiring."
     echo ""
     echo "Next steps:"
     echo "  1. Start dev environment:     make dev-up"
     echo "  2. Start dev services:        make dev-services-up"
     echo "  3. Deploy to production:      make deploy-prod"
     echo ""
-    echo "To regenerate all credentials:  make setup-creds-force"
+    echo "To regenerate NKEY seeds:       make setup-creds-force"
     echo "============================================================================="
 }
 
@@ -425,14 +298,14 @@ main() {
     echo "This script will:"
     echo "  1. Verify Vault connectivity"
     echo "  2. Generate NKEY pairs (if missing) and store seeds in Vault"
-    echo "  3. Generate TLS certs and store ALL in Vault (nothing on disk)"
-    echo "  4. Validate the setup"
+    echo "  3. Validate the setup"
     echo ""
-    echo "Note: auth.conf is generated at container startup by nats-init from Vault."
+    echo "Note: TLS certificates are issued from Vault PKI at runtime (PLAN-0008"
+    echo "Stage 4.B). This script no longer generates or stores TLS material."
+    echo "auth.conf is generated at container startup by nats-init from Vault."
     echo ""
     echo "Vault Address:  ${VAULT_ADDR}"
     echo "Secret Prefix:  ${VAULT_SECRET_PREFIX}"
-    echo "Extra SANs:     ${EXTRA_NATS_SANS:-(none)}"
     echo "Force Regen:    ${FORCE_REGEN:-false}"
     echo ""
 
@@ -440,7 +313,6 @@ main() {
     ensure_vault_running
     enable_kv_engine
     generate_nkeys
-    generate_tls_certs
     validate_setup
     print_summary
 }

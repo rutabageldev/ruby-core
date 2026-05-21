@@ -180,11 +180,10 @@ deploy-prod-down: ## Stop and remove prod deployment
 # Staging Environment
 # =============================================================================
 
-setup-staging-creds: ## Generate staging credentials in Vault (secret/ruby-core/staging/*)
+setup-staging-creds: ## Generate staging NKEY seeds in Vault (secret/ruby-core/staging/nats/*). TLS is PKI-issued at runtime.
 	@( . deploy/dev/.env && \
 	   VAULT_TOKEN="$$VAULT_TOKEN_RUBY_CORE_WRITER" \
 	   VAULT_SECRET_PREFIX=secret/ruby-core/staging \
-	   EXTRA_NATS_SANS=ruby-core-staging-nats \
 	   ./scripts/setup-credentials.sh )
 
 staging-up: ## Start staging stack (requires deploy/staging/.env with VAULT_TOKEN)
@@ -236,11 +235,43 @@ docker-nuke: ## Remove ALL ruby-core containers, images, and volumes (use with c
 # Setup
 # =============================================================================
 
-setup-creds: ## Generate and store credentials (NKEYs + TLS) in Vault
+setup-creds: ## Generate NKEY seeds in Vault. TLS is PKI-issued at runtime (PLAN-0008 Stage 4.B).
 	@( . deploy/dev/.env && VAULT_TOKEN="$$VAULT_TOKEN_RUBY_CORE_WRITER" scripts/setup-credentials.sh )
 
-setup-creds-force: ## Regenerate ALL credentials (overwrites existing)
+setup-creds-force: ## Regenerate ALL NKEY seeds (overwrites existing)
 	@( . deploy/dev/.env && VAULT_TOKEN="$$VAULT_TOKEN_RUBY_CORE_WRITER" FORCE_REGEN=true scripts/setup-credentials.sh )
+
+cleanup-mkcert-kv-bundles: ## Delete the legacy mkcert KV bundles at secret/ruby-core/{,staging/}tls/*. Requires CONFIRM=yes. One-shot post-Stage-4.B.
+	@if [ "$(CONFIRM)" != "yes" ]; then \
+	  echo "DRY RUN — pass CONFIRM=yes to actually delete:"; \
+	  echo ""; \
+	  for prefix in secret/ruby-core/tls secret/ruby-core/staging/tls; do \
+	    for svc in admin gateway engine notifier presence audit-sink nats-server; do \
+	      echo "  vault kv metadata delete $$prefix/$$svc"; \
+	    done; \
+	  done; \
+	  echo ""; \
+	  echo "These bundles were the rollback target during PLAN-0008 Stages 2/3/4.A."; \
+	  echo "Stage 4.B (PR including this target) cuts the cord — admin migrates to"; \
+	  echo "PKI, the transitional bundle code is removed, and these KV paths are no"; \
+	  echo "longer read by any service or script."; \
+	  echo ""; \
+	  echo "To execute: make cleanup-mkcert-kv-bundles CONFIRM=yes"; \
+	else \
+	  set -e; \
+	  . deploy/dev/.env; \
+	  export VAULT_TOKEN="$$VAULT_TOKEN_RUBY_CORE_WRITER"; \
+	  export VAULT_ADDR="$${VAULT_ADDR:-https://127.0.0.1:8200}"; \
+	  export VAULT_CACERT="$${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"; \
+	  for prefix in secret/ruby-core/tls secret/ruby-core/staging/tls; do \
+	    for svc in admin gateway engine notifier presence audit-sink nats-server; do \
+	      echo "Deleting $$prefix/$$svc..."; \
+	      vault kv metadata delete "$$prefix/$$svc" 2>&1 | grep -v "^$$" || true; \
+	    done; \
+	  done; \
+	  echo ""; \
+	  echo "Done. All mkcert KV bundles removed."; \
+	fi
 
 db-seed: ## Seed the Ada database with representative test data (all source/type combinations)
 	@scripts/seed-db.sh

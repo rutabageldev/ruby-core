@@ -37,7 +37,7 @@ Concrete requirements, all enforced in `pkg/boot/pki.go`:
 
 7. **AppRole policy scope.** The bound policy (foundation-side `vault/policies/foundation-agent-ruby-core-<svc>.hcl`) grants only `update` on the service's own `pki_int/issue/<role>` path plus `auth/token/{lookup,renew}-self`. Negative scope verified live during PR #78: each AppRole cannot read the legacy `secret/ruby-core/tls/*` KV path and cannot cross-issue another service's role.
 
-8. **Rollback path.** `boot.FetchNATSTLS` and `boot.ConnectNATS` (the legacy KV-bundle path) remain callable. `BootstrapNATSTLS` branches on `VAULT_PKI_ROLE` — when unset, it falls back to the legacy path. The mkcert KV bundles in `secret/ruby-core/tls/*` stay populated through Phase 17.7's decommission PR as the durable rollback target.
+8. **Rollback path.** `boot.FetchNATSTLS` and `boot.ConnectNATS` (the legacy KV-bundle path) remain callable in `boot.go`. `BootstrapNATSTLS` branches on `VAULT_PKI_ROLE` — when unset, it falls back to the legacy path. **The mkcert KV bundles in `secret/ruby-core/{,staging/}tls/*` have been deleted as of PLAN-0008 Stage 4.B** (`make cleanup-mkcert-kv-bundles CONFIRM=yes`); the fallback code remains for any future emergency where someone manually populates a KV bundle for rollback, but the durable target is gone. Real rollback now requires `git revert` of the relevant PR + a re-release.
 
 ## Consequences
 
