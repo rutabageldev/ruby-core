@@ -62,24 +62,7 @@ chmod 0644 "$CERT_TMP" "$CA_TMP" "$KEY_TMP"
 
 mv "$CERT_TMP" "$CERTS_DIR/server-cert.pem"
 mv "$KEY_TMP"  "$CERTS_DIR/server-key.pem"
-
-# ─────────────────────────────────────────────────────────────────────────
-# TRANSITIONAL: deliberately DO NOT overwrite ca.pem on rotation.
-# nats-init writes a BUNDLED ca.pem (pki_int issuing_ca + legacy mkcert CA)
-# at startup; overwriting here with PKI-only would drop the mkcert anchor
-# and break the admin smoke path. The renewer's AppRole has no KV read
-# capability so it cannot reproduce the bundle on its own — letting
-# nats-init's bundle persist is the simpler, correct behavior.
-#
-# Both CAs are stable for years (RubyNet Intermediate, mkcert root), so a
-# static ca.pem across cert rotations is fine. The renewer just rotates
-# cert+key.
-#
-# *** REMOVE the discard-CA behavior in PLAN-0008 Stage 4 ***
-# Once admin migrates to PKI in Stage 4, the bundle becomes unnecessary and
-# this script can resume writing ca.pem with just the PKI issuing_ca.
-# ─────────────────────────────────────────────────────────────────────────
-rm -f "$CA_TMP"
+mv "$CA_TMP"   "$CERTS_DIR/ca.pem"
 rm -f "$BUNDLE"
 
 # SIGHUP NATS via the Docker API. /kill (not /restart) with signal=SIGHUP
@@ -93,7 +76,7 @@ HTTP_CODE=$(curl --silent --unix-socket /var/run/docker.sock \
 
 case "$HTTP_CODE" in
   204)
-    echo "post-render: cert+key written to ${CERTS_DIR} (ca.pem preserved from nats-init); SIGHUP sent to ${NATS_CONTAINER}"
+    echo "post-render: cert+key+ca written to ${CERTS_DIR}; SIGHUP sent to ${NATS_CONTAINER}"
     ;;
   *)
     echo "post-render: write OK but SIGHUP call returned HTTP $HTTP_CODE" >&2

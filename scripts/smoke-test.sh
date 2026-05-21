@@ -44,37 +44,68 @@ _vault() {
   VAULT_ADDR="$VAULT_ADDR" VAULT_CACERT="$VAULT_CACERT" VAULT_TOKEN="$VAULT_TOKEN" vault "$@"
 }
 
-echo "  [smoke] fetching admin credentials from Vault"
+echo "  [smoke] fetching admin NKEY seed from Vault"
 
+# Admin's NKEY seed stays in KV (NKEY auth is orthogonal to TLS).
 if ! _vault kv get -field=seed "${VAULT_SECRET_PREFIX}/nats/admin" > "$TMPDIR/seed.nk" 2>&1; then
   echo "ERROR: cannot fetch admin NKEY seed from Vault (check VAULT_TOKEN and Vault availability)" >&2
   exit 1
 fi
 chmod 600 "$TMPDIR/seed.nk"
 
-_vault kv get -field=cert "${VAULT_SECRET_PREFIX}/tls/admin" > "$TMPDIR/client.crt"
-_vault kv get -field=key  "${VAULT_SECRET_PREFIX}/tls/admin" > "$TMPDIR/client.key"
-_vault kv get -field=ca   "${VAULT_SECRET_PREFIX}/tls/admin" > "$TMPDIR/ca.crt"
-chmod 600 "$TMPDIR/client.key"
+# ─────────────────────────────────────────────────────────────────────────
+# Admin TLS material is issued from pki_int via AppRole (PLAN-0008 Stage 4.B).
+# Previously read from a legacy mkcert KV bundle at ${VAULT_SECRET_PREFIX}/tls/admin
+# with a transitional pki_int CA append; both removed in this stage. End state
+# is pure pki_int: NATS's ca.pem trusts only the RubyNet Intermediate CA, and
+# admin's client cert chains to the same.
+#
+# AppRole material lives on the host at /opt/foundation/vault/. The smoke
+# test runs from the GH self-hosted runner (which IS that host), so the
+# files are reachable directly.
+# ─────────────────────────────────────────────────────────────────────────
+ADMIN_ROLE_ID_PATH="${ADMIN_ROLE_ID_PATH:-/opt/foundation/vault/role-id-foundation-agent-ruby-core-admin}"
+ADMIN_SECRET_ID_PATH="${ADMIN_SECRET_ID_PATH:-/opt/foundation/vault/.secret-id-foundation-agent-ruby-core-admin}"
 
-# ─────────────────────────────────────────────────────────────────────────
-# TRANSITIONAL: append the pki_int intermediate CA to the trust bundle so
-# the smoke test can verify NATS's PKI-signed server cert. Admin's client
-# cert is still mkcert-signed; both anchors coexist until Stage 4 of
-# PLAN-0008 migrates admin to PKI too.
-#
-# Without this, the smoke test fails with:
-#   "tls: failed to verify certificate: x509: certificate signed by
-#    unknown authority"
-# because admin's mkcert CA bundle alone can't verify NATS's pki_int-signed
-# server cert.
-#
-# *** REMOVE in PLAN-0008 Stage 4 ***
-# When admin migrates to PKI, fetch admin's cert/key from pki_int/issue
-# and drop both this bundling and the legacy KV reads above.
-# ─────────────────────────────────────────────────────────────────────────
-printf '\n' >> "$TMPDIR/ca.crt"
-_vault read -field=certificate pki_int/cert/ca >> "$TMPDIR/ca.crt"
+if [ ! -s "$ADMIN_ROLE_ID_PATH" ]; then
+  echo "ERROR: admin role-id missing or empty at $ADMIN_ROLE_ID_PATH" >&2
+  echo "       Run on foundation: make setup-foundation-agent-ruby-core-role SERVICE=admin" >&2
+  exit 1
+fi
+if [ ! -s "$ADMIN_SECRET_ID_PATH" ]; then
+  echo "ERROR: admin secret-id missing or empty at $ADMIN_SECRET_ID_PATH" >&2
+  exit 1
+fi
+
+ADMIN_ROLE_ID="$(tr -d '[:space:]' < "$ADMIN_ROLE_ID_PATH")"
+ADMIN_SECRET_ID="$(tr -d '[:space:]' < "$ADMIN_SECRET_ID_PATH")"
+
+echo "  [smoke] AppRole-login + issuing admin cert from pki_int/issue/ruby-core-admin"
+
+# AppRole login — returns a short-lived token scoped to the
+# foundation-agent-ruby-core-admin policy (update on pki_int/issue/ruby-core-admin
+# + self-renew; nothing else).
+ADMIN_VAULT_TOKEN="$(VAULT_ADDR="$VAULT_ADDR" VAULT_CACERT="$VAULT_CACERT" \
+  vault write -field=token auth/approle/login \
+  role_id="$ADMIN_ROLE_ID" secret_id="$ADMIN_SECRET_ID")"
+
+if [ -z "$ADMIN_VAULT_TOKEN" ]; then
+  echo "ERROR: AppRole login returned empty token" >&2
+  exit 1
+fi
+
+# Issue once; capture full JSON so we can extract cert/key/ca from a single
+# issuance (jq is a smoke-host dependency — already used elsewhere).
+ISSUE_RESP="$TMPDIR/admin-issue.json"
+VAULT_ADDR="$VAULT_ADDR" VAULT_CACERT="$VAULT_CACERT" VAULT_TOKEN="$ADMIN_VAULT_TOKEN" \
+  vault write -format=json pki_int/issue/ruby-core-admin \
+  common_name=admin ttl=1h > "$ISSUE_RESP"
+
+jq -r '.data.certificate' "$ISSUE_RESP" > "$TMPDIR/client.crt"
+jq -r '.data.private_key' "$ISSUE_RESP" > "$TMPDIR/client.key"
+jq -r '.data.issuing_ca'  "$ISSUE_RESP" > "$TMPDIR/ca.crt"
+chmod 600 "$TMPDIR/client.key"
+rm -f "$ISSUE_RESP"
 
 # Millisecond-unique smoke ID so grep matches only this run's audit event.
 SMOKE_ID="smoke-$(date +%s%3N)"

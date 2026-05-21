@@ -19,7 +19,7 @@ We will adopt a **"TLS Everywhere"** policy.
 
 2. **Internal Communication (mTLS):** For internal service-to-service connections, specifically client connections to the NATS server, we **MUST** use **Mutual TLS (mTLS)**. This requires both the server and the connecting client to present and validate certificates from a trusted Certificate Authority (CA), providing strong, transport-level authentication in both directions.
 
-3. **Local Development Environment:** The "TLS Everywhere" policy **MUST** also be enforced in the default local development environment. Plaintext communication is forbidden. Developers will use a local CA (e.g., via `mkcert` or a dev-mode Vault PKI engine) to generate the necessary certificates for their local services.
+3. **Local Development Environment:** The "TLS Everywhere" policy **MUST** also be enforced in the default local development environment. Plaintext communication is forbidden. Developers will issue certificates from the shared Vault PKI engine (`pki_int`) at service startup via AppRole-bound `pki_int/issue/ruby-core-<svc>` paths (see ADR-0030).
 
 4. **Certificate Management:** The production internal CA will be managed using the existing HashiCorp Vault instance's PKI Secrets Engine. The existing Traefik proxy can be used for TLS termination and certificate management for any externally exposed endpoints.
 

@@ -94,40 +94,38 @@ vault kv put secret/ruby-core/nats/engine \
 
 ### TLS Certificates
 
-**Dev now uses direct-PKI issuance** (PLAN-0008 Stage 2; ADR-0030). At service
-startup, `pkg/boot/pki.go` AppRole-logs in via mounted role-id + secret-id files
-and issues a cert directly from `pki_int/issue/ruby-core-<svc>`. An in-process
-goroutine renews at TTL/2. No mkcert dependency; no operator action for routine
-rotation.
+**All environments use direct-PKI issuance** (PLAN-0008 Stages 2 + 3 + 4;
+ADR-0030). mkcert is no longer a dependency. Per-component:
 
-**NATS server cert is also auto-renewed** by the `nats-cert-renewer` sidecar
-(PLAN-0008 follow-up). It's a long-running Vault Agent that uses the same
-`foundation-agent-ruby-core-nats-server` AppRole, re-issues the server cert at
-TTL/2, writes cert/key/ca atomically into the shared `nats-certs` volume, and
-SIGHUPs NATS via the Docker API. NATS reloads its TLS config in-place (~40ms);
-existing mTLS connections are unaffected — only new TLS handshakes use the
-rotated cert. Config under `deploy/dev/vault-agent/`.
+**5 Go services** (gateway, engine, notifier, presence, audit-sink) — at startup,
+`pkg/boot/pki.go` AppRole-logs in via mounted role-id + secret-id files and
+issues a cert from `pki_int/issue/ruby-core-<svc>`. An in-process goroutine
+renews at TTL/2. No operator action for routine rotation.
 
-The Vault-side state (AppRoles + PKI roles + scoped policies + role-id files on
-disk) is created by foundation's `make setup-pki-ruby-core-roles` +
-`make setup-foundation-agent-ruby-core-roles` (PLAN-0008 Stage 1, foundation
-PR #78). The compose file bind-mounts the resulting role-id + secret-id files
-into each ruby-core container — including the `nats-cert-renewer` sidecar.
+**NATS server cert** — auto-renewed by the `nats-cert-renewer` sidecar (Vault
+Agent) in each environment. Uses the `foundation-agent-ruby-core-nats-server`
+AppRole, re-issues the server cert at TTL/2, writes cert/key/ca atomically into
+the shared `nats-certs` volume, and SIGHUPs NATS via the Docker API. NATS
+reloads its TLS config in-place (~40ms); existing mTLS connections are
+unaffected — only new TLS handshakes use the rotated cert. Config under
+`deploy/{dev,staging,prod}/vault-agent/`.
 
-**Staging and Production** use the same flow (PLAN-0008 Stages 3 + 4.A;
-`deploy/{staging,prod}/vault-agent/`) with a transitional difference: NATS's
-`ca.pem` is bundled with both the `pki_int` intermediate CA **and** the
-legacy mkcert root CA. This is purely so the smoke test (which still uses
-`admin`'s mkcert-signed cert from the legacy KV path) can complete its mTLS
-handshake. The 5 services + NATS server cert are 100% pki_int-signed — the
-mkcert anchor is an additive trust anchor for the one out-of-scope principal
-(admin). Stage 4.B folds in admin's migration to PKI and removes the bundle
-entirely; each transitional block in the affected files carries an explicit
-`REMOVE in Stage 4` marker.
+**Admin (smoke-test path)** — `scripts/smoke-test.sh` AppRole-logs in via the
+`foundation-agent-ruby-core-admin` AppRole and issues a short-lived (1h) cert
+from `pki_int/issue/ruby-core-admin` each smoke run. Admin's NKEY seed stays in
+KV (NKEY auth is orthogonal to TLS).
 
-**Rollback path (legacy mkcert KV bundle):** still callable when `VAULT_PKI_ROLE`
-is unset in compose. `make setup-creds` repopulates `secret/ruby-core/tls/*`
-from mkcert. Retained as the durable rollback target until Phase 17.7.
+The Vault-side state (7 AppRoles + 7 PKI roles + 7 scoped policies + role-id
+files on disk) is created by foundation's `make setup-pki-ruby-core-roles` +
+`make setup-foundation-agent-ruby-core-roles` (foundation PRs #78, #83). The
+compose files bind-mount the resulting role-id + secret-id files into each
+ruby-core container — including the `nats-cert-renewer` sidecar.
+
+**Rollback path:** legacy mkcert KV bundles at `secret/ruby-core/{,staging/}tls/*`
+were the rollback target through PLAN-0008 Stages 2/3/4.A and were deleted in
+Stage 4.B via `make cleanup-mkcert-kv-bundles CONFIRM=yes` (one-shot, see
+Makefile). Real rollback now requires `git revert` of the relevant PR + a
+re-release.
 
 **Historical note (Phase 2 design — superseded by Phase 17.6):** the original
 plan was to use mkcert in dev and Vault's PKI engine only in prod, with a
