@@ -57,6 +57,25 @@ _vault kv get -field=key  "${VAULT_SECRET_PREFIX}/tls/admin" > "$TMPDIR/client.k
 _vault kv get -field=ca   "${VAULT_SECRET_PREFIX}/tls/admin" > "$TMPDIR/ca.crt"
 chmod 600 "$TMPDIR/client.key"
 
+# ─────────────────────────────────────────────────────────────────────────
+# TRANSITIONAL: append the pki_int intermediate CA to the trust bundle so
+# the smoke test can verify NATS's PKI-signed server cert. Admin's client
+# cert is still mkcert-signed; both anchors coexist until Stage 4 of
+# PLAN-0008 migrates admin to PKI too.
+#
+# Without this, the smoke test fails with:
+#   "tls: failed to verify certificate: x509: certificate signed by
+#    unknown authority"
+# because admin's mkcert CA bundle alone can't verify NATS's pki_int-signed
+# server cert.
+#
+# *** REMOVE in PLAN-0008 Stage 4 ***
+# When admin migrates to PKI, fetch admin's cert/key from pki_int/issue
+# and drop both this bundling and the legacy KV reads above.
+# ─────────────────────────────────────────────────────────────────────────
+printf '\n' >> "$TMPDIR/ca.crt"
+_vault read -field=certificate pki_int/cert/ca >> "$TMPDIR/ca.crt"
+
 # Millisecond-unique smoke ID so grep matches only this run's audit event.
 SMOKE_ID="smoke-$(date +%s%3N)"
 
