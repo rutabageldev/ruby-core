@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.13.0](https://github.com/rutabageldev/ruby-core/compare/v0.12.0...v0.13.0) (2026-05-21)
+
+
+### Features
+
+* **boot:** direct-PKI cert issuance via AppRole + in-process renewal (Phase 17.6.2) ([11d760b](https://github.com/rutabageldev/ruby-core/commit/11d760b94bee9ae6c123061251ada56fea01af59))
+* **boot:** direct-PKI cert issuance via AppRole + in-process renewal (Phase 17.6.2) ([c4f9af9](https://github.com/rutabageldev/ruby-core/commit/c4f9af989d9b2ea90167a1f7a64730092b0fd06f))
+* **deploy/dev:** nats-cert-renewer sidecar for automatic NATS server cert rotation ([ea75b27](https://github.com/rutabageldev/ruby-core/commit/ea75b27eee5ec52bedc34090ea7aab792693a4dd))
+* **deploy/dev:** nats-cert-renewer sidecar for automatic NATS server cert rotation ([b29541c](https://github.com/rutabageldev/ruby-core/commit/b29541c2ee98200e131c44fd03cb46b188a46cea))
+
 ## [0.12.0](https://github.com/rutabageldev/ruby-core/compare/v0.11.4...v0.12.0) (2026-04-30)
 
 
