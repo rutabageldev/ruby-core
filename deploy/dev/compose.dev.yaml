@@ -71,6 +71,48 @@ services:
       start_period: 5s
 
   # ==========================================================================
+  # NATS Cert Renewer (long-running sidecar — PLAN-0008 follow-up)
+  # ==========================================================================
+  # Vault Agent that re-issues the NATS server cert at TTL/2 and SIGHUPs the
+  # NATS container to reload TLS without dropping client connections. Closes
+  # the renewal gap from PLAN-0008 Stage 2 verification.
+  #
+  # See deploy/dev/vault-agent/ for config + template + post-render script.
+  # Auth via foundation-agent-ruby-core-nats-server AppRole (created in
+  # foundation PR #78); zero new Vault state required.
+  nats-cert-renewer:
+    image: foundation/vault-agent:1.21.4
+    container_name: ruby-core-dev-nats-cert-renewer
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      nats:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - vault agent -config=/etc/vault-agent/config.hcl
+    environment:
+      - NATS_CONTAINER=ruby-core-dev-nats
+    volumes:
+      - nats-certs:/certs
+      - ./vault-agent/config.hcl:/etc/vault-agent/config.hcl:ro
+      - ./vault-agent/nats-server.tpl:/etc/vault-agent/nats-server.tpl:ro
+      - ./vault-agent/post-render.sh:/etc/vault-agent/post-render.sh:ro
+      - /opt/foundation/vault/role-id-foundation-agent-ruby-core-nats-server:/vault/role-id:ro
+      - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-nats-server:/vault/secret-id:ro
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+      - ./vault-agent/rendered:/rendered
+      - /var/run/docker.sock:/var/run/docker.sock  # allow:docker.sock -- nats-cert-renewer SIGHUP hook (PLAN-0008 follow-up)
+    networks:
+      - default
+      - vault-ruby-core-dev
+    cap_drop:
+      - ALL
+
+  # ==========================================================================
   # Gateway Service (profile: services)
   # ==========================================================================
   # Activated with: docker compose --profile services up -d
