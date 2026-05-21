@@ -43,8 +43,8 @@ Concrete requirements, all enforced in `pkg/boot/pki.go`:
 
 ### Positive Consequences
 
-* Zero new sidecar containers across dev/staging/prod.
-* No shared-volume plumbing, no UID/perm coordination, no restart orchestration.
+* Zero sidecars for the 5 Go services across dev/staging/prod (15 sidecars avoided). One sidecar remains for the NATS server cert — `nats-cert-renewer` — because NATS is a third-party process that reads certs from disk and provides none of the in-process semantics this ADR requires for the exemption. The two-pattern split is exactly what's intended: direct-PKI for Vault-native consumers, sidecar pattern (per foundation's ADR-0008) for filesystem consumers.
+* No shared-volume plumbing, no UID/perm coordination, no restart orchestration **for the Go services**. The NATS sidecar handles those concerns for the one process that does need them.
 * Cert lifecycle scoped to the process: a service that's running has a fresh cert; a service that's not is irrelevant.
 * Reuses the existing `boot` Vault client — no parallel infrastructure.
 * Reconnect handshakes pick up rotated certs without restart; no operator action ever required for routine rotation.

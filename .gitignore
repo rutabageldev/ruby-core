@@ -28,6 +28,9 @@ dist/
 # deployment state
 .last-deployed-version
 
+# Vault Agent rendered output (sidecar writes here; never commit)
+deploy/*/vault-agent/rendered/
+
 # GitHub Actions runner artifacts (runner lives at ~/actions-runner, not in repo)
 _runner-work/
 _diag/
