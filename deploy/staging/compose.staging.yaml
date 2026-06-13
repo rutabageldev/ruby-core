@@ -87,7 +87,7 @@ services:
   # Auth via foundation-agent-ruby-core-nats-server AppRole (foundation PR #78);
   # zero new Vault state required.
   nats-cert-renewer:
-    image: foundation/vault-agent:1.21.4
+    image: foundation/vault-agent:2.0.2
     # Local-only image (built via foundation's `make build-vault-agent-image`,
     # never pushed to a registry per the Dockerfile comment in /opt/foundation/
     # vault-agent/Dockerfile). pull_policy: never skips it during compose pull
