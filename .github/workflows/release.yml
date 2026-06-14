@@ -88,8 +88,9 @@ jobs:
   # ==========================================================================
   # Deploy to Staging & Run Smoke Test (Phase 8, ADR-0013)
   # Runs after all images are built. SSHes into the node, checks out the tag,
-  # runs deploy-staging.sh which: pulls images, starts the staging stack,
-  # runs smoke-test.sh against staging NATS (port 4224), then tears down.
+  # runs deploy-staging.sh which: pulls images, rolling-restarts the permanent
+  # staging stack onto the tag, then runs smoke-test.sh against staging NATS
+  # (port 4224). The stack is left running (PLAN-0017 step 7).
   # create-release only runs if this job passes.
   # ==========================================================================
   deploy-staging:

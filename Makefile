@@ -192,7 +192,7 @@ staging-up: ## Start staging stack (requires deploy/staging/.env with VAULT_TOKE
 staging-down: ## Stop staging stack and remove volumes
 	$(COMPOSE_CMD) -f $(STAGING_COMPOSE) down -v
 
-deploy-staging: ## Pull images, start staging, run smoke test, tear down (requires VERSION=)
+deploy-staging: ## Pull images, rolling-restart permanent staging, run smoke test (requires VERSION=)
 	@VERSION="$(VERSION)" ./scripts/deploy-staging.sh "$(VERSION)"
 
 # =============================================================================
