@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # deploy-staging.sh VERSION
 #
-# Deploys the staging stack, runs a smoke test, then tears down.
-# Designed to be idempotent: always runs `docker compose down -v` on exit
-# so the next run starts from a clean state.
+# Updates the permanent staging stack to VERSION and runs a smoke test.
+# The stack is NOT torn down on exit (PLAN-0017 step 7): the warm stack stays
+# up to validate the rolling-restart path prod will take. Re-running performs a
+# rolling restart onto the requested version. To explicitly tear staging down
+# and remove its volumes, use `make staging-down`.
 #
 # Exit codes:
 #   0  smoke test passed
-#   1  smoke test failed (stack has been torn down)
+#   1  smoke test failed (stack is left running for inspection)
 #
 # Environment:
 #   VAULT_TOKEN    (required) — read from deploy/staging/.env if not set
@@ -97,5 +99,4 @@ else
   docker logs ruby-core-staging-engine --tail 50 2>&1 >&2 || true
 fi
 
-# cleanup trap runs on exit
 exit "$smoke_exit"
