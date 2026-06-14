@@ -194,7 +194,7 @@ services:
       - VAULT_TLS_PATH=secret/data/ruby-core/tls/engine
       - VAULT_PKI_ROLE=ruby-core-engine
       - RULES_DIR=/etc/ruby-core/rules
-      - VAULT_PG_PATH=secret/data/ruby-core/postgres
+      - VAULT_PG_PATH=secret/data/ruby-core/dev/postgres
       - VAULT_HA_PATH=secret/data/ruby-core/ha
       - TZ=America/New_York
 
