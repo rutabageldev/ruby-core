@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.15.2](https://github.com/rutabageldev/ruby-core/compare/v0.15.1...v0.15.2) (2026-06-17)
+
+
+### Bug Fixes
+
+* **dev:** point dev engine at its own isolated database ([28813cc](https://github.com/rutabageldev/ruby-core/commit/28813cc3d5ac9f4c8996f47005a7c5e700102d54))
+* **gateway:** gate Home Assistant ingestion to prod only ([5f776bd](https://github.com/rutabageldev/ruby-core/commit/5f776bd110e1fbd6257f738c19177527de6171e2))
+* isolate non-prod environments from prod HA + database (stop 3x Ada writes) ([da7d012](https://github.com/rutabageldev/ruby-core/commit/da7d012822749c6de8838f013dc81b60a6a153d2))
+
 ## [0.15.1](https://github.com/rutabageldev/ruby-core/compare/v0.15.0...v0.15.1) (2026-05-21)
 
 
