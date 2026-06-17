@@ -158,6 +158,9 @@ services:
       - VAULT_TLS_PATH=secret/data/ruby-core/staging/tls/gateway
       - VAULT_PKI_ROLE=ruby-core-gateway
       - HTTP_ADDR=:8080
+      # HA ingestion gate: only prod consumes the shared Home Assistant event
+      # stream. Non-prod stays off it to avoid duplicate fan-out writes.
+      - HA_INGEST_ENABLED=false
     # No Traefik labels — staging gateway is not publicly routed
 
   # ==========================================================================

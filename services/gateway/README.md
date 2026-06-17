@@ -26,6 +26,7 @@ All secrets are fetched from Vault at startup. The service will not start if Vau
 | `NATS_REQUIRE_MTLS` | `false` | Force mTLS even if NATS_URL is not `tls://` |
 | `HTTP_ADDR` | `:8080` | Bind address for the health endpoint |
 | `ENVIRONMENT` | *(unset)* | Set to `production` to enforce HTTPS Vault |
+| `HA_INGEST_ENABLED` | *(unset → enabled)* | Set to `false` to disable Home Assistant ingestion (no WebSocket; degraded mode). All environments share one HA, so only prod should ingest — non-prod gateways set this to `false`. |
 | `VAULT_ALLOW_HTTP` | `false` | Override HTTPS enforcement for co-located Vault |
 
 ## Health check
