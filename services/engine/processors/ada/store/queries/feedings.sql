@@ -7,6 +7,18 @@ RETURNING id;
 INSERT INTO feeding_bottle_detail (feeding_id, amount_oz, breast_milk_oz, formula_oz, duration_s)
 VALUES (@feeding_id, @amount_oz, @breast_milk_oz, @formula_oz, @duration_s);
 
+-- name: AddFeedingBottleDetailAmounts :exec
+-- Additively merge bottle amounts onto a feed's bottle detail, creating the row
+-- if absent (e.g. a supplement top-off onto a breast feed) or accumulating onto an
+-- existing one (repeated supplements / a supplement onto a bottle feed). Used for
+-- ada.feeding.supplement so a top-off is attached to its parent feed, not orphaned (#74).
+INSERT INTO feeding_bottle_detail (feeding_id, amount_oz, breast_milk_oz, formula_oz)
+VALUES (@feeding_id, @amount_oz, @breast_milk_oz, @formula_oz)
+ON CONFLICT (feeding_id) DO UPDATE SET
+    amount_oz      = COALESCE(feeding_bottle_detail.amount_oz, 0)      + COALESCE(EXCLUDED.amount_oz, 0),
+    breast_milk_oz = COALESCE(feeding_bottle_detail.breast_milk_oz, 0) + COALESCE(EXCLUDED.breast_milk_oz, 0),
+    formula_oz     = COALESCE(feeding_bottle_detail.formula_oz, 0)     + COALESCE(EXCLUDED.formula_oz, 0);
+
 -- name: InsertFeedingSegment :exec
 INSERT INTO feeding_segments (feeding_id, side, started_at, ended_at, duration_s)
 VALUES (@feeding_id, @side, @started_at, @ended_at, @duration_s);

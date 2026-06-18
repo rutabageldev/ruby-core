@@ -9,3 +9,12 @@ SELECT
 FROM tummy_time_sessions
 WHERE deleted_at IS NULL
   AND start_time >= @boundary;
+
+-- name: GetLast24hTummy :many
+-- Returns tummy time sessions since @since (a rolling-24h boundary), newest-first,
+-- matching the shape of the other *_history sensors.
+SELECT id, start_time, end_time, duration_s, logged_by
+FROM tummy_time_sessions
+WHERE deleted_at IS NULL
+  AND start_time >= @since
+ORDER BY start_time DESC;

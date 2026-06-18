@@ -18,7 +18,9 @@ On startup the engine:
 
 The `ada` processor persists feeding, diaper, sleep, and tummy time events to PostgreSQL and pushes derived sensor state to Home Assistant after each event. It also subscribes to the bare `gateway.health` subject to restore HA sensor state after a gateway reconnect. A background ticker runs every 60 seconds to push `sensor.ada_sleep_session_min` while a session is active, refresh daily aggregates at midnight rollover, and perform a full sensor restore every 4 hours as a safety net against HA state loss.
 
-Three sensors carry a 24-hour rolling history array as their `entries[]` attribute: `sensor.ada_feeding_history`, `sensor.ada_diaper_history`, and `sensor.ada_sleep_history`. Each is pushed after the relevant event and on every daily restore. Sensor state is the entry count; active sleep sessions appear in `sensor.ada_sleep_history` with `end_time` and `duration_s` omitted.
+Four sensors carry a 24-hour rolling history array as their `entries[]` attribute: `sensor.ada_feeding_history`, `sensor.ada_diaper_history`, `sensor.ada_sleep_history`, and `sensor.ada_tummy_history`. Each is pushed after the relevant event and on every daily restore. Sensor state is the entry count; active sleep sessions appear in `sensor.ada_sleep_history` with `end_time` and `duration_s` omitted. The `last_*` sensors (e.g. `sensor.ada_last_diaper_time`, `sensor.ada_last_sleep_change`) reflect the chronologically newest event by timestamp, so back-dating an older event does not overwrite them.
+
+When a caregiver claims a due feed (`ada.feeding.claimed`), the engine owns the claim lifecycle: it sets `input_boolean.ada_feeding_claimed` on and projects the claimer to `sensor.ada_feeding_claimed_by`, then clears both when the next feed is completed.
 
 The `ada.born` event persists Ada's birth datetime to the `ada_profile` table. The table is singleton-constrained (at most one row) and idempotent — repeated fires are silently ignored. `birth_at` is stored as a UTC timestamp and is available as a future query boundary for filtering pre-birth data.
 

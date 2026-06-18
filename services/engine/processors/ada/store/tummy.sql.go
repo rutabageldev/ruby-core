@@ -11,6 +11,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getLast24hTummy = `-- name: GetLast24hTummy :many
+SELECT id, start_time, end_time, duration_s, logged_by
+FROM tummy_time_sessions
+WHERE deleted_at IS NULL
+  AND start_time >= $1
+ORDER BY start_time DESC
+`
+
+type GetLast24hTummyRow struct {
+	ID        pgtype.UUID
+	StartTime pgtype.Timestamptz
+	EndTime   pgtype.Timestamptz
+	DurationS int32
+	LoggedBy  string
+}
+
+// Returns tummy time sessions since @since (a rolling-24h boundary), newest-first,
+// matching the shape of the other *_history sensors.
+func (q *Queries) GetLast24hTummy(ctx context.Context, since pgtype.Timestamptz) ([]*GetLast24hTummyRow, error) {
+	rows, err := q.db.Query(ctx, getLast24hTummy, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*GetLast24hTummyRow
+	for rows.Next() {
+		var i GetLast24hTummyRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StartTime,
+			&i.EndTime,
+			&i.DurationS,
+			&i.LoggedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTodayTummyAggregates = `-- name: GetTodayTummyAggregates :one
 SELECT
     COALESCE(SUM(duration_s) / 60, 0)::int AS total_minutes,
