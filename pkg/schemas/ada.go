@@ -55,11 +55,16 @@ type AdaFeedingLoggedData struct {
 }
 
 // AdaFeedingSupplementData is the payload for a supplemental bottle logged mid-session.
-// AmountOz is in oz at point of entry.
+// All amounts are in oz at point of entry. A single-source supplement
+// (source "breast_milk" or "formula") carries AmountOz; a mixed supplement
+// (source "mixed") carries BreastMilkOz and FormulaOz directly. The processor
+// routes the amounts onto the correct named columns of the parent feed (#74).
 type AdaFeedingSupplementData struct {
-	Source   string  `json:"source"`
-	AmountOz float64 `json:"amount_oz"`
-	LoggedBy string  `json:"logged_by,omitempty"`
+	Source       string  `json:"source"`
+	AmountOz     float64 `json:"amount_oz,omitempty"`      // single-source supplement
+	BreastMilkOz float64 `json:"breast_milk_oz,omitempty"` // mixed supplement
+	FormulaOz    float64 `json:"formula_oz,omitempty"`     // mixed supplement
+	LoggedBy     string  `json:"logged_by,omitempty"`
 }
 
 // AdaDiaperLoggedData is the payload for a logged diaper change.

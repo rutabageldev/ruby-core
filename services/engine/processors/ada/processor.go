@@ -64,6 +64,7 @@ const (
 	sensorDiaperHistory        = "sensor.ada_diaper_history"
 	sensorSleepHistory         = "sensor.ada_sleep_history"
 	sensorFeedingHistory       = "sensor.ada_feeding_history"
+	sensorTummyHistory         = "sensor.ada_tummy_history"
 	sensorTodayBoundary        = "sensor.ada_today_boundary"
 
 	// Growth measurement sensors
@@ -483,24 +484,52 @@ func (p *Processor) handleFeedingSupplemented(ctx context.Context, evt schemas.C
 	}
 
 	// A supplement is a bottle top-off during the same breast feeding session.
-	// Attach the bottle detail to the most recent feeding row rather than
-	// creating a new one — this keeps ada_today_feeding_count accurate.
+	// Attach the bottle detail to the most-recent non-deleted feeding row rather
+	// than creating a new one — this keeps ada_today_feeding_count accurate.
 	feedingID, err := p.q.GetLastFeedingID(ctx)
 	if err != nil {
 		return fmt.Errorf("ada: get last feeding for supplement: %w", err)
 	}
 
-	if err := p.q.InsertFeedingBottleDetail(ctx, &store.InsertFeedingBottleDetailParams{
-		FeedingID: feedingID,
-		AmountOz:  numericFromFloat(d.AmountOz),
+	// Route the supplement's oz onto the correct named columns by source. A mixed
+	// top-off carries breast_milk_oz + formula_oz; a single-source one carries
+	// amount_oz routed by source. Additively merged so repeated supplements (or a
+	// supplement onto an existing bottle feed) accumulate rather than conflict (#74).
+	amount, breastMilk, formula := supplementAmounts(d.Source, d.AmountOz, d.BreastMilkOz, d.FormulaOz)
+	if err := p.q.AddFeedingBottleDetailAmounts(ctx, &store.AddFeedingBottleDetailAmountsParams{
+		FeedingID:    feedingID,
+		AmountOz:     numericFromFloat(amount),
+		BreastMilkOz: numericFromFloat(breastMilk),
+		FormulaOz:    numericFromFloat(formula),
 	}); err != nil {
-		return fmt.Errorf("ada: insert supplement bottle detail: %w", err)
+		return fmt.Errorf("ada: merge supplement bottle detail: %w", err)
 	}
 
 	// Push only oz sensors — last_feeding_time, last_feeding_source,
 	// next_feeding_target, and today_feeding_count must not change.
 	p.pushSupplementOzSensor(ctx)
 	return nil
+}
+
+// supplementAmounts routes a supplement's oz onto the named bottle-detail columns
+// by source: a mixed supplement carries breast_milk_oz + formula_oz directly; a
+// single-source supplement carries amount_oz, routed to breast-milk or formula by
+// source. amount is the combined total, kept current because today_feeding_oz sums
+// the amount_oz column. A legacy/unknown source falls back to amount_oz only (#74).
+func supplementAmounts(source string, amountOz, breastMilkOz, formulaOz float64) (amount, breastMilk, formula float64) {
+	switch normalizeSource(source) {
+	case "mixed":
+		breastMilk, formula = breastMilkOz, formulaOz
+	case "bottle_breast": // dashboard "breast_milk"
+		breastMilk = amountOz
+	case "bottle_formula": // dashboard "formula"
+		formula = amountOz
+	default:
+		amount = amountOz
+		return amount, breastMilk, formula
+	}
+	amount = breastMilk + formula
+	return amount, breastMilk, formula
 }
 
 // ── Diaper handler ───────────────────────────────────────────────────────────
@@ -524,7 +553,7 @@ func (p *Processor) handleDiaperLogged(ctx context.Context, evt schemas.CloudEve
 		return fmt.Errorf("ada: insert diaper: %w", err)
 	}
 
-	p.pushDiaperSensors(ctx, ts, d.Type)
+	p.pushDiaperSensors(ctx)
 	return nil
 }
 
@@ -556,7 +585,7 @@ func (p *Processor) handleSleepStarted(ctx context.Context, evt schemas.CloudEve
 		return fmt.Errorf("ada: insert sleep start: %w", err)
 	}
 
-	p.pushSleepStartedSensors(ctx, startTime)
+	p.pushSleepStartedSensors(ctx)
 	return nil
 }
 
@@ -575,7 +604,7 @@ func (p *Processor) handleSleepEnded(ctx context.Context, evt schemas.CloudEvent
 		return fmt.Errorf("ada: update sleep end: %w", err)
 	}
 
-	p.pushSleepEndedSensors(ctx, endTime)
+	p.pushSleepEndedSensors(ctx)
 	return nil
 }
 
@@ -610,7 +639,7 @@ func (p *Processor) handleSleepLogged(ctx context.Context, evt schemas.CloudEven
 		return fmt.Errorf("ada: insert sleep session: %w", err)
 	}
 
-	p.pushSleepEndedSensors(ctx, endTime)
+	p.pushSleepEndedSensors(ctx)
 	return nil
 }
 
@@ -652,6 +681,7 @@ func (p *Processor) insertTummyAndPush(ctx context.Context, startStr, endStr str
 	}
 
 	p.pushTummySensors(ctx)
+	p.pushTummyHistory(ctx)
 	return nil
 }
 
@@ -958,9 +988,18 @@ func (p *Processor) pushFeedingSensors(ctx context.Context) {
 }
 
 // pushDiaperSensors pushes all diaper-related sensors after a diaper event.
-// lastDiaperTime is the actual event time (never time.Now()).
-func (p *Processor) pushDiaperSensors(ctx context.Context, lastDiaperTime time.Time, diaperType string) {
-	lastTimeStr := lastDiaperTime.UTC().Format(time.RFC3339)
+// last_diaper_* is derived from the chronologically newest diaper (MAX timestamp),
+// not the inbound event, so back-dating an older diaper does not overwrite it (#76).
+func (p *Processor) pushDiaperSensors(ctx context.Context) {
+	pushes := []struct{ id, state string }{}
+	if last, err := p.q.GetLastDiaper(ctx); err == nil {
+		pushes = append(pushes,
+			struct{ id, state string }{sensorLastDiaperTime, last.Timestamp.Time.UTC().Format(time.RFC3339)},
+			struct{ id, state string }{sensorLastDiaperType, last.Type},
+		)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		p.log.Warn("ada: get last diaper for sensor push", slog.String("error", err.Error()))
+	}
 
 	btz := p.todayBoundaryTz(ctx)
 	agg, err := p.q.GetTodayDiaperAggregates(ctx, btz)
@@ -968,10 +1007,6 @@ func (p *Processor) pushDiaperSensors(ctx context.Context, lastDiaperTime time.T
 		p.log.Warn("ada: get today diaper aggregates", slog.String("error", err.Error()))
 	}
 
-	pushes := []struct{ id, state string }{
-		{sensorLastDiaperTime, lastTimeStr},
-		{sensorLastDiaperType, diaperType},
-	}
 	if agg != nil {
 		pushes = append(pushes,
 			struct{ id, state string }{sensorTodayDiaperCount, strconv.Itoa(int(agg.Total))},
@@ -1003,41 +1038,36 @@ func (p *Processor) pushSupplementOzSensor(ctx context.Context) {
 }
 
 // pushSleepStartedSensors pushes sensors after a sleep session starts.
-// sensorSleepSessionMin is set to the elapsed minutes from startTime, which
-// correctly reflects a backdated start (e.g. "started 15 min ago" → pushes 15).
-func (p *Processor) pushSleepStartedSensors(ctx context.Context, startTime time.Time) {
-	p.pushAll(ctx, []struct{ id, state string }{
-		{sensorSleepState, "sleeping"},
-		{sensorLastSleepChange, startTime.UTC().Format(time.RFC3339)},
-		{sensorSleepSessionMin, strconv.Itoa(sleepElapsedMin(startTime))},
-	})
+// Sleep state, last_sleep_change, and session_min are derived from the DB
+// (newest active session) via pushActiveSleepState, so a back-dated start does
+// not overwrite "last change" with an older time than a more-recent event (#76).
+func (p *Processor) pushSleepStartedSensors(ctx context.Context) {
+	p.pushActiveSleepState(ctx)
 	p.pushSleepHistory(ctx)
 }
 
-// pushSleepEndedSensors pushes sensors after a sleep session ends.
-// sensorSleepSessionMin is reset to "0" — the session is over.
-func (p *Processor) pushSleepEndedSensors(ctx context.Context, endTime time.Time) {
+// pushSleepEndedSensors pushes sensors after a sleep session ends or a past
+// session is logged. State and last_sleep_change come from pushActiveSleepState
+// (newest active start, else MAX end time), so back-dating an older session does
+// not overwrite "last change", and an end while another session is active still
+// reports "sleeping" (#76).
+func (p *Processor) pushSleepEndedSensors(ctx context.Context) {
+	p.pushActiveSleepState(ctx)
+
 	btz := p.todayBoundaryTz(ctx)
 	agg, err := p.q.GetTodaySleepAggregates(ctx, btz)
 	if err != nil {
 		p.log.Warn("ada: get today sleep aggregates", slog.String("error", err.Error()))
 	}
-
-	pushes := []struct{ id, state string }{
-		{sensorSleepState, "awake"},
-		{sensorLastSleepChange, endTime.UTC().Format(time.RFC3339)},
-		{sensorSleepSessionMin, "0"},
-	}
 	if agg != nil {
-		pushes = append(pushes,
-			struct{ id, state string }{sensorTodaySleepHours, strconv.FormatFloat(agg.TotalHours, 'f', 2, 64)},
-			struct{ id, state string }{sensorTodaySleepNapCount, strconv.Itoa(int(agg.NapCount))},
-			struct{ id, state string }{sensorTodaySleepNightCount, strconv.Itoa(int(agg.NightCount))},
-			struct{ id, state string }{sensorTodaySleepNightHours, strconv.FormatFloat(agg.NightHours, 'f', 2, 64)},
-			struct{ id, state string }{sensorTodaySleepNapHours, strconv.FormatFloat(agg.NapHours, 'f', 2, 64)},
-		)
+		p.pushAll(ctx, []struct{ id, state string }{
+			{sensorTodaySleepHours, strconv.FormatFloat(agg.TotalHours, 'f', 2, 64)},
+			{sensorTodaySleepNapCount, strconv.Itoa(int(agg.NapCount))},
+			{sensorTodaySleepNightCount, strconv.Itoa(int(agg.NightCount))},
+			{sensorTodaySleepNightHours, strconv.FormatFloat(agg.NightHours, 'f', 2, 64)},
+			{sensorTodaySleepNapHours, strconv.FormatFloat(agg.NapHours, 'f', 2, 64)},
+		})
 	}
-	p.pushAll(ctx, pushes)
 	p.pushSleepHistory(ctx)
 }
 
@@ -1078,6 +1108,7 @@ func (p *Processor) refreshAllSensors(ctx context.Context) {
 	p.pushFeedingHistory(ctx)
 	p.pushDiaperHistory(ctx)
 	p.pushSleepHistory(ctx)
+	p.pushTummyHistory(ctx)
 	p.pushGrowthSensors(ctx) // includes pushGrowthHistory
 	p.pushGrowthCurves(ctx)
 }
@@ -1601,6 +1632,54 @@ func (p *Processor) pushSleepHistory(ctx context.Context) {
 	}
 	if err := p.ha.PushState(ctx, sensorSleepHistory, strconv.Itoa(len(entries)), attributes); err != nil {
 		p.log.Warn("ada: push sleep history", slog.String("error", err.Error()))
+	}
+}
+
+// ── Tummy history ─────────────────────────────────────────────────────────────
+
+// TummyHistoryEntry is one element of the JSON array pushed as attributes on
+// sensor.ada_tummy_history. Shape matches the other *_history sensors so the
+// dashboard's Recent History view can merge tummy sessions like the rest (#75).
+type TummyHistoryEntry struct {
+	ID        string `json:"id"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+	DurationS int    `json:"duration_s"`
+	LoggedBy  string `json:"logged_by"`
+}
+
+// buildTummyHistory converts sqlc rows to JSON-serializable history entries.
+func buildTummyHistory(rows []*store.GetLast24hTummyRow) []TummyHistoryEntry {
+	entries := make([]TummyHistoryEntry, 0, len(rows))
+	for _, r := range rows {
+		entries = append(entries, TummyHistoryEntry{
+			ID:        uuid.UUID(r.ID.Bytes).String(),
+			StartTime: r.StartTime.Time.UTC().Format(time.RFC3339),
+			EndTime:   r.EndTime.Time.UTC().Format(time.RFC3339),
+			DurationS: int(r.DurationS),
+			LoggedBy:  r.LoggedBy,
+		})
+	}
+	return entries
+}
+
+// pushTummyHistory queries the last 24h of tummy time sessions and pushes them as
+// attributes on sensor.ada_tummy_history. Uses a fixed 24h window so the history
+// modal always shows recent context regardless of the bedtime boundary (#75).
+func (p *Processor) pushTummyHistory(ctx context.Context) {
+	since := pgtype.Timestamptz{Time: time.Now().UTC().Add(-24 * time.Hour), Valid: true}
+	rows, err := p.q.GetLast24hTummy(ctx, since)
+	if err != nil {
+		p.log.Warn("ada: query tummy history", slog.String("error", err.Error()))
+		return
+	}
+	entries := buildTummyHistory(rows)
+	attributes := map[string]any{
+		"entries":      entries,
+		"last_updated": time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := p.ha.PushState(ctx, sensorTummyHistory, strconv.Itoa(len(entries)), attributes); err != nil {
+		p.log.Warn("ada: push tummy history", slog.String("error", err.Error()))
 	}
 }
 

@@ -199,6 +199,7 @@ type growthWeightEntry struct {
 	WeightOz   float64  `json:"weight_oz"`
 	Percentile *float64 `json:"percentile,omitempty"`
 	Source     string   `json:"source"`
+	LoggedBy   string   `json:"logged_by"`
 }
 
 type growthLengthEntry struct {
@@ -207,6 +208,7 @@ type growthLengthEntry struct {
 	LengthIn   float64  `json:"length_in"`
 	Percentile *float64 `json:"percentile,omitempty"`
 	Source     string   `json:"source"`
+	LoggedBy   string   `json:"logged_by"`
 }
 
 type growthHeadEntry struct {
@@ -215,20 +217,17 @@ type growthHeadEntry struct {
 	HeadCircumferenceIn float64  `json:"head_circumference_in"`
 	Percentile          *float64 `json:"percentile,omitempty"`
 	Source              string   `json:"source"`
+	LoggedBy            string   `json:"logged_by"`
 }
 
-// pushGrowthHistory queries all growth measurements and pushes them as three separate
-// descending arrays (weight, length, head) on sensor.ada_growth_history.
-func (p *Processor) pushGrowthHistory(ctx context.Context) {
-	rows, err := p.q.GetAllGrowthMeasurements(ctx)
-	if err != nil {
-		p.log.Warn("ada: query growth history", slog.String("error", err.Error()))
-		return
-	}
-
-	weightEntries := make([]growthWeightEntry, 0)
-	lengthEntries := make([]growthLengthEntry, 0)
-	headEntries := make([]growthHeadEntry, 0)
+// buildGrowthHistory converts the complete set of growth measurement rows into the
+// three per-metric descending arrays (weight, length, head). Pure for testability.
+// logged_by is carried onto every entry so caregiver attribution survives into the
+// history sensor (#80).
+func buildGrowthHistory(rows []*store.GetAllGrowthMeasurementsRow) (weight []growthWeightEntry, length []growthLengthEntry, head []growthHeadEntry) {
+	weight = make([]growthWeightEntry, 0)
+	length = make([]growthLengthEntry, 0)
+	head = make([]growthHeadEntry, 0)
 
 	for _, r := range rows {
 		id := uuid.UUID(r.ID.Bytes).String()
@@ -240,11 +239,12 @@ func (p *Processor) pushGrowthHistory(ctx context.Context) {
 				MeasuredAt: ts,
 				WeightOz:   numericToFloat(r.WeightOz),
 				Source:     r.Source,
+				LoggedBy:   r.LoggedBy,
 			}
 			if pct, ok := numericToFloatOk(r.WeightPct); ok {
 				e.Percentile = &pct
 			}
-			weightEntries = append(weightEntries, e)
+			weight = append(weight, e)
 		}
 		if r.LengthIn.Valid {
 			e := growthLengthEntry{
@@ -252,11 +252,12 @@ func (p *Processor) pushGrowthHistory(ctx context.Context) {
 				MeasuredAt: ts,
 				LengthIn:   numericToFloat(r.LengthIn),
 				Source:     r.Source,
+				LoggedBy:   r.LoggedBy,
 			}
 			if pct, ok := numericToFloatOk(r.LengthPct); ok {
 				e.Percentile = &pct
 			}
-			lengthEntries = append(lengthEntries, e)
+			length = append(length, e)
 		}
 		if r.HeadCircumferenceIn.Valid {
 			e := growthHeadEntry{
@@ -264,13 +265,27 @@ func (p *Processor) pushGrowthHistory(ctx context.Context) {
 				MeasuredAt:          ts,
 				HeadCircumferenceIn: numericToFloat(r.HeadCircumferenceIn),
 				Source:              r.Source,
+				LoggedBy:            r.LoggedBy,
 			}
 			if pct, ok := numericToFloatOk(r.HeadPct); ok {
 				e.Percentile = &pct
 			}
-			headEntries = append(headEntries, e)
+			head = append(head, e)
 		}
 	}
+	return weight, length, head
+}
+
+// pushGrowthHistory queries all growth measurements and pushes them as three separate
+// descending arrays (weight, length, head) on sensor.ada_growth_history.
+func (p *Processor) pushGrowthHistory(ctx context.Context) {
+	rows, err := p.q.GetAllGrowthMeasurements(ctx)
+	if err != nil {
+		p.log.Warn("ada: query growth history", slog.String("error", err.Error()))
+		return
+	}
+
+	weightEntries, lengthEntries, headEntries := buildGrowthHistory(rows)
 
 	attrs := map[string]any{
 		"weight":       weightEntries,

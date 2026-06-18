@@ -11,6 +11,36 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addFeedingBottleDetailAmounts = `-- name: AddFeedingBottleDetailAmounts :exec
+INSERT INTO feeding_bottle_detail (feeding_id, amount_oz, breast_milk_oz, formula_oz)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (feeding_id) DO UPDATE SET
+    amount_oz      = COALESCE(feeding_bottle_detail.amount_oz, 0)      + COALESCE(EXCLUDED.amount_oz, 0),
+    breast_milk_oz = COALESCE(feeding_bottle_detail.breast_milk_oz, 0) + COALESCE(EXCLUDED.breast_milk_oz, 0),
+    formula_oz     = COALESCE(feeding_bottle_detail.formula_oz, 0)     + COALESCE(EXCLUDED.formula_oz, 0)
+`
+
+type AddFeedingBottleDetailAmountsParams struct {
+	FeedingID    pgtype.UUID
+	AmountOz     pgtype.Numeric
+	BreastMilkOz pgtype.Numeric
+	FormulaOz    pgtype.Numeric
+}
+
+// Additively merge bottle amounts onto a feed's bottle detail, creating the row
+// if absent (e.g. a supplement top-off onto a breast feed) or accumulating onto an
+// existing one (repeated supplements / a supplement onto a bottle feed). Used for
+// ada.feeding.supplement so a top-off is attached to its parent feed, not orphaned (#74).
+func (q *Queries) AddFeedingBottleDetailAmounts(ctx context.Context, arg *AddFeedingBottleDetailAmountsParams) error {
+	_, err := q.db.Exec(ctx, addFeedingBottleDetailAmounts,
+		arg.FeedingID,
+		arg.AmountOz,
+		arg.BreastMilkOz,
+		arg.FormulaOz,
+	)
+	return err
+}
+
 const getLast24hFeedings = `-- name: GetLast24hFeedings :many
 SELECT
     f.id,
