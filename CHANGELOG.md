@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.1](https://github.com/rutabageldev/ruby-core/compare/v0.16.0...v0.16.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **deploy:** validate NATS PKI AppRole material, not decommissioned KV cert bundle ([84d923d](https://github.com/rutabageldev/ruby-core/commit/84d923d58a5f872c92586c9329b9214e6a605b28))
+* **deploy:** validate NATS PKI AppRole material, not decommissioned KV cert bundle ([7f5e854](https://github.com/rutabageldev/ruby-core/commit/7f5e854f6e556e72238a36217e97100a8a6f276b))
+
 ## [0.16.0](https://github.com/rutabageldev/ruby-core/compare/v0.15.2...v0.16.0) (2026-06-18)
 
 
