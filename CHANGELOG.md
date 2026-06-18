@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/rutabageldev/ruby-core/compare/v0.15.2...v0.16.0) (2026-06-18)
+
+
+### Features
+
+* **ada:** data-integrity fixes + feed-claim lifecycle (ROADMAP-0010.2-0010.3) ([280134b](https://github.com/rutabageldev/ruby-core/commit/280134bb13dcfe470f6267e6c545e607db5fb472))
+* **ada:** implement feed-claim lifecycle ([#19](https://github.com/rutabageldev/ruby-core/issues/19), [#81](https://github.com/rutabageldev/ruby-core/issues/81)) ([f329213](https://github.com/rutabageldev/ruby-core/commit/f329213d2d6741e35525127a270dfc864e8d4c84))
+
+
+### Bug Fixes
+
+* **ada:** data-integrity fixes for last_*, tummy history, supplement, growth attribution ([cb69ba2](https://github.com/rutabageldev/ruby-core/commit/cb69ba24fdf8806100774a0747cb553376a2191e))
+
 ## [0.15.2](https://github.com/rutabageldev/ruby-core/compare/v0.15.1...v0.15.2) (2026-06-17)
 
 
