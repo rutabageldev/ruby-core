@@ -1,8 +1,8 @@
 -- name: InsertGrowthMeasurement :one
 INSERT INTO growth_measurements (
     measured_at, weight_oz, length_in, head_circumference_in,
-    source, weight_pct, length_pct, head_pct, logged_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    source, weight_pct, length_pct, head_pct, logged_by, test
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id;
 
 -- name: GetLatestWeight :one

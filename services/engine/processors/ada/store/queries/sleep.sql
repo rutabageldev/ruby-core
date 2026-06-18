@@ -1,6 +1,6 @@
 -- name: InsertSleepStart :one
-INSERT INTO sleep_sessions (start_time, sleep_type, logged_by)
-VALUES (@start_time, @sleep_type, @logged_by)
+INSERT INTO sleep_sessions (start_time, sleep_type, logged_by, test)
+VALUES (@start_time, @sleep_type, @logged_by, @test)
 RETURNING id;
 
 -- name: UpdateSleepEnd :exec
@@ -13,8 +13,8 @@ WHERE id = (
 );
 
 -- name: InsertSleepSession :exec
-INSERT INTO sleep_sessions (start_time, end_time, sleep_type, logged_by)
-VALUES (@start_time, @end_time, @sleep_type, @logged_by);
+INSERT INTO sleep_sessions (start_time, end_time, sleep_type, logged_by, test)
+VALUES (@start_time, @end_time, @sleep_type, @logged_by, @test);
 
 -- name: GetActiveSleepSession :one
 SELECT start_time FROM sleep_sessions

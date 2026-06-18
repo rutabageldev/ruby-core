@@ -134,8 +134,8 @@ func (q *Queries) GetTodaySleepSessions(ctx context.Context, boundary pgtype.Tim
 }
 
 const insertSleepSession = `-- name: InsertSleepSession :exec
-INSERT INTO sleep_sessions (start_time, end_time, sleep_type, logged_by)
-VALUES ($1, $2, $3, $4)
+INSERT INTO sleep_sessions (start_time, end_time, sleep_type, logged_by, test)
+VALUES ($1, $2, $3, $4, $5)
 `
 
 type InsertSleepSessionParams struct {
@@ -143,6 +143,7 @@ type InsertSleepSessionParams struct {
 	EndTime   pgtype.Timestamptz
 	SleepType string
 	LoggedBy  string
+	Test      bool
 }
 
 func (q *Queries) InsertSleepSession(ctx context.Context, arg *InsertSleepSessionParams) error {
@@ -151,13 +152,14 @@ func (q *Queries) InsertSleepSession(ctx context.Context, arg *InsertSleepSessio
 		arg.EndTime,
 		arg.SleepType,
 		arg.LoggedBy,
+		arg.Test,
 	)
 	return err
 }
 
 const insertSleepStart = `-- name: InsertSleepStart :one
-INSERT INTO sleep_sessions (start_time, sleep_type, logged_by)
-VALUES ($1, $2, $3)
+INSERT INTO sleep_sessions (start_time, sleep_type, logged_by, test)
+VALUES ($1, $2, $3, $4)
 RETURNING id
 `
 
@@ -165,10 +167,16 @@ type InsertSleepStartParams struct {
 	StartTime pgtype.Timestamptz
 	SleepType string
 	LoggedBy  string
+	Test      bool
 }
 
 func (q *Queries) InsertSleepStart(ctx context.Context, arg *InsertSleepStartParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, insertSleepStart, arg.StartTime, arg.SleepType, arg.LoggedBy)
+	row := q.db.QueryRow(ctx, insertSleepStart,
+		arg.StartTime,
+		arg.SleepType,
+		arg.LoggedBy,
+		arg.Test,
+	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err

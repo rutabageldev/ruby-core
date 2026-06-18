@@ -77,8 +77,8 @@ func (q *Queries) GetTodayTummyAggregates(ctx context.Context, boundary pgtype.T
 }
 
 const insertTummySession = `-- name: InsertTummySession :exec
-INSERT INTO tummy_time_sessions (start_time, end_time, duration_s, logged_by)
-VALUES ($1, $2, $3, $4)
+INSERT INTO tummy_time_sessions (start_time, end_time, duration_s, logged_by, test)
+VALUES ($1, $2, $3, $4, $5)
 `
 
 type InsertTummySessionParams struct {
@@ -86,6 +86,7 @@ type InsertTummySessionParams struct {
 	EndTime   pgtype.Timestamptz
 	DurationS int32
 	LoggedBy  string
+	Test      bool
 }
 
 func (q *Queries) InsertTummySession(ctx context.Context, arg *InsertTummySessionParams) error {
@@ -94,6 +95,7 @@ func (q *Queries) InsertTummySession(ctx context.Context, arg *InsertTummySessio
 		arg.EndTime,
 		arg.DurationS,
 		arg.LoggedBy,
+		arg.Test,
 	)
 	return err
 }

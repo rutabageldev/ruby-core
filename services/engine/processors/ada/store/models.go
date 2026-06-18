@@ -28,6 +28,7 @@ type Diaper struct {
 	LoggedBy  string
 	DeletedAt pgtype.Timestamptz
 	CreatedAt pgtype.Timestamptz
+	Test      bool
 }
 
 type Feeding struct {
@@ -37,6 +38,7 @@ type Feeding struct {
 	LoggedBy  string
 	DeletedAt pgtype.Timestamptz
 	CreatedAt pgtype.Timestamptz
+	Test      bool
 }
 
 type FeedingBottleDetail struct {
@@ -69,6 +71,7 @@ type GrowthMeasurement struct {
 	LoggedBy            string
 	DeletedAt           pgtype.Timestamptz
 	CreatedAt           pgtype.Timestamptz
+	Test                bool
 }
 
 type Person struct {
@@ -100,6 +103,7 @@ type SleepSession struct {
 	LoggedBy  string
 	DeletedAt pgtype.Timestamptz
 	CreatedAt pgtype.Timestamptz
+	Test      bool
 }
 
 type TummyTimeSession struct {
@@ -110,4 +114,5 @@ type TummyTimeSession struct {
 	LoggedBy  string
 	DeletedAt pgtype.Timestamptz
 	CreatedAt pgtype.Timestamptz
+	Test      bool
 }

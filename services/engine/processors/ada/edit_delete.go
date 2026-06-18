@@ -17,6 +17,15 @@ import (
 // rewritten to match, then all derived sensors are recomputed. Deletes are soft
 // (deleted_at), so every read path (which filters deleted_at IS NULL) recomputes too.
 
+// eventTest reads the envelope-level "test" marker from a CloudEvent payload.
+// The dashboard stamps test:true on every event it fires while live-test mode is
+// on (ADR-0031); absence means real data. Carried on inserts only — edits never
+// change a row's test-ness.
+func eventTest(evt schemas.CloudEvent) bool {
+	t, _ := evt.Data["test"].(bool)
+	return t
+}
+
 // parseUUID parses a dashboard-supplied id string into a pgtype.UUID.
 func parseUUID(s string) (pgtype.UUID, error) {
 	u, err := uuid.Parse(s)

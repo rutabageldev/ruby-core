@@ -1,6 +1,6 @@
 -- name: InsertFeeding :one
-INSERT INTO feedings (timestamp, source, logged_by)
-VALUES (@timestamp, @source, @logged_by)
+INSERT INTO feedings (timestamp, source, logged_by, test)
+VALUES (@timestamp, @source, @logged_by, @test)
 RETURNING id;
 
 -- name: InsertFeedingBottleDetail :exec

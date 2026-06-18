@@ -67,6 +67,7 @@ func (p *Processor) handleGrowthLogged(ctx context.Context, evt schemas.CloudEve
 		LengthPct:           numericFromFloatPtr(lengthPct),
 		HeadPct:             numericFromFloatPtr(headPct),
 		LoggedBy:            d.LoggedBy,
+		Test:                eventTest(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert growth measurement: %w", err)
 	}

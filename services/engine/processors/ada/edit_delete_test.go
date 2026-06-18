@@ -2,7 +2,31 @@
 
 package ada
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
+)
+
+func TestEventTest(t *testing.T) {
+	cases := []struct {
+		name string
+		data map[string]any
+		want bool
+	}{
+		{"test true", map[string]any{"test": true}, true},
+		{"test false", map[string]any{"test": false}, false},
+		{"test absent (real data)", map[string]any{"event": "ada.diaper.log"}, false},
+		{"wrong type is not test", map[string]any{"test": "true"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := eventTest(schemas.CloudEvent{Data: c.data}); got != c.want {
+				t.Errorf("eventTest(%v) = %v, want %v", c.data, got, c.want)
+			}
+		})
+	}
+}
 
 func TestDeriveFeedingSource(t *testing.T) {
 	cases := []struct {

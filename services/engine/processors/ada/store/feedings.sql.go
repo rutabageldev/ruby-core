@@ -195,8 +195,8 @@ func (q *Queries) GetTodayFeedingAggregates(ctx context.Context, boundary pgtype
 }
 
 const insertFeeding = `-- name: InsertFeeding :one
-INSERT INTO feedings (timestamp, source, logged_by)
-VALUES ($1, $2, $3)
+INSERT INTO feedings (timestamp, source, logged_by, test)
+VALUES ($1, $2, $3, $4)
 RETURNING id
 `
 
@@ -204,10 +204,16 @@ type InsertFeedingParams struct {
 	Timestamp pgtype.Timestamptz
 	Source    string
 	LoggedBy  string
+	Test      bool
 }
 
 func (q *Queries) InsertFeeding(ctx context.Context, arg *InsertFeedingParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, insertFeeding, arg.Timestamp, arg.Source, arg.LoggedBy)
+	row := q.db.QueryRow(ctx, insertFeeding,
+		arg.Timestamp,
+		arg.Source,
+		arg.LoggedBy,
+		arg.Test,
+	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err

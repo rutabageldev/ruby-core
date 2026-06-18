@@ -1,6 +1,6 @@
 -- name: InsertDiaper :exec
-INSERT INTO diapers (timestamp, type, logged_by)
-VALUES (@timestamp, @type, @logged_by);
+INSERT INTO diapers (timestamp, type, logged_by, test)
+VALUES (@timestamp, @type, @logged_by, @test);
 
 -- name: GetLastDiaper :one
 SELECT timestamp, type FROM diapers

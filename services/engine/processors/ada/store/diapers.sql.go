@@ -101,18 +101,24 @@ func (q *Queries) GetTodayDiapers(ctx context.Context, boundary pgtype.Timestamp
 }
 
 const insertDiaper = `-- name: InsertDiaper :exec
-INSERT INTO diapers (timestamp, type, logged_by)
-VALUES ($1, $2, $3)
+INSERT INTO diapers (timestamp, type, logged_by, test)
+VALUES ($1, $2, $3, $4)
 `
 
 type InsertDiaperParams struct {
 	Timestamp pgtype.Timestamptz
 	Type      string
 	LoggedBy  string
+	Test      bool
 }
 
 func (q *Queries) InsertDiaper(ctx context.Context, arg *InsertDiaperParams) error {
-	_, err := q.db.Exec(ctx, insertDiaper, arg.Timestamp, arg.Type, arg.LoggedBy)
+	_, err := q.db.Exec(ctx, insertDiaper,
+		arg.Timestamp,
+		arg.Type,
+		arg.LoggedBy,
+		arg.Test,
+	)
 	return err
 }
 

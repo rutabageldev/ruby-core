@@ -307,6 +307,7 @@ func (p *Processor) handleFeedingEnded(ctx context.Context, evt schemas.CloudEve
 		Timestamp: toTimestamptz(sessionStart),
 		Source:    source,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	})
 	if err != nil {
 		return fmt.Errorf("ada: insert feeding_ended: %w", err)
@@ -394,6 +395,7 @@ func (p *Processor) handleFeedingLogged(ctx context.Context, evt schemas.CloudEv
 		Timestamp: toTimestamptz(startTime),
 		Source:    source,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	})
 	if err != nil {
 		return fmt.Errorf("ada: insert feeding_logged: %w", err)
@@ -438,6 +440,7 @@ func (p *Processor) handleFeedingLoggedPast(ctx context.Context, evt schemas.Clo
 		Timestamp: toTimestamptz(startTime),
 		Source:    source,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	})
 	if err != nil {
 		return fmt.Errorf("ada: insert feeding_logged_past: %w", err)
@@ -619,6 +622,7 @@ func (p *Processor) handleDiaperLogged(ctx context.Context, evt schemas.CloudEve
 		Timestamp: toTimestamptz(ts),
 		Type:      d.Type,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert diaper: %w", err)
 	}
@@ -651,6 +655,7 @@ func (p *Processor) handleSleepStarted(ctx context.Context, evt schemas.CloudEve
 		StartTime: toTimestamptz(startTime),
 		SleepType: sleepType,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert sleep start: %w", err)
 	}
@@ -705,6 +710,7 @@ func (p *Processor) handleSleepLogged(ctx context.Context, evt schemas.CloudEven
 		EndTime:   toTimestamptz(endTime),
 		SleepType: sleepType,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert sleep session: %w", err)
 	}
@@ -720,7 +726,7 @@ func (p *Processor) handleTummyEnded(ctx context.Context, evt schemas.CloudEvent
 	if err := remarshal(evt.Data, &d); err != nil {
 		return fmt.Errorf("ada: decode tummy_ended: %w", err)
 	}
-	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy)
+	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy, eventTest(evt))
 }
 
 func (p *Processor) handleTummyLogged(ctx context.Context, evt schemas.CloudEvent) error {
@@ -728,10 +734,10 @@ func (p *Processor) handleTummyLogged(ctx context.Context, evt schemas.CloudEven
 	if err := remarshal(evt.Data, &d); err != nil {
 		return fmt.Errorf("ada: decode tummy_logged: %w", err)
 	}
-	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy)
+	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy, eventTest(evt))
 }
 
-func (p *Processor) insertTummyAndPush(ctx context.Context, startStr, endStr string, durationS int, loggedBy string) error {
+func (p *Processor) insertTummyAndPush(ctx context.Context, startStr, endStr string, durationS int, loggedBy string, test bool) error {
 	startTime, err := parseRFC3339(startStr)
 	if err != nil {
 		return fmt.Errorf("ada: parse tummy start_time: %w", err)
@@ -746,6 +752,7 @@ func (p *Processor) insertTummyAndPush(ctx context.Context, startStr, endStr str
 		EndTime:   toTimestamptz(endTime),
 		DurationS: int32(durationS), //nolint:gosec // G115: bounded by session duration in seconds, never near int32 max
 		LoggedBy:  loggedBy,
+		Test:      test,
 	}); err != nil {
 		return fmt.Errorf("ada: insert tummy session: %w", err)
 	}

@@ -1,6 +1,6 @@
 -- name: InsertTummySession :exec
-INSERT INTO tummy_time_sessions (start_time, end_time, duration_s, logged_by)
-VALUES (@start_time, @end_time, @duration_s, @logged_by);
+INSERT INTO tummy_time_sessions (start_time, end_time, duration_s, logged_by, test)
+VALUES (@start_time, @end_time, @duration_s, @logged_by, @test);
 
 -- name: GetTodayTummyAggregates :one
 SELECT

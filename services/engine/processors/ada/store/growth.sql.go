@@ -153,8 +153,8 @@ func (q *Queries) GetLatestWeight(ctx context.Context) (*GetLatestWeightRow, err
 const insertGrowthMeasurement = `-- name: InsertGrowthMeasurement :one
 INSERT INTO growth_measurements (
     measured_at, weight_oz, length_in, head_circumference_in,
-    source, weight_pct, length_pct, head_pct, logged_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    source, weight_pct, length_pct, head_pct, logged_by, test
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id
 `
 
@@ -168,6 +168,7 @@ type InsertGrowthMeasurementParams struct {
 	LengthPct           pgtype.Numeric
 	HeadPct             pgtype.Numeric
 	LoggedBy            string
+	Test                bool
 }
 
 func (q *Queries) InsertGrowthMeasurement(ctx context.Context, arg *InsertGrowthMeasurementParams) (pgtype.UUID, error) {
@@ -181,6 +182,7 @@ func (q *Queries) InsertGrowthMeasurement(ctx context.Context, arg *InsertGrowth
 		arg.LengthPct,
 		arg.HeadPct,
 		arg.LoggedBy,
+		arg.Test,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
