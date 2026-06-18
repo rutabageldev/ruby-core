@@ -1,6 +1,6 @@
 # PLAN-0021 - Ada edit & delete operations (#77, #79, #78)
 
-* **Status:** In Progress
+* **Status:** Complete
 * **Date:** 2026-06-18
 * **Project:** ruby-core
 * **Roadmap Item:** docs/roadmap/ROADMAP-0010-ada-hardening-test-data-lifecycle.md (effort 0010.4)
