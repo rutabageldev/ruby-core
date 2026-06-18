@@ -57,13 +57,18 @@ environment flag decides whether a gateway connects to Home Assistant at all.
    neither `state_changed` nor `ada_event` is consumed and no derived state is pushed — while the
    HTTP/health endpoints stay up. It MUST be `false` in dev and staging compose and unset/true in
    prod, so exactly one stack ingests live HA events.
-2. Each environment MUST use its own Postgres database (dev isolated per the change accompanying
+2. The **engine's** Ada HA push MUST also be gated by `HA_INGEST_ENABLED` — `false` in dev/staging,
+   `true` in prod. When `false` the engine skips the Vault HA fetch and runs with an empty HA client
+   whose pushes are no-ops, so a non-prod engine never projects its database to the shared HA on
+   startup, HA-reconnect, or the 4-hour safety net (the gateway gate in #72 stopped non-prod
+   *ingest* but not non-prod *projection* — this closes that gap).
+3. Each environment MUST use its own Postgres database (dev isolated per the change accompanying
    #72), so non-prod engines never write to or read from the prod Ada store.
-3. Growth measurements MUST be retained permanently (no rolling window); `sensor.ada_latest_*`,
+4. Growth measurements MUST be retained permanently (no rolling window); `sensor.ada_latest_*`,
    `sensor.ada_growth_curves`, and `sensor.ada_growth_history` MUST be derived from the complete
    set of non-deleted (`deleted_at IS NULL`) measurements.
-4. The growth-history projection MUST preserve `logged_by` per entry.
-5. Non-prod stacks (staging, dev) MUST be exercised via seeded data only (ROADMAP-0010.6); they do
+5. The growth-history projection MUST preserve `logged_by` per entry.
+6. Non-prod stacks (staging, dev) MUST be exercised via seeded data only (ROADMAP-0010.6); they do
    not receive live HA ingest.
 
 ## Consequences

@@ -42,6 +42,12 @@ type statePayload struct {
 // Errors are logged at Warn and returned so callers can decide how to handle them;
 // the ada processor logs and continues rather than treating push failures as fatal.
 func (c *Client) PushState(ctx context.Context, entityID, state string, attributes map[string]any) error {
+	// No base URL means HA is disabled for this stack (HA_INGEST_ENABLED=false on
+	// non-prod). Skip silently so non-prod engines never push to the shared HA and
+	// clobber prod's sensors (ADR-0033).
+	if c.baseURL == "" {
+		return nil
+	}
 	body, err := json.Marshal(statePayload{State: state, Attributes: attributes})
 	if err != nil {
 		return fmt.Errorf("ha: marshal state payload: %w", err)
@@ -78,6 +84,9 @@ func (c *Client) PushState(ctx context.Context, entityID, state string, attribut
 // Notify sends a push notification via HA's notify service REST API.
 // service is the full notify service name, e.g. "mobile_app_mikes_iphone".
 func (c *Client) Notify(ctx context.Context, service, title, message string) error {
+	if c.baseURL == "" {
+		return nil // HA disabled for this stack — see PushState
+	}
 	body, err := json.Marshal(map[string]string{
 		"title":   title,
 		"message": message,

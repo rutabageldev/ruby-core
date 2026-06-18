@@ -206,6 +206,8 @@ services:
       - RULES_DIR=/etc/ruby-core/rules
       - VAULT_PG_PATH=secret/data/ruby-core/postgres
       - VAULT_HA_PATH=secret/data/ruby-core/ha
+      # Engine HA push gate (ADR-0033): prod is the sole projector to the shared HA.
+      - HA_INGEST_ENABLED=true
       - TZ=America/New_York
 
   # ==========================================================================

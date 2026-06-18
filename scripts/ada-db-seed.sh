@@ -3,9 +3,9 @@
 #
 # Writes a fully test-flagged (test=true, logged_by='seed') ~14-month dataset, then
 # — for ENV=prod only — aligns the shared HA test helpers and restarts the prod
-# engine so the seed is projected onto the dashboard. Non-prod engines are NOT
-# restarted: every engine pushes to the SAME shared HA (secret/ruby-core/ha) on
-# startup, so restarting a non-prod engine would overwrite prod's sensors.
+# engine so the seed is projected onto the dashboard. Only prod projects to the
+# shared HA (non-prod engines run with HA_INGEST_ENABLED=false and do not push,
+# ADR-0033), so non-prod seeds populate their DB but not the dashboard.
 #
 # Usage: ENV=<dev|staging|prod> DOB=<RFC3339> scripts/ada-db-seed.sh
 
@@ -61,8 +61,8 @@ if [[ "${ENV}" == "prod" ]]; then
     docker restart ruby-core-prod-engine >/dev/null && echo "  prod engine restarted (projecting seed)"
 else
     echo ""
-    echo "NOTE: ${ENV} database seeded. The shared HA dashboard is projected by the"
-    echo "      prod engine only, so this seed will NOT appear on the dashboard."
-    echo "      Use ENV=prod to validate the dashboard. (Not restarting the ${ENV}"
-    echo "      engine — it pushes to the same shared HA and would overwrite prod.)"
+    echo "NOTE: ${ENV} database seeded. Only the prod engine projects to the shared"
+    echo "      HA (non-prod runs HA_INGEST_ENABLED=false, ADR-0033), so this seed"
+    echo "      will NOT appear on the dashboard. Use ENV=prod to validate the"
+    echo "      dashboard. The ${ENV} engine is not restarted (it would not project)."
 fi

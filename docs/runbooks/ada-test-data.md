@@ -14,9 +14,9 @@ network plus a Vault token with read access to `secret/ruby-core/*` (sourced fro
 - **`test` column (ADR-0031).** Every Ada table carries `test BOOLEAN`. Test data behaves
   identically in every sensor/projection; only the clear target selects on it.
 - **One shared Home Assistant.** All environments share `secret/ruby-core/ha`, and **only the prod
-  engine should project to it.** The engine does not gate HA pushes by environment, so seeding/
-  clearing only restarts the **prod** engine. Seeding `dev`/`staging` writes their DB but does not
-  appear on the dashboard — use `ENV=prod` to validate the dashboard.
+  engine projects to it** — non-prod engines run with `HA_INGEST_ENABLED=false` and skip all HA
+  pushes (ADR-0033). So seeding/clearing only restarts the **prod** engine; seeding `dev`/`staging`
+  writes their DB but does not appear on the dashboard — use `ENV=prod` to validate the dashboard.
 
 ## Snapshot (pre-destructive backup)
 
@@ -80,6 +80,6 @@ populate, and counts are not duplicated (single-stack ingest, ADR-0033).
 
 ## Known issues / drift
 
-- The engine ignores `HA_INGEST_ENABLED` (only the gateway honors it), so non-prod engines push to
-  the shared HA on startup/refresh. This is why the tooling restarts only the prod engine. Tracked
-  separately.
+- None outstanding. (The engine now honors `HA_INGEST_ENABLED`, so non-prod engines no longer push
+  to the shared HA — ADR-0033. The tooling restarts only the prod engine because only prod projects
+  to the dashboard.)

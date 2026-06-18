@@ -199,6 +199,8 @@ services:
       - VAULT_PKI_ROLE=ruby-core-engine
       - VAULT_PG_PATH=secret/data/ruby-core/staging/postgres
       - VAULT_HA_PATH=secret/data/ruby-core/ha
+      # Engine HA push gate (ADR-0033): only prod projects to the shared HA.
+      - HA_INGEST_ENABLED=false
       - RULES_DIR=/etc/ruby-core/rules
       - TZ=America/New_York
 
