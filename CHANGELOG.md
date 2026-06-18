@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.17.0](https://github.com/rutabageldev/ruby-core/compare/v0.16.1...v0.17.0) (2026-06-18)
+
+
+### Features
+
+* **ada:** add test-data marker column and persist it through ingestion (ADR-0031) ([dc65f2b](https://github.com/rutabageldev/ruby-core/commit/dc65f2b6432b1984b70105dfb19d0573ed139c34))
+* **ada:** edit & delete operations for all event types ([#77](https://github.com/rutabageldev/ruby-core/issues/77), [#78](https://github.com/rutabageldev/ruby-core/issues/78), [#79](https://github.com/rutabageldev/ruby-core/issues/79)) ([d0d6f0f](https://github.com/rutabageldev/ruby-core/commit/d0d6f0f17e96be3198707a347c4004253730a180))
+* **ada:** edit/delete, test-data lifecycle + engine HA-push gate (ROADMAP-0010.4-0.6) ([3dd683b](https://github.com/rutabageldev/ruby-core/commit/3dd683b71575059f9543a8a51c80b16422b75243))
+* **ada:** test-data lifecycle — guarded seed + clear make targets (ROADMAP-0010.6) ([a92931d](https://github.com/rutabageldev/ruby-core/commit/a92931db6624999addaf0bf3e0c899d8caf6b9da))
+
+
+### Bug Fixes
+
+* **engine:** gate Ada HA push behind HA_INGEST_ENABLED (ADR-0033) ([3eb45d8](https://github.com/rutabageldev/ruby-core/commit/3eb45d8baeda6cb88c18eaed1662abf965586a76))
+
 ## [0.16.1](https://github.com/rutabageldev/ruby-core/compare/v0.16.0...v0.16.1) (2026-06-18)
 
 
