@@ -55,20 +55,22 @@ else
     WARNINGS=$((WARNINGS + 1))
 fi
 
-# Check for TLS server certificate in Vault (ADR-0015, ADR-0018)
-# Server certs are stored exclusively in Vault and fetched at container start
-if command -v vault >/dev/null 2>&1; then
-    if vault kv get "secret/ruby-core/tls/nats-server" >/dev/null 2>&1; then
-        echo "[OK] NATS server certificate found in Vault (secret/ruby-core/tls/nats-server)"
-    else
-        echo "[FAIL] NATS server certificate not found in Vault"
-        echo "       Run: make setup-creds"
-        ERRORS=$((ERRORS + 1))
-    fi
+# Check NATS server TLS certificate prerequisites (ADR-0018, ADR-0030).
+# The server cert is no longer a Vault KV bundle — since the direct-PKI migration
+# (PLAN-0008 Stage 4 / ADR-0030) nats-init issues it at container start from
+# pki_int/issue/<role> using the nats-server AppRole, and the legacy KV path
+# secret/ruby-core/tls/nats-server was decommissioned (see cleanup-mkcert-kv-bundles).
+# Validate the AppRole material that issuance depends on, not the removed bundle.
+NATS_ROLE_ID="${NATS_PKI_ROLE_ID:-/opt/foundation/vault/role-id-foundation-agent-ruby-core-nats-server}"
+NATS_SECRET_ID="${NATS_PKI_SECRET_ID:-/opt/foundation/vault/.secret-id-foundation-agent-ruby-core-nats-server}"
+if [ -s "$NATS_ROLE_ID" ] && [ -s "$NATS_SECRET_ID" ]; then
+    echo "[OK] NATS server PKI AppRole material present (cert is direct-PKI issued at startup)"
 else
-    echo "[WARN] vault CLI not available — skipping Vault cert check"
-    echo "       Ensure server certs are seeded with: make setup-creds"
-    WARNINGS=$((WARNINGS + 1))
+    echo "[FAIL] NATS server PKI AppRole material missing — cert issuance will fail at startup"
+    echo "       Expected non-empty: $NATS_ROLE_ID"
+    echo "                       and: $NATS_SECRET_ID"
+    echo "       (NATS server cert is PKI-issued at container start per ADR-0030, not a Vault KV bundle.)"
+    ERRORS=$((ERRORS + 1))
 fi
 
 # Check for JetStream storage directory reference
