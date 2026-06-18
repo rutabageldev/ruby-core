@@ -186,3 +186,50 @@ func (q *Queries) InsertGrowthMeasurement(ctx context.Context, arg *InsertGrowth
 	err := row.Scan(&id)
 	return id, err
 }
+
+const softDeleteGrowthMeasurement = `-- name: SoftDeleteGrowthMeasurement :exec
+UPDATE growth_measurements SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteGrowthMeasurement(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, softDeleteGrowthMeasurement, id)
+	return err
+}
+
+const updateGrowthMeasurement = `-- name: UpdateGrowthMeasurement :exec
+UPDATE growth_measurements
+SET measured_at = $2, weight_oz = $3, length_in = $4, head_circumference_in = $5,
+    source = $6, weight_pct = $7, length_pct = $8, head_pct = $9, logged_by = $10
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+type UpdateGrowthMeasurementParams struct {
+	ID                  pgtype.UUID
+	MeasuredAt          pgtype.Timestamptz
+	WeightOz            pgtype.Numeric
+	LengthIn            pgtype.Numeric
+	HeadCircumferenceIn pgtype.Numeric
+	Source              string
+	WeightPct           pgtype.Numeric
+	LengthPct           pgtype.Numeric
+	HeadPct             pgtype.Numeric
+	LoggedBy            string
+}
+
+// Full-resolution edit of a growth measurement by id (#78). Percentiles are
+// recomputed by the caller from the new value + age.
+func (q *Queries) UpdateGrowthMeasurement(ctx context.Context, arg *UpdateGrowthMeasurementParams) error {
+	_, err := q.db.Exec(ctx, updateGrowthMeasurement,
+		arg.ID,
+		arg.MeasuredAt,
+		arg.WeightOz,
+		arg.LengthIn,
+		arg.HeadCircumferenceIn,
+		arg.Source,
+		arg.WeightPct,
+		arg.LengthPct,
+		arg.HeadPct,
+		arg.LoggedBy,
+	)
+	return err
+}

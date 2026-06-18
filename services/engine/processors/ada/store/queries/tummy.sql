@@ -18,3 +18,11 @@ FROM tummy_time_sessions
 WHERE deleted_at IS NULL
   AND start_time >= @since
 ORDER BY start_time DESC;
+
+-- name: UpdateTummySession :exec
+UPDATE tummy_time_sessions
+SET start_time = @start_time, end_time = @end_time, duration_s = @duration_s, logged_by = @logged_by
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: SoftDeleteTummySession :exec
+UPDATE tummy_time_sessions SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;

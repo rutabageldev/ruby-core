@@ -41,6 +41,24 @@ func (q *Queries) AddFeedingBottleDetailAmounts(ctx context.Context, arg *AddFee
 	return err
 }
 
+const deleteFeedingBottleDetail = `-- name: DeleteFeedingBottleDetail :exec
+DELETE FROM feeding_bottle_detail WHERE feeding_id = $1
+`
+
+func (q *Queries) DeleteFeedingBottleDetail(ctx context.Context, feedingID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteFeedingBottleDetail, feedingID)
+	return err
+}
+
+const deleteFeedingSegments = `-- name: DeleteFeedingSegments :exec
+DELETE FROM feeding_segments WHERE feeding_id = $1
+`
+
+func (q *Queries) DeleteFeedingSegments(ctx context.Context, feedingID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteFeedingSegments, feedingID)
+	return err
+}
+
 const getLast24hFeedings = `-- name: GetLast24hFeedings :many
 SELECT
     f.id,
@@ -239,6 +257,40 @@ func (q *Queries) InsertFeedingSegment(ctx context.Context, arg *InsertFeedingSe
 		arg.StartedAt,
 		arg.EndedAt,
 		arg.DurationS,
+	)
+	return err
+}
+
+const softDeleteFeeding = `-- name: SoftDeleteFeeding :exec
+UPDATE feedings SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteFeeding(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, softDeleteFeeding, id)
+	return err
+}
+
+const updateFeeding = `-- name: UpdateFeeding :exec
+UPDATE feedings
+SET timestamp = $1, source = $2, logged_by = $3
+WHERE id = $4 AND deleted_at IS NULL
+`
+
+type UpdateFeedingParams struct {
+	Timestamp pgtype.Timestamptz
+	Source    string
+	LoggedBy  string
+	ID        pgtype.UUID
+}
+
+// Updates the feeding header during a full-resolution edit (#79). Segments and
+// bottle detail are rebuilt separately within the same transaction.
+func (q *Queries) UpdateFeeding(ctx context.Context, arg *UpdateFeedingParams) error {
+	_, err := q.db.Exec(ctx, updateFeeding,
+		arg.Timestamp,
+		arg.Source,
+		arg.LoggedBy,
+		arg.ID,
 	)
 	return err
 }

@@ -115,3 +115,35 @@ func (q *Queries) InsertDiaper(ctx context.Context, arg *InsertDiaperParams) err
 	_, err := q.db.Exec(ctx, insertDiaper, arg.Timestamp, arg.Type, arg.LoggedBy)
 	return err
 }
+
+const softDeleteDiaper = `-- name: SoftDeleteDiaper :exec
+UPDATE diapers SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteDiaper(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, softDeleteDiaper, id)
+	return err
+}
+
+const updateDiaper = `-- name: UpdateDiaper :exec
+UPDATE diapers
+SET timestamp = $1, type = $2, logged_by = $3
+WHERE id = $4 AND deleted_at IS NULL
+`
+
+type UpdateDiaperParams struct {
+	Timestamp pgtype.Timestamptz
+	Type      string
+	LoggedBy  string
+	ID        pgtype.UUID
+}
+
+func (q *Queries) UpdateDiaper(ctx context.Context, arg *UpdateDiaperParams) error {
+	_, err := q.db.Exec(ctx, updateDiaper,
+		arg.Timestamp,
+		arg.Type,
+		arg.LoggedBy,
+		arg.ID,
+	)
+	return err
+}

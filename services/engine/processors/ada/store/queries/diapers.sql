@@ -24,3 +24,11 @@ FROM diapers
 WHERE deleted_at IS NULL
   AND timestamp >= @boundary
 ORDER BY timestamp DESC;
+
+-- name: UpdateDiaper :exec
+UPDATE diapers
+SET timestamp = @timestamp, type = @type, logged_by = @logged_by
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: SoftDeleteDiaper :exec
+UPDATE diapers SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;
