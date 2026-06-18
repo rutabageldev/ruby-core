@@ -24,6 +24,8 @@ When a caregiver claims a due feed (`ada.feeding.claimed`), the engine owns the 
 
 The `ada.born` event persists Ada's birth datetime to the `ada_profile` table. The table is singleton-constrained (at most one row) and idempotent — repeated fires are silently ignored. `birth_at` is stored as a UTC timestamp and is available as a future query boundary for filtering pre-birth data.
 
+Recorded events can be corrected or removed via `ada.{feeding,diaper,sleep,tummy,growth}.update` (full-resolution replacement) and `ada.{...}.delete {id}` (soft-delete via `deleted_at`), each recomputing the derived sensors. Every row carries a `test BOOLEAN` marker (ADR-0031): test data behaves identically in every projection but is selectable for bulk teardown by the seed/clear tooling — see [docs/runbooks/ada-test-data.md](../../docs/runbooks/ada-test-data.md).
+
 ## Configuration
 
 | Variable | Default | Notes |
@@ -34,6 +36,7 @@ The `ada.born` event persists Ada's birth datetime to the `ada_profile` table. T
 | `VAULT_TLS_PATH` | `secret/data/ruby-core/tls/engine` | NATS mTLS cert, key, CA |
 | `VAULT_PG_PATH` | `secret/data/ruby-core/postgres` | Postgres credentials (host, port, dbname, user, password) — only read if a stateful processor is registered |
 | `VAULT_HA_PATH` | `secret/data/ruby-core/ha` | HA base URL and access token — only read if a stateful processor is registered |
+| `HA_INGEST_ENABLED` | *(unset → enabled)* | Set to `false` to disable HA projection. All environments share one HA, so only prod projects Ada sensors — non-prod engines set this `false` and their HA pushes become no-ops (ADR-0033). |
 | `NATS_URL` | `tls://localhost:4222` | NATS server URL |
 | `NATS_REQUIRE_MTLS` | `false` | Force mTLS even if NATS_URL is not `tls://` |
 | `RULES_DIR` | `configs/rules` | Directory of `*.yaml` rule files |
