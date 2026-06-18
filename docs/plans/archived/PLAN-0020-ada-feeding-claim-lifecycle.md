@@ -1,6 +1,6 @@
 # PLAN-0020 - Ada feed-claim lifecycle (#19, #81)
 
-* **Status:** In Progress
+* **Status:** Complete
 * **Date:** 2026-06-18
 * **Project:** ruby-core
 * **Roadmap Item:** docs/roadmap/ROADMAP-0010-ada-hardening-test-data-lifecycle.md (effort 0010.3)
