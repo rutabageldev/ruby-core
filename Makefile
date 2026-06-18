@@ -12,7 +12,7 @@
         staging-up staging-down deploy-staging \
         docker-ps docker-images docker-volumes docker-clean \
         setup-creds setup-creds-force setup-staging-creds nats-validate \
-        db-seed db-seed-clear
+        ada-db-snapshot ada-db-seed ada-db-clear-test
 
 # Default target
 .DEFAULT_GOAL := help
@@ -273,11 +273,14 @@ cleanup-mkcert-kv-bundles: ## Delete the legacy mkcert KV bundles at secret/ruby
 	  echo "Done. All mkcert KV bundles removed."; \
 	fi
 
-db-seed: ## Seed the Ada database with representative test data (all source/type combinations)
-	@scripts/seed-db.sh
+ada-db-snapshot: ## Snapshot Ada tables to a local file (requires ENV=dev|staging|prod)
+	@ENV="$(ENV)" scripts/ada-db-snapshot.sh
 
-db-seed-clear: ## Remove all seeded rows (logged_by='seed') from Ada tables
-	@scripts/clear-seed-db.sh
+ada-db-seed: ## Clear-then-seed representative Ada test data (requires ENV= and DOB=<RFC3339>)
+	@ENV="$(ENV)" DOB="$(DOB)" scripts/ada-db-seed.sh
+
+ada-db-clear-test: ## DESTRUCTIVE: delete only test=true Ada rows (ENV=; dry-run unless CONFIRM=yes)
+	@ENV="$(ENV)" CONFIRM="$(CONFIRM)" scripts/ada-db-clear-test.sh
 
 # =============================================================================
 # Validation
