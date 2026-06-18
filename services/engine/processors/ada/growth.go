@@ -55,26 +55,7 @@ func (p *Processor) handleGrowthLogged(ctx context.Context, evt schemas.CloudEve
 
 	// Compute percentiles from birth date. Any error or missing profile is a soft-fail —
 	// the measurement is still useful without a percentile.
-	var weightPct, lengthPct, headPct *float64
-	profile, err := p.q.GetProfile(ctx)
-	if err != nil {
-		p.log.Warn("ada: get profile for growth percentile — storing without percentile",
-			slog.String("error", err.Error()))
-	} else {
-		ageDays := measuredAt.Sub(profile.BirthAt.Time).Hours() / 24
-		switch {
-		case ageDays < 0:
-			p.log.Warn("ada: growth measured_at is before birth date — skipping percentile",
-				slog.Float64("age_days", ageDays))
-		case ageDays > 730:
-			p.log.Warn("ada: age exceeds WHO table range (730 days) — skipping percentile",
-				slog.Float64("age_days", ageDays))
-		default:
-			weightPct = computePct(p.log, who.WeightTable, ageDays, d.WeightOz, "weight")
-			lengthPct = computePct(p.log, who.LengthTable, ageDays, d.LengthIn, "length")
-			headPct = computePct(p.log, who.HeadTable, ageDays, d.HeadCircumferenceIn, "head")
-		}
-	}
+	weightPct, lengthPct, headPct := p.computeGrowthPercentiles(ctx, measuredAt, d.WeightOz, d.LengthIn, d.HeadCircumferenceIn)
 
 	if _, err := p.q.InsertGrowthMeasurement(ctx, &store.InsertGrowthMeasurementParams{
 		MeasuredAt:          toTimestamptz(measuredAt),
@@ -86,12 +67,41 @@ func (p *Processor) handleGrowthLogged(ctx context.Context, evt schemas.CloudEve
 		LengthPct:           numericFromFloatPtr(lengthPct),
 		HeadPct:             numericFromFloatPtr(headPct),
 		LoggedBy:            d.LoggedBy,
+		Test:                eventTest(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert growth measurement: %w", err)
 	}
 
 	p.pushGrowthSensors(ctx)
 	return nil
+}
+
+// computeGrowthPercentiles derives the three WHO percentiles for a measurement from
+// the birth profile. Any missing profile, pre-birth date, or out-of-range age is a
+// soft-fail returning nils — the measurement is still useful without a percentile.
+// Shared by growth log and growth update (#78).
+func (p *Processor) computeGrowthPercentiles(ctx context.Context, measuredAt time.Time, weightOz, lengthIn, headIn *float64) (weightPct, lengthPct, headPct *float64) {
+	profile, err := p.q.GetProfile(ctx)
+	if err != nil {
+		p.log.Warn("ada: get profile for growth percentile — storing without percentile",
+			slog.String("error", err.Error()))
+		return nil, nil, nil
+	}
+	ageDays := measuredAt.Sub(profile.BirthAt.Time).Hours() / 24
+	switch {
+	case ageDays < 0:
+		p.log.Warn("ada: growth measured_at is before birth date — skipping percentile",
+			slog.Float64("age_days", ageDays))
+		return nil, nil, nil
+	case ageDays > 730:
+		p.log.Warn("ada: age exceeds WHO table range (730 days) — skipping percentile",
+			slog.Float64("age_days", ageDays))
+		return nil, nil, nil
+	}
+	weightPct = computePct(p.log, who.WeightTable, ageDays, weightOz, "weight")
+	lengthPct = computePct(p.log, who.LengthTable, ageDays, lengthIn, "length")
+	headPct = computePct(p.log, who.HeadTable, ageDays, headIn, "head")
+	return weightPct, lengthPct, headPct
 }
 
 // computePct computes the WHO percentile for a single measurement value.

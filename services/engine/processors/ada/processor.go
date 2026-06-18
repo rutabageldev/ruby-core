@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -91,6 +92,7 @@ var adaBoundaryCrossingsTotal = promauto.NewCounter(prometheus.CounterOpts{
 // Daily aggregate refresh is driven by a bedtime boundary ticker (not midnight).
 type Processor struct {
 	q               *store.Queries
+	pool            *pgxpool.Pool // for multi-statement transactions (feeding edit)
 	ha              *adaha.Client
 	lastHAConnected bool
 	healthSub       *nats.Subscription
@@ -126,6 +128,7 @@ func (p *Processor) Subscriptions() []string {
 // bare gateway.health subscription, and restores sensor state from Postgres.
 func (p *Processor) Initialize(cfg processor.Config) error {
 	p.q = store.New(cfg.Pool)
+	p.pool = cfg.Pool
 	p.ha = adaha.NewClient(cfg.HA.URL, cfg.HA.Token, p.log)
 	// Assume HA is connected at startup; gateway.health will correct if not.
 	p.lastHAConnected = true
@@ -227,6 +230,26 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleGrowthLogged(ctx, evt)
 	case schemas.AdaEventFeedingClaimed:
 		return p.handleFeedingClaimed(ctx, evt)
+	case schemas.AdaEventFeedingUpdate:
+		return p.handleFeedingUpdate(ctx, evt)
+	case schemas.AdaEventFeedingDelete:
+		return p.handleFeedingDelete(ctx, evt)
+	case schemas.AdaEventDiaperUpdate:
+		return p.handleDiaperUpdate(ctx, evt)
+	case schemas.AdaEventDiaperDelete:
+		return p.handleDiaperDelete(ctx, evt)
+	case schemas.AdaEventSleepUpdate:
+		return p.handleSleepUpdate(ctx, evt)
+	case schemas.AdaEventSleepDelete:
+		return p.handleSleepDelete(ctx, evt)
+	case schemas.AdaEventTummyUpdate:
+		return p.handleTummyUpdate(ctx, evt)
+	case schemas.AdaEventTummyDelete:
+		return p.handleTummyDelete(ctx, evt)
+	case schemas.AdaEventGrowthUpdate:
+		return p.handleGrowthUpdate(ctx, evt)
+	case schemas.AdaEventGrowthDelete:
+		return p.handleGrowthDelete(ctx, evt)
 	case "ha.events.input_number.ada_alert_threshold_h":
 		return p.handleThresholdChange(ctx, evt)
 	default:
@@ -284,6 +307,7 @@ func (p *Processor) handleFeedingEnded(ctx context.Context, evt schemas.CloudEve
 		Timestamp: toTimestamptz(sessionStart),
 		Source:    source,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	})
 	if err != nil {
 		return fmt.Errorf("ada: insert feeding_ended: %w", err)
@@ -371,6 +395,7 @@ func (p *Processor) handleFeedingLogged(ctx context.Context, evt schemas.CloudEv
 		Timestamp: toTimestamptz(startTime),
 		Source:    source,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	})
 	if err != nil {
 		return fmt.Errorf("ada: insert feeding_logged: %w", err)
@@ -407,29 +432,15 @@ func (p *Processor) handleFeedingLoggedPast(ctx context.Context, evt schemas.Clo
 		return fmt.Errorf("ada: parse feeding_logged_past start_time: %w", err)
 	}
 
-	hasBreast := d.LeftBreastS > 0 || d.RightBreastS > 0
 	hasBottle := d.BreastMilkML > 0 || d.FormulaML > 0
-
-	var source string
-	switch {
-	case hasBreast && d.LeftBreastS > 0 && d.RightBreastS > 0:
-		source = "breast"
-	case hasBreast && d.LeftBreastS > 0:
-		source = "breast_left"
-	case hasBreast:
-		source = "breast_right"
-	case d.BreastMilkML > 0 && d.FormulaML > 0:
-		source = "mixed"
-	case d.BreastMilkML > 0:
-		source = "bottle_breast"
-	default:
-		source = "bottle_formula"
-	}
+	// ml vs oz is irrelevant to classification — only which components are non-zero.
+	source := deriveFeedingSource(d.LeftBreastS, d.RightBreastS, d.BreastMilkML, d.FormulaML)
 
 	feedingID, err := p.q.InsertFeeding(ctx, &store.InsertFeedingParams{
 		Timestamp: toTimestamptz(startTime),
 		Source:    source,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	})
 	if err != nil {
 		return fmt.Errorf("ada: insert feeding_logged_past: %w", err)
@@ -611,6 +622,7 @@ func (p *Processor) handleDiaperLogged(ctx context.Context, evt schemas.CloudEve
 		Timestamp: toTimestamptz(ts),
 		Type:      d.Type,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert diaper: %w", err)
 	}
@@ -643,6 +655,7 @@ func (p *Processor) handleSleepStarted(ctx context.Context, evt schemas.CloudEve
 		StartTime: toTimestamptz(startTime),
 		SleepType: sleepType,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert sleep start: %w", err)
 	}
@@ -697,6 +710,7 @@ func (p *Processor) handleSleepLogged(ctx context.Context, evt schemas.CloudEven
 		EndTime:   toTimestamptz(endTime),
 		SleepType: sleepType,
 		LoggedBy:  d.LoggedBy,
+		Test:      eventTest(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert sleep session: %w", err)
 	}
@@ -712,7 +726,7 @@ func (p *Processor) handleTummyEnded(ctx context.Context, evt schemas.CloudEvent
 	if err := remarshal(evt.Data, &d); err != nil {
 		return fmt.Errorf("ada: decode tummy_ended: %w", err)
 	}
-	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy)
+	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy, eventTest(evt))
 }
 
 func (p *Processor) handleTummyLogged(ctx context.Context, evt schemas.CloudEvent) error {
@@ -720,10 +734,10 @@ func (p *Processor) handleTummyLogged(ctx context.Context, evt schemas.CloudEven
 	if err := remarshal(evt.Data, &d); err != nil {
 		return fmt.Errorf("ada: decode tummy_logged: %w", err)
 	}
-	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy)
+	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy, eventTest(evt))
 }
 
-func (p *Processor) insertTummyAndPush(ctx context.Context, startStr, endStr string, durationS int, loggedBy string) error {
+func (p *Processor) insertTummyAndPush(ctx context.Context, startStr, endStr string, durationS int, loggedBy string, test bool) error {
 	startTime, err := parseRFC3339(startStr)
 	if err != nil {
 		return fmt.Errorf("ada: parse tummy start_time: %w", err)
@@ -738,6 +752,7 @@ func (p *Processor) insertTummyAndPush(ctx context.Context, startStr, endStr str
 		EndTime:   toTimestamptz(endTime),
 		DurationS: int32(durationS), //nolint:gosec // G115: bounded by session duration in seconds, never near int32 max
 		LoggedBy:  loggedBy,
+		Test:      test,
 	}); err != nil {
 		return fmt.Errorf("ada: insert tummy session: %w", err)
 	}

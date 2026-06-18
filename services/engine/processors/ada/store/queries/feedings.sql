@@ -1,6 +1,6 @@
 -- name: InsertFeeding :one
-INSERT INTO feedings (timestamp, source, logged_by)
-VALUES (@timestamp, @source, @logged_by)
+INSERT INTO feedings (timestamp, source, logged_by, test)
+VALUES (@timestamp, @source, @logged_by, @test)
 RETURNING id;
 
 -- name: InsertFeedingBottleDetail :exec
@@ -22,6 +22,22 @@ ON CONFLICT (feeding_id) DO UPDATE SET
 -- name: InsertFeedingSegment :exec
 INSERT INTO feeding_segments (feeding_id, side, started_at, ended_at, duration_s)
 VALUES (@feeding_id, @side, @started_at, @ended_at, @duration_s);
+
+-- name: UpdateFeeding :exec
+-- Updates the feeding header during a full-resolution edit (#79). Segments and
+-- bottle detail are rebuilt separately within the same transaction.
+UPDATE feedings
+SET timestamp = @timestamp, source = @source, logged_by = @logged_by
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: DeleteFeedingSegments :exec
+DELETE FROM feeding_segments WHERE feeding_id = @feeding_id;
+
+-- name: DeleteFeedingBottleDetail :exec
+DELETE FROM feeding_bottle_detail WHERE feeding_id = @feeding_id;
+
+-- name: SoftDeleteFeeding :exec
+UPDATE feedings SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;
 
 -- name: GetLastFeeding :one
 SELECT

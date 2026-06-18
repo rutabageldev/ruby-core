@@ -1,6 +1,6 @@
 -- name: InsertSleepStart :one
-INSERT INTO sleep_sessions (start_time, sleep_type, logged_by)
-VALUES (@start_time, @sleep_type, @logged_by)
+INSERT INTO sleep_sessions (start_time, sleep_type, logged_by, test)
+VALUES (@start_time, @sleep_type, @logged_by, @test)
 RETURNING id;
 
 -- name: UpdateSleepEnd :exec
@@ -13,8 +13,8 @@ WHERE id = (
 );
 
 -- name: InsertSleepSession :exec
-INSERT INTO sleep_sessions (start_time, end_time, sleep_type, logged_by)
-VALUES (@start_time, @end_time, @sleep_type, @logged_by);
+INSERT INTO sleep_sessions (start_time, end_time, sleep_type, logged_by, test)
+VALUES (@start_time, @end_time, @sleep_type, @logged_by, @test);
 
 -- name: GetActiveSleepSession :one
 SELECT start_time FROM sleep_sessions
@@ -62,3 +62,13 @@ FROM sleep_sessions
 WHERE deleted_at IS NULL
   AND (end_time IS NULL OR end_time > @boundary)
 ORDER BY start_time DESC;
+
+-- name: UpdateSleepSession :exec
+-- Full-resolution edit of a sleep session by id (#79). end_time may be NULL for an
+-- still-active session.
+UPDATE sleep_sessions
+SET start_time = @start_time, end_time = @end_time, sleep_type = @sleep_type, logged_by = @logged_by
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: SoftDeleteSleepSession :exec
+UPDATE sleep_sessions SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;

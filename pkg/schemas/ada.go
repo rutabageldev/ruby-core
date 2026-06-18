@@ -22,7 +22,78 @@ const (
 	AdaEventBedtimeConfig       = "ha.events.ada.config_bedtime"
 	AdaEventGrowthLogged        = "ha.events.ada.growth_logged"
 	AdaEventFeedingClaimed      = "ha.events.ada.feeding_claimed"
+
+	// Edit/delete (#77, #78, #79). Updates are full-resolution replacements.
+	AdaEventFeedingUpdate = "ha.events.ada.feeding_updated"
+	AdaEventFeedingDelete = "ha.events.ada.feeding_deleted"
+	AdaEventDiaperUpdate  = "ha.events.ada.diaper_updated"
+	AdaEventDiaperDelete  = "ha.events.ada.diaper_deleted"
+	AdaEventSleepUpdate   = "ha.events.ada.sleep_updated"
+	AdaEventSleepDelete   = "ha.events.ada.sleep_deleted"
+	AdaEventTummyUpdate   = "ha.events.ada.tummy_updated"
+	AdaEventTummyDelete   = "ha.events.ada.tummy_deleted"
+	AdaEventGrowthUpdate  = "ha.events.ada.growth_updated"
+	AdaEventGrowthDelete  = "ha.events.ada.growth_deleted"
 )
+
+// AdaDeleteData is the payload for every ada.<area>.delete event — a single id.
+type AdaDeleteData struct {
+	ID       string `json:"id"`
+	LoggedBy string `json:"logged_by,omitempty"`
+}
+
+// AdaFeedingUpdateData is the full-resolution replacement payload for a feeding (#79).
+// Any combination of components is valid; a zero-valued field clears that component.
+// Breast timing is in seconds; bottle amounts are in oz. The source is re-derived
+// from which fields are non-zero, exactly as a fresh submission would be.
+type AdaFeedingUpdateData struct {
+	ID           string  `json:"id"`
+	StartTime    string  `json:"start_time"`
+	LeftBreastS  int     `json:"left_breast_s,omitempty"`
+	RightBreastS int     `json:"right_breast_s,omitempty"`
+	BreastMilkOz float64 `json:"breast_milk_oz,omitempty"`
+	FormulaOz    float64 `json:"formula_oz,omitempty"`
+	LoggedBy     string  `json:"logged_by,omitempty"`
+}
+
+// AdaDiaperUpdateData replaces a diaper event by id. Type ∈ wet | dirty | mixed.
+type AdaDiaperUpdateData struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	LoggedBy  string `json:"logged_by,omitempty"`
+}
+
+// AdaSleepUpdateData replaces a sleep session by id. SleepType ∈ nap | night.
+type AdaSleepUpdateData struct {
+	ID        string `json:"id"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+	DurationS int    `json:"duration_s"`
+	SleepType string `json:"sleep_type"`
+	LoggedBy  string `json:"logged_by,omitempty"`
+}
+
+// AdaTummyUpdateData replaces a tummy time session by id.
+type AdaTummyUpdateData struct {
+	ID        string `json:"id"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+	DurationS int    `json:"duration_s"`
+	LoggedBy  string `json:"logged_by,omitempty"`
+}
+
+// AdaGrowthUpdateData replaces a growth measurement by id. Optional metric fields
+// use pointers — nil means "not present" (cleared). Percentiles are recomputed.
+type AdaGrowthUpdateData struct {
+	ID                  string   `json:"id"`
+	WeightOz            *float64 `json:"weight_oz,omitempty"`
+	LengthIn            *float64 `json:"length_in,omitempty"`
+	HeadCircumferenceIn *float64 `json:"head_circumference_in,omitempty"`
+	Source              string   `json:"source"`
+	Timestamp           string   `json:"timestamp"`
+	LoggedBy            string   `json:"logged_by,omitempty"`
+}
 
 // AdaFeedingEndedData is the CloudEvent Data payload for a breast feeding session end.
 // Segments hold per-side timing; totals are pre-computed by the dashboard as a fallback.

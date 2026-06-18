@@ -1,6 +1,6 @@
 -- name: InsertTummySession :exec
-INSERT INTO tummy_time_sessions (start_time, end_time, duration_s, logged_by)
-VALUES (@start_time, @end_time, @duration_s, @logged_by);
+INSERT INTO tummy_time_sessions (start_time, end_time, duration_s, logged_by, test)
+VALUES (@start_time, @end_time, @duration_s, @logged_by, @test);
 
 -- name: GetTodayTummyAggregates :one
 SELECT
@@ -18,3 +18,11 @@ FROM tummy_time_sessions
 WHERE deleted_at IS NULL
   AND start_time >= @since
 ORDER BY start_time DESC;
+
+-- name: UpdateTummySession :exec
+UPDATE tummy_time_sessions
+SET start_time = @start_time, end_time = @end_time, duration_s = @duration_s, logged_by = @logged_by
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: SoftDeleteTummySession :exec
+UPDATE tummy_time_sessions SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;

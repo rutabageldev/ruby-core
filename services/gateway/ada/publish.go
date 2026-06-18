@@ -33,6 +33,16 @@ var eventRoutes = map[string]string{
 	"ada.config.bedtime":      schemas.AdaEventBedtimeConfig,
 	"ada.growth.log":          schemas.AdaEventGrowthLogged,
 	"ada.feeding.claimed":     schemas.AdaEventFeedingClaimed,
+	"ada.feeding.update":      schemas.AdaEventFeedingUpdate,
+	"ada.feeding.delete":      schemas.AdaEventFeedingDelete,
+	"ada.diaper.update":       schemas.AdaEventDiaperUpdate,
+	"ada.diaper.delete":       schemas.AdaEventDiaperDelete,
+	"ada.sleep.update":        schemas.AdaEventSleepUpdate,
+	"ada.sleep.delete":        schemas.AdaEventSleepDelete,
+	"ada.tummy.update":        schemas.AdaEventTummyUpdate,
+	"ada.tummy.delete":        schemas.AdaEventTummyDelete,
+	"ada.growth.update":       schemas.AdaEventGrowthUpdate,
+	"ada.growth.delete":       schemas.AdaEventGrowthDelete,
 }
 
 // Publish wraps payload in a CloudEvent and publishes to the appropriate

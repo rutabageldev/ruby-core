@@ -1,6 +1,6 @@
 -- name: InsertDiaper :exec
-INSERT INTO diapers (timestamp, type, logged_by)
-VALUES (@timestamp, @type, @logged_by);
+INSERT INTO diapers (timestamp, type, logged_by, test)
+VALUES (@timestamp, @type, @logged_by, @test);
 
 -- name: GetLastDiaper :one
 SELECT timestamp, type FROM diapers
@@ -24,3 +24,11 @@ FROM diapers
 WHERE deleted_at IS NULL
   AND timestamp >= @boundary
 ORDER BY timestamp DESC;
+
+-- name: UpdateDiaper :exec
+UPDATE diapers
+SET timestamp = @timestamp, type = @type, logged_by = @logged_by
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: SoftDeleteDiaper :exec
+UPDATE diapers SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;

@@ -134,8 +134,8 @@ func (q *Queries) GetTodaySleepSessions(ctx context.Context, boundary pgtype.Tim
 }
 
 const insertSleepSession = `-- name: InsertSleepSession :exec
-INSERT INTO sleep_sessions (start_time, end_time, sleep_type, logged_by)
-VALUES ($1, $2, $3, $4)
+INSERT INTO sleep_sessions (start_time, end_time, sleep_type, logged_by, test)
+VALUES ($1, $2, $3, $4, $5)
 `
 
 type InsertSleepSessionParams struct {
@@ -143,6 +143,7 @@ type InsertSleepSessionParams struct {
 	EndTime   pgtype.Timestamptz
 	SleepType string
 	LoggedBy  string
+	Test      bool
 }
 
 func (q *Queries) InsertSleepSession(ctx context.Context, arg *InsertSleepSessionParams) error {
@@ -151,13 +152,14 @@ func (q *Queries) InsertSleepSession(ctx context.Context, arg *InsertSleepSessio
 		arg.EndTime,
 		arg.SleepType,
 		arg.LoggedBy,
+		arg.Test,
 	)
 	return err
 }
 
 const insertSleepStart = `-- name: InsertSleepStart :one
-INSERT INTO sleep_sessions (start_time, sleep_type, logged_by)
-VALUES ($1, $2, $3)
+INSERT INTO sleep_sessions (start_time, sleep_type, logged_by, test)
+VALUES ($1, $2, $3, $4)
 RETURNING id
 `
 
@@ -165,13 +167,28 @@ type InsertSleepStartParams struct {
 	StartTime pgtype.Timestamptz
 	SleepType string
 	LoggedBy  string
+	Test      bool
 }
 
 func (q *Queries) InsertSleepStart(ctx context.Context, arg *InsertSleepStartParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, insertSleepStart, arg.StartTime, arg.SleepType, arg.LoggedBy)
+	row := q.db.QueryRow(ctx, insertSleepStart,
+		arg.StartTime,
+		arg.SleepType,
+		arg.LoggedBy,
+		arg.Test,
+	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const softDeleteSleepSession = `-- name: SoftDeleteSleepSession :exec
+UPDATE sleep_sessions SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteSleepSession(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, softDeleteSleepSession, id)
+	return err
 }
 
 const updateSleepEnd = `-- name: UpdateSleepEnd :exec
@@ -186,5 +203,32 @@ WHERE id = (
 
 func (q *Queries) UpdateSleepEnd(ctx context.Context, endTime pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, updateSleepEnd, endTime)
+	return err
+}
+
+const updateSleepSession = `-- name: UpdateSleepSession :exec
+UPDATE sleep_sessions
+SET start_time = $1, end_time = $2, sleep_type = $3, logged_by = $4
+WHERE id = $5 AND deleted_at IS NULL
+`
+
+type UpdateSleepSessionParams struct {
+	StartTime pgtype.Timestamptz
+	EndTime   pgtype.Timestamptz
+	SleepType string
+	LoggedBy  string
+	ID        pgtype.UUID
+}
+
+// Full-resolution edit of a sleep session by id (#79). end_time may be NULL for an
+// still-active session.
+func (q *Queries) UpdateSleepSession(ctx context.Context, arg *UpdateSleepSessionParams) error {
+	_, err := q.db.Exec(ctx, updateSleepSession,
+		arg.StartTime,
+		arg.EndTime,
+		arg.SleepType,
+		arg.LoggedBy,
+		arg.ID,
+	)
 	return err
 }

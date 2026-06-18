@@ -210,16 +210,26 @@ func main() {
 		defer pool.Close()
 		logger.Info("connected to postgres", slog.String("host", pgCfg.Host))
 
-		haVaultPath := os.Getenv("VAULT_HA_PATH")
-		if haVaultPath == "" {
-			haVaultPath = "secret/data/ruby-core/ha"
+		// HA push gate. All environments share one Home Assistant, so only the
+		// prod engine may project Ada sensor state to it — otherwise a non-prod
+		// engine clobbers prod's sensors on startup/refresh/safety-net (ADR-0033).
+		// Mirrors the gateway's HA_INGEST_ENABLED ingest gate (#72): when false,
+		// skip the HA fetch and run with an empty HA client (pushes become no-ops).
+		if os.Getenv("HA_INGEST_ENABLED") == "false" {
+			logger.Warn("HA push disabled (HA_INGEST_ENABLED=false) — engine will not push Ada sensors to Home Assistant")
+			haCfg = &boot.HAConfig{} // empty: ada HA client pushes become no-ops
+		} else {
+			haVaultPath := os.Getenv("VAULT_HA_PATH")
+			if haVaultPath == "" {
+				haVaultPath = "secret/data/ruby-core/ha"
+			}
+			haCfg, err = boot.FetchHAConfig(cfg.VaultAddr, cfg.VaultToken, haVaultPath)
+			if err != nil {
+				logger.Error("vault: fetch HA config failed", slog.String("error", err.Error()))
+				os.Exit(1)
+			}
+			logger.Info("vault: fetched HA config", slog.String("ha_url", haCfg.URL))
 		}
-		haCfg, err = boot.FetchHAConfig(cfg.VaultAddr, cfg.VaultToken, haVaultPath)
-		if err != nil {
-			logger.Error("vault: fetch HA config failed", slog.String("error", err.Error()))
-			os.Exit(1)
-		}
-		logger.Info("vault: fetched HA config", slog.String("ha_url", haCfg.URL))
 	}
 
 	if err := host.Initialize(ruleCfg, nc, js, pool, haCfg); err != nil {
