@@ -21,6 +21,7 @@ const (
 	AdaEventRemoveChannel       = "ha.events.ada.remove_channel"
 	AdaEventBedtimeConfig       = "ha.events.ada.config_bedtime"
 	AdaEventGrowthLogged        = "ha.events.ada.growth_logged"
+	AdaEventFeedingClaimed      = "ha.events.ada.feeding_claimed"
 )
 
 // AdaFeedingEndedData is the CloudEvent Data payload for a breast feeding session end.
@@ -188,6 +189,16 @@ type AdaFeedingLoggedPastData struct {
 	BreastMilkML float64 `json:"breast_milk_ml,omitempty"`
 	FormulaML    float64 `json:"formula_ml,omitempty"`
 	LoggedBy     string  `json:"logged_by,omitempty"`
+}
+
+// AdaFeedingClaimedData is the payload for ada.feeding.claimed, fired when a
+// caregiver taps "I've got it" on a feed-due alert. GotItUser is the caregiver's
+// display name; ruby-core owns the claim lifecycle and projects it to
+// sensor.ada_feeding_claimed_by + input_boolean.ada_feeding_claimed (#81).
+type AdaFeedingClaimedData struct {
+	GotItUser string `json:"got_it_user"`
+	Timestamp string `json:"timestamp,omitempty"`
+	LoggedBy  string `json:"logged_by,omitempty"`
 }
 
 // AdaGrowthLoggedData is the payload for a logged growth measurement.

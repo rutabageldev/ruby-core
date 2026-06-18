@@ -33,6 +33,7 @@ const (
 	// ada_config keys — feed interval
 	cfgKeyFeedIntervalHours = "feed_interval_hours"
 	cfgKeyNextFeedingTarget = "next_feeding_target"
+	cfgKeyFeedingClaimedBy  = "feeding_claimed_by" // current claimer name, "" when unclaimed
 
 	// ada_config keys — bedtime boundary
 	cfgKeyBedtimeHHMM     = "bedtime_hhmm"      // e.g. "19:00"
@@ -66,6 +67,8 @@ const (
 	sensorFeedingHistory       = "sensor.ada_feeding_history"
 	sensorTummyHistory         = "sensor.ada_tummy_history"
 	sensorTodayBoundary        = "sensor.ada_today_boundary"
+	sensorFeedingClaimedBy     = "sensor.ada_feeding_claimed_by"
+	booleanFeedingClaimed      = "input_boolean.ada_feeding_claimed"
 
 	// Growth measurement sensors
 	sensorLatestWeight            = "sensor.ada_latest_weight"
@@ -222,6 +225,8 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleBedtimeConfig(ctx, evt)
 	case schemas.AdaEventGrowthLogged:
 		return p.handleGrowthLogged(ctx, evt)
+	case schemas.AdaEventFeedingClaimed:
+		return p.handleFeedingClaimed(ctx, evt)
 	case "ha.events.input_number.ada_alert_threshold_h":
 		return p.handleThresholdChange(ctx, evt)
 	default:
@@ -530,6 +535,63 @@ func supplementAmounts(source string, amountOz, breastMilkOz, formulaOz float64)
 	}
 	amount = breastMilk + formula
 	return amount, breastMilk, formula
+}
+
+// ── Feed-claim lifecycle (#19, #81) ───────────────────────────────────────────
+
+// handleFeedingClaimed records that a caregiver claimed the due feed ("I've got
+// it"). ruby-core owns the claim lifecycle: it persists the claimer, marks
+// input_boolean.ada_feeding_claimed on, and projects the name to
+// sensor.ada_feeding_claimed_by so every caregiver's dashboard shows who has it.
+// The claim is cleared by the next completed feed (see clearFeedingClaim).
+func (p *Processor) handleFeedingClaimed(ctx context.Context, evt schemas.CloudEvent) error {
+	var d schemas.AdaFeedingClaimedData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode feeding_claimed: %w", err)
+	}
+	if d.GotItUser == "" {
+		p.log.Warn("ada: feeding_claimed missing got_it_user — ignoring")
+		return nil
+	}
+
+	if err := p.q.UpsertConfig(ctx, &store.UpsertConfigParams{
+		Key:   cfgKeyFeedingClaimedBy,
+		Value: d.GotItUser,
+	}); err != nil {
+		return fmt.Errorf("ada: persist feeding_claimed_by: %w", err)
+	}
+
+	p.pushFeedingClaim(ctx, d.GotItUser)
+	return nil
+}
+
+// pushFeedingClaim projects an active claim: boolean on + the claimer's name as
+// both the sensor state and a claimed_by attribute.
+func (p *Processor) pushFeedingClaim(ctx context.Context, user string) {
+	p.pushAll(ctx, []struct{ id, state string }{{booleanFeedingClaimed, "on"}})
+	if err := p.ha.PushState(ctx, sensorFeedingClaimedBy, user, map[string]any{"claimed_by": user}); err != nil {
+		p.log.Warn("ada: push feeding_claimed_by", slog.String("error", err.Error()))
+	}
+}
+
+// clearFeedingClaim resets the claim when a feed is completed. It is a no-op when
+// nothing is currently claimed, so it can be called on every completed feed
+// without churning HA state. Supplements do not call this (they are not a new feed).
+func (p *Processor) clearFeedingClaim(ctx context.Context) {
+	cfg, err := p.q.GetConfig(ctx, cfgKeyFeedingClaimedBy)
+	if err != nil || cfg.Value == "" {
+		return // not claimed (no row) — nothing to clear
+	}
+	if err := p.q.UpsertConfig(ctx, &store.UpsertConfigParams{
+		Key:   cfgKeyFeedingClaimedBy,
+		Value: "",
+	}); err != nil {
+		p.log.Warn("ada: clear feeding_claimed_by config", slog.String("error", err.Error()))
+	}
+	p.pushAll(ctx, []struct{ id, state string }{{booleanFeedingClaimed, "off"}})
+	if err := p.ha.PushState(ctx, sensorFeedingClaimedBy, "", map[string]any{"claimed_by": ""}); err != nil {
+		p.log.Warn("ada: clear feeding_claimed_by sensor", slog.String("error", err.Error()))
+	}
 }
 
 // ── Diaper handler ───────────────────────────────────────────────────────────
@@ -985,6 +1047,10 @@ func (p *Processor) pushFeedingSensors(ctx context.Context) {
 	}
 	p.pushAll(ctx, pushes)
 	p.pushFeedingHistory(ctx)
+
+	// A completed feed fulfils the due feed, so any outstanding claim is cleared
+	// (#81). Supplements use pushSupplementOzSensor and intentionally do not clear.
+	p.clearFeedingClaim(ctx)
 }
 
 // pushDiaperSensors pushes all diaper-related sensors after a diaper event.
@@ -1145,6 +1211,14 @@ func (p *Processor) pushLastEventSensors(ctx context.Context) {
 		p.pushAll(ctx, []struct{ id, state string }{{"sensor.ada_tummy_time_target_min", cfg.Value}})
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		p.log.Warn("ada: restore tummy target", slog.String("error", err.Error()))
+	}
+
+	// Restore an outstanding feed claim so a mid-claim engine restart re-projects
+	// who has it (#81). No row / empty value means unclaimed — leave HA as-is.
+	if cfg, err := p.q.GetConfig(ctx, cfgKeyFeedingClaimedBy); err == nil && cfg.Value != "" {
+		p.pushFeedingClaim(ctx, cfg.Value)
+	} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		p.log.Warn("ada: restore feeding_claimed_by", slog.String("error", err.Error()))
 	}
 }
 
