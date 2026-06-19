@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/rutabageldev/ruby-core/compare/v0.18.0...v0.19.0) (2026-06-19)
+
+
+### Features
+
+* **ada:** clean slate at birth — force test pre-birth + wipe tracking on ada.born (ADR-0035) ([1465a79](https://github.com/rutabageldev/ruby-core/commit/1465a791d779a075a4a85f1be2e383fd4bd94c1d))
+* **ada:** clean slate at birth — force test pre-birth + wipe tracking on ada.born (ADR-0035) ([360d149](https://github.com/rutabageldev/ruby-core/commit/360d14922fd04da8b2d83ebcc261052e9f5fbb60))
+
 ## [0.18.0](https://github.com/rutabageldev/ruby-core/compare/v0.17.1...v0.18.0) (2026-06-19)
 
 
