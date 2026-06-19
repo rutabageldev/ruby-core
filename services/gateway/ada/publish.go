@@ -33,6 +33,7 @@ var eventRoutes = map[string]string{
 	"ada.config.bedtime":      schemas.AdaEventBedtimeConfig,
 	"ada.growth.log":          schemas.AdaEventGrowthLogged,
 	"ada.feeding.claimed":     schemas.AdaEventFeedingClaimed,
+	"ada.trends.query":        schemas.AdaEventTrendsQuery,
 	"ada.feeding.update":      schemas.AdaEventFeedingUpdate,
 	"ada.feeding.delete":      schemas.AdaEventFeedingDelete,
 	"ada.diaper.update":       schemas.AdaEventDiaperUpdate,

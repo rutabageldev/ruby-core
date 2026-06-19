@@ -1,10 +1,10 @@
 # Make Ada trustworthy end-to-end and safely validatable before birth
 
-* **Status:** Planned
+* **Status:** Complete
 * **Date:** 2026-06-18
 * **Project:** ruby-core
 * **Related ADRs:** ADR-0031 (test-data model), ADR-0032 (trends acquisition), ADR-0033 (projection integrity)
-* **Linked Plan:** PLAN-0018 … PLAN-0024 (one per effort; each created and committed on its own effort branch before that effort executes)
+* **Linked Plan:** PLAN-0018 … PLAN-0025 (one per effort, archived under docs/plans/archived/). Note: 0010.1 was already resolved on `main` by PR #72 before this roadmap landed.
 
 ---
 
@@ -42,7 +42,7 @@ Add `test BOOLEAN NOT NULL DEFAULT false` to every Ada table; persist the flag f
 
 Env-parameterized `make` targets: a seed target that writes a representative, fully `test`-flagged, ~14-month dataset aligned to a `DOB=` (and writes the matching HA `input_datetime.ada_test_dob`, `ada_live_test=on`, `ada_born=off`); and a guarded clear target that deletes only `test=true` rows (dry-run/count-first, `CONFIRM=yes`, prod-safety prompt, pre-delete snapshot). Includes a one-time guarded purge of pre-existing junk and a §4 reliability harness. This effort contains the only destructive operations and must not be bundled with feature delivery. Out of scope: automated/scheduled Postgres backups (ROADMAP-0011).
 
-### 0010.7 — Trends aggregation (#82, ADR-0032)
+### 0010.7 — Trends aggregation (#82, ADR-0032) — DONE (PLAN-0025)
 
 Request/response over the existing channel: `ada.trends.query {metric, view, period, request_id}` → boundary-aligned bucket computation → `sensor.ada_trends` echoing `request_id` + resolved params + `generated_at`. Out of scope: promotion to an HA WebSocket command (future, contract-compatible).
 

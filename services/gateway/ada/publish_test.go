@@ -20,6 +20,13 @@ func TestEventRoutesFeedingClaimed(t *testing.T) {
 	}
 }
 
+// TestEventRoutesTrendsQuery verifies the trends query event routes to its subject (#82).
+func TestEventRoutesTrendsQuery(t *testing.T) {
+	if got := eventRoutes["ada.trends.query"]; got != schemas.AdaEventTrendsQuery {
+		t.Errorf("ada.trends.query routes to %q, want %q", got, schemas.AdaEventTrendsQuery)
+	}
+}
+
 // TestEventRoutesEditDelete verifies all ten edit/delete write-path events route to
 // their subjects (#77/#78/#79).
 func TestEventRoutesEditDelete(t *testing.T) {
