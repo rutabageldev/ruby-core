@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0](https://github.com/rutabageldev/ruby-core/compare/v0.19.0...v0.20.0) (2026-06-19)
+
+
+### Features
+
+* **ada:** birth-watcher — snapshot (pg_dump) then nuke on ada.born (ADR-0036) ([fa8bf07](https://github.com/rutabageldev/ruby-core/commit/fa8bf0745df7b10c43c54f47bfc9ca067b07f57e))
+* **ada:** birth-watcher — snapshot then nuke on ada.born (ADR-0036) ([834984c](https://github.com/rutabageldev/ruby-core/commit/834984c1c2e8c35e8b288aa5cf399af288456602))
+
 ## [0.19.0](https://github.com/rutabageldev/ruby-core/compare/v0.18.0...v0.19.0) (2026-06-19)
 
 
