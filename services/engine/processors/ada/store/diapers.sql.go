@@ -11,15 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteAllDiapers = `-- name: DeleteAllDiapers :exec
-DELETE FROM diapers
-`
-
-func (q *Queries) DeleteAllDiapers(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteAllDiapers)
-	return err
-}
-
 const getLastDiaper = `-- name: GetLastDiaper :one
 SELECT timestamp, type FROM diapers
 WHERE deleted_at IS NULL

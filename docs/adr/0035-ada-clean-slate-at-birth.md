@@ -1,9 +1,9 @@
 # ADR-0035 - Ada clean slate at birth: pre-birth test marking and auto-clear on ada.born
 
-* **Status:** Accepted
+* **Status:** Accepted (decision 2 — the engine-side wipe — superseded by [ADR-0036](0036-ada-birth-watcher-snapshot-then-nuke.md))
 * **Date:** 2026-06-18
 * **Supersedes:** *(extends ADR-0031 test-data model)*
-* **Superseded by:** *(none)*
+* **Superseded by:** *(ADR-0036 replaces the engine-side birth wipe with a host watcher that snapshots first; the pre-birth `test=true` forcing and backfill in this ADR still stand)*
 
 ---
 

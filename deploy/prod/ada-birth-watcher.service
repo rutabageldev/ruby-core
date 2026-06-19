@@ -1,0 +1,30 @@
+# Ada birth-watcher (ADR-0036) — on the first ada.born, snapshot (pg_dump) the Ada
+# database then clear the pre-birth test data and restart the engine, validate, and
+# spin down. One-time install (needs sudo once, same pattern as the GitHub runner):
+#
+#   sudo cp /opt/ruby-core/deploy/prod/ada-birth-watcher.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ada-birth-watcher
+#   journalctl -u ada-birth-watcher -f      # watch it
+#
+# After the birth it exits cleanly and stays down (Restart=on-failure + a sentinel at
+# ~/.ada-birth-handled). To retire it entirely afterward: sudo systemctl disable --now
+# ada-birth-watcher.
+
+[Unit]
+Description=Ada birth-watcher — snapshot then clean-slate on ada.born (ADR-0036)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=primaryrutabaga
+WorkingDirectory=/opt/ruby-core
+Environment=ENV=prod
+ExecStart=/opt/ruby-core/scripts/ada-birth-watch.sh
+# Clean exit (birth handled, or sentinel present) => stays down. Crash => retry.
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

@@ -11,15 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteAllTummy = `-- name: DeleteAllTummy :exec
-DELETE FROM tummy_time_sessions
-`
-
-func (q *Queries) DeleteAllTummy(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteAllTummy)
-	return err
-}
-
 const getLast24hTummy = `-- name: GetLast24hTummy :many
 SELECT id, start_time, end_time, duration_s, logged_by
 FROM tummy_time_sessions

@@ -800,46 +800,18 @@ func (p *Processor) handleBornEvent(ctx context.Context, evt schemas.CloudEvent)
 	if err := p.q.UpsertProfile(ctx, toTimestamptz(birthAt)); err != nil {
 		return fmt.Errorf("ada: upsert profile: %w", err)
 	}
-
-	// Clean slate: wipe ALL pre-birth tracking data — nothing real can predate birth,
-	// so this is safe and catches both dashboard test data and API-seeded data that
-	// never carried a test flag (ADR-0035). Config (caretakers, bedtime, targets) is
-	// kept; the first-birth gate above means this only ever runs pre-birth.
-	cleared := p.clearTracking(ctx)
 	p.born.Store(true)
-	p.refreshAllSensors(ctx)
 
-	p.log.Info("ada: birth recorded — pre-birth tracking cleared, clean slate",
+	// The engine does NOT wipe pre-birth data here. The clean slate is performed by the
+	// host ada-birth-watcher, which snapshots (pg_dump) the database BEFORE deleting and
+	// then restarts this engine (ADR-0036). The engine only records the birth; pre-birth
+	// events were already forced test=true (ADR-0035), so the watcher's test=true clear
+	// removes the whole pre-birth slate.
+	p.log.Info("ada: birth recorded — clean slate handled by ada-birth-watcher",
 		slog.String("birth_at", birthAt.UTC().Format(time.RFC3339)),
 		slog.String("logged_by", d.LoggedBy),
-		slog.Bool("tracking_cleared", cleared),
 	)
 	return nil
-}
-
-// clearTracking hard-deletes all rows from the Ada tracking tables (feeding children
-// cascade). Config tables are untouched. Each table is best-effort: a failure is
-// logged and the rest proceed, so a single error never blocks recording the birth.
-// Returns whether all deletes succeeded.
-func (p *Processor) clearTracking(ctx context.Context) bool {
-	ok := true
-	deletes := []struct {
-		name string
-		fn   func(context.Context) error
-	}{
-		{"feedings", p.q.DeleteAllFeedings},
-		{"diapers", p.q.DeleteAllDiapers},
-		{"sleep", p.q.DeleteAllSleep},
-		{"tummy", p.q.DeleteAllTummy},
-		{"growth", p.q.DeleteAllGrowth},
-	}
-	for _, dl := range deletes {
-		if err := dl.fn(ctx); err != nil {
-			ok = false
-			p.log.Warn("ada: clear tracking failed", slog.String("table", dl.name), slog.String("error", err.Error()))
-		}
-	}
-	return ok
 }
 
 // ── People and channel handlers ───────────────────────────────────────────────
