@@ -8,6 +8,28 @@ import (
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 )
 
+func TestEventTestOrPreBirth(t *testing.T) {
+	var p Processor
+
+	// Pre-birth: every event is forced test, regardless of the payload flag (ADR-0035).
+	p.born.Store(false)
+	if !p.eventTestOrPreBirth(schemas.CloudEvent{Data: map[string]any{}}) {
+		t.Error("pre-birth, no flag: want test=true")
+	}
+	if !p.eventTestOrPreBirth(schemas.CloudEvent{Data: map[string]any{"test": false}}) {
+		t.Error("pre-birth, payload test=false: want test=true (forced)")
+	}
+
+	// Post-birth: honor the payload flag.
+	p.born.Store(true)
+	if p.eventTestOrPreBirth(schemas.CloudEvent{Data: map[string]any{}}) {
+		t.Error("post-birth, no flag: want test=false")
+	}
+	if !p.eventTestOrPreBirth(schemas.CloudEvent{Data: map[string]any{"test": true}}) {
+		t.Error("post-birth, payload test=true: want test=true")
+	}
+}
+
 func TestEventTest(t *testing.T) {
 	cases := []struct {
 		name string

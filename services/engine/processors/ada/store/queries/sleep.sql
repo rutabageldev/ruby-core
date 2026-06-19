@@ -72,3 +72,6 @@ WHERE id = @id AND deleted_at IS NULL;
 
 -- name: SoftDeleteSleepSession :exec
 UPDATE sleep_sessions SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;
+
+-- name: DeleteAllSleep :exec
+DELETE FROM sleep_sessions;

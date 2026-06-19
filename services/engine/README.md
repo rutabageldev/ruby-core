@@ -22,7 +22,7 @@ Four sensors carry a 24-hour rolling history array as their `entries[]` attribut
 
 When a caregiver claims a due feed (`ada.feeding.claimed`), the engine owns the claim lifecycle: it sets `input_boolean.ada_feeding_claimed` on and projects the claimer to `sensor.ada_feeding_claimed_by`, then clears both when the next feed is completed.
 
-The `ada.born` event persists Ada's birth datetime to the `ada_profile` table. The table is singleton-constrained (at most one row) and idempotent — repeated fires are silently ignored. `birth_at` is stored as a UTC timestamp and is available as a future query boundary for filtering pre-birth data.
+The `ada.born` event persists Ada's birth datetime to the singleton `ada_profile` table. On the **first** birth only (profile previously absent), the engine wipes all pre-birth tracking data — feeds/diapers/sleep/tummy/growth — so Ada's real record starts from a clean slate (ADR-0035); config (caretakers, bedtime, targets) is preserved, and a re-fired `ada.born` is a no-op. Relatedly, while not yet born the engine forces `test=true` on every event so pre-birth data is always selectable as test data regardless of the dashboard toggle.
 
 Recorded events can be corrected or removed via `ada.{feeding,diaper,sleep,tummy,growth}.update` (full-resolution replacement) and `ada.{...}.delete {id}` (soft-delete via `deleted_at`), each recomputing the derived sensors. Every row carries a `test BOOLEAN` marker (ADR-0031): test data behaves identically in every projection but is selectable for bulk teardown by the seed/clear tooling — see [docs/runbooks/ada-test-data.md](../../docs/runbooks/ada-test-data.md).
 

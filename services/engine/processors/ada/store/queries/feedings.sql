@@ -90,3 +90,8 @@ FROM feedings f
 LEFT JOIN feeding_bottle_detail d ON d.feeding_id = f.id
 WHERE f.deleted_at IS NULL
   AND f.timestamp >= @boundary;
+
+-- name: DeleteAllFeedings :exec
+-- Hard-delete every feeding (children cascade). Used by the first ada.born to
+-- clear the pre-birth slate (ADR-0035), and selectable for ongoing test teardown.
+DELETE FROM feedings;
