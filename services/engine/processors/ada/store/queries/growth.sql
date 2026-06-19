@@ -43,3 +43,6 @@ WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: SoftDeleteGrowthMeasurement :exec
 UPDATE growth_measurements SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: DeleteAllGrowth :exec
+DELETE FROM growth_measurements;

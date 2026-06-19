@@ -11,6 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteAllSleep = `-- name: DeleteAllSleep :exec
+DELETE FROM sleep_sessions
+`
+
+func (q *Queries) DeleteAllSleep(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deleteAllSleep)
+	return err
+}
+
 const getActiveSleepSession = `-- name: GetActiveSleepSession :one
 SELECT start_time FROM sleep_sessions
 WHERE end_time IS NULL AND deleted_at IS NULL

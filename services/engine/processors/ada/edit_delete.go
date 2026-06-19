@@ -26,6 +26,14 @@ func eventTest(evt schemas.CloudEvent) bool {
 	return t
 }
 
+// eventTestOrPreBirth is the test flag to persist for a new event: the payload flag,
+// OR forced true while Ada is not yet born (ADR-0035) — so every pre-birth event is
+// guaranteed test data regardless of the dashboard's live_test toggle, and the first
+// ada.born clears a complete clean slate.
+func (p *Processor) eventTestOrPreBirth(evt schemas.CloudEvent) bool {
+	return eventTest(evt) || !p.born.Load()
+}
+
 // parseUUID parses a dashboard-supplied id string into a pgtype.UUID.
 func parseUUID(s string) (pgtype.UUID, error) {
 	u, err := uuid.Parse(s)

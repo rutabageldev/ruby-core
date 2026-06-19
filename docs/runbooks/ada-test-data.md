@@ -62,6 +62,21 @@ Guards: dry-run unless `CONFIRM=yes`; `ENV=prod` additionally prompts for the da
 snapshot is taken before any delete; every statement is `WHERE test = true`, so real data is never
 touched. The prod engine is restarted afterward to recompute sensors.
 
+## Birth clean slate (automatic, ADR-0035)
+
+Pre-birth, the engine **forces `test=true` on every Ada event** (regardless of the dashboard's
+`live_test` toggle), and the `000007` migration backfilled all pre-existing rows to `test=true`.
+This keeps the `test` flag accurate so the operator clear above is comprehensive during testing.
+
+The **first** `ada.born` (when no `ada_profile` row exists yet) automatically **deletes ALL Ada
+tracking data** — feeds, diapers, sleep, tummy, growth — not only `test=true` rows, so it also
+catches any API-seeded data that never carried a flag. **Config is preserved** (caretakers, bedtime/
+boundary, tummy target, alert threshold). Ada's real record starts from a clean slate. A re-fired
+`ada.born` (profile already present) is a no-op and never clears anything.
+
+This clear is **irreversible** and the engine cannot snapshot. If you want to keep a copy of the
+pre-birth test dataset, run `make ada-db-snapshot ENV=prod` **before** confirming the birth.
+
 ## One-time junk purge (pre-existing non-test rows)
 
 Junk created before the `test` column exists is `test = false`, so the clear target will not remove

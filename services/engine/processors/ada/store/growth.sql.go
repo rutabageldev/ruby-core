@@ -11,6 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteAllGrowth = `-- name: DeleteAllGrowth :exec
+DELETE FROM growth_measurements
+`
+
+func (q *Queries) DeleteAllGrowth(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deleteAllGrowth)
+	return err
+}
+
 const getAllGrowthMeasurements = `-- name: GetAllGrowthMeasurements :many
 SELECT id, measured_at, weight_oz, length_in, head_circumference_in,
        source, weight_pct, length_pct, head_pct, logged_by

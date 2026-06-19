@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -101,6 +102,9 @@ type Processor struct {
 	lastFullRefresh time.Time // time of last full sensor restore (for 4h safety net)
 	alertMu         sync.Mutex
 	alertTimer      *time.Timer
+	// born is true once Ada's birth profile exists. While false (pre-birth), every
+	// event is forced test=true; the first ada.born clears the test slate (ADR-0035).
+	born atomic.Bool
 }
 
 // compile-time interface check
@@ -129,6 +133,12 @@ func (p *Processor) Subscriptions() []string {
 func (p *Processor) Initialize(cfg processor.Config) error {
 	p.q = store.New(cfg.Pool)
 	p.pool = cfg.Pool
+
+	// Determine born state from the profile so pre-birth events are forced test=true
+	// (ADR-0035). Any error (incl. no rows) is treated as not-born.
+	if _, err := p.q.GetProfile(context.Background()); err == nil {
+		p.born.Store(true)
+	}
 	p.ha = adaha.NewClient(cfg.HA.URL, cfg.HA.Token, p.log)
 	// Assume HA is connected at startup; gateway.health will correct if not.
 	p.lastHAConnected = true
@@ -309,7 +319,7 @@ func (p *Processor) handleFeedingEnded(ctx context.Context, evt schemas.CloudEve
 		Timestamp: toTimestamptz(sessionStart),
 		Source:    source,
 		LoggedBy:  d.LoggedBy,
-		Test:      eventTest(evt),
+		Test:      p.eventTestOrPreBirth(evt),
 	})
 	if err != nil {
 		return fmt.Errorf("ada: insert feeding_ended: %w", err)
@@ -397,7 +407,7 @@ func (p *Processor) handleFeedingLogged(ctx context.Context, evt schemas.CloudEv
 		Timestamp: toTimestamptz(startTime),
 		Source:    source,
 		LoggedBy:  d.LoggedBy,
-		Test:      eventTest(evt),
+		Test:      p.eventTestOrPreBirth(evt),
 	})
 	if err != nil {
 		return fmt.Errorf("ada: insert feeding_logged: %w", err)
@@ -442,7 +452,7 @@ func (p *Processor) handleFeedingLoggedPast(ctx context.Context, evt schemas.Clo
 		Timestamp: toTimestamptz(startTime),
 		Source:    source,
 		LoggedBy:  d.LoggedBy,
-		Test:      eventTest(evt),
+		Test:      p.eventTestOrPreBirth(evt),
 	})
 	if err != nil {
 		return fmt.Errorf("ada: insert feeding_logged_past: %w", err)
@@ -624,7 +634,7 @@ func (p *Processor) handleDiaperLogged(ctx context.Context, evt schemas.CloudEve
 		Timestamp: toTimestamptz(ts),
 		Type:      d.Type,
 		LoggedBy:  d.LoggedBy,
-		Test:      eventTest(evt),
+		Test:      p.eventTestOrPreBirth(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert diaper: %w", err)
 	}
@@ -657,7 +667,7 @@ func (p *Processor) handleSleepStarted(ctx context.Context, evt schemas.CloudEve
 		StartTime: toTimestamptz(startTime),
 		SleepType: sleepType,
 		LoggedBy:  d.LoggedBy,
-		Test:      eventTest(evt),
+		Test:      p.eventTestOrPreBirth(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert sleep start: %w", err)
 	}
@@ -712,7 +722,7 @@ func (p *Processor) handleSleepLogged(ctx context.Context, evt schemas.CloudEven
 		EndTime:   toTimestamptz(endTime),
 		SleepType: sleepType,
 		LoggedBy:  d.LoggedBy,
-		Test:      eventTest(evt),
+		Test:      p.eventTestOrPreBirth(evt),
 	}); err != nil {
 		return fmt.Errorf("ada: insert sleep session: %w", err)
 	}
@@ -728,7 +738,7 @@ func (p *Processor) handleTummyEnded(ctx context.Context, evt schemas.CloudEvent
 	if err := remarshal(evt.Data, &d); err != nil {
 		return fmt.Errorf("ada: decode tummy_ended: %w", err)
 	}
-	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy, eventTest(evt))
+	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy, p.eventTestOrPreBirth(evt))
 }
 
 func (p *Processor) handleTummyLogged(ctx context.Context, evt schemas.CloudEvent) error {
@@ -736,7 +746,7 @@ func (p *Processor) handleTummyLogged(ctx context.Context, evt schemas.CloudEven
 	if err := remarshal(evt.Data, &d); err != nil {
 		return fmt.Errorf("ada: decode tummy_logged: %w", err)
 	}
-	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy, eventTest(evt))
+	return p.insertTummyAndPush(ctx, d.StartTime, d.EndTime, d.DurationS, d.LoggedBy, p.eventTestOrPreBirth(evt))
 }
 
 func (p *Processor) insertTummyAndPush(ctx context.Context, startStr, endStr string, durationS int, loggedBy string, test bool) error {
@@ -777,15 +787,59 @@ func (p *Processor) handleBornEvent(ctx context.Context, evt schemas.CloudEvent)
 		return fmt.Errorf("ada: parse birth_at %q: %w", d.BirthAt, err)
 	}
 
+	// First-birth gate: if a profile already exists this is a re-fire — already born,
+	// never clear (ADR-0035). Only the absent→set transition triggers the clean slate.
+	if _, err := p.q.GetProfile(ctx); err == nil {
+		p.born.Store(true)
+		p.log.Info("ada: born event ignored — already born")
+		return nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("ada: check profile for born: %w", err)
+	}
+
 	if err := p.q.UpsertProfile(ctx, toTimestamptz(birthAt)); err != nil {
 		return fmt.Errorf("ada: upsert profile: %w", err)
 	}
 
-	p.log.Info("ada: birth profile saved",
+	// Clean slate: wipe ALL pre-birth tracking data — nothing real can predate birth,
+	// so this is safe and catches both dashboard test data and API-seeded data that
+	// never carried a test flag (ADR-0035). Config (caretakers, bedtime, targets) is
+	// kept; the first-birth gate above means this only ever runs pre-birth.
+	cleared := p.clearTracking(ctx)
+	p.born.Store(true)
+	p.refreshAllSensors(ctx)
+
+	p.log.Info("ada: birth recorded — pre-birth tracking cleared, clean slate",
 		slog.String("birth_at", birthAt.UTC().Format(time.RFC3339)),
 		slog.String("logged_by", d.LoggedBy),
+		slog.Bool("tracking_cleared", cleared),
 	)
 	return nil
+}
+
+// clearTracking hard-deletes all rows from the Ada tracking tables (feeding children
+// cascade). Config tables are untouched. Each table is best-effort: a failure is
+// logged and the rest proceed, so a single error never blocks recording the birth.
+// Returns whether all deletes succeeded.
+func (p *Processor) clearTracking(ctx context.Context) bool {
+	ok := true
+	deletes := []struct {
+		name string
+		fn   func(context.Context) error
+	}{
+		{"feedings", p.q.DeleteAllFeedings},
+		{"diapers", p.q.DeleteAllDiapers},
+		{"sleep", p.q.DeleteAllSleep},
+		{"tummy", p.q.DeleteAllTummy},
+		{"growth", p.q.DeleteAllGrowth},
+	}
+	for _, dl := range deletes {
+		if err := dl.fn(ctx); err != nil {
+			ok = false
+			p.log.Warn("ada: clear tracking failed", slog.String("table", dl.name), slog.String("error", err.Error()))
+		}
+	}
+	return ok
 }
 
 // ── People and channel handlers ───────────────────────────────────────────────
