@@ -10,16 +10,20 @@ import (
 	"github.com/primaryrutabaga/ruby-core/pkg/config"
 )
 
-// EnsureHAEventsStream creates the HA_EVENTS JetStream stream if it does not already exist.
+// EnsureHAEventsStream creates or reconciles the HA_EVENTS JetStream stream.
 // The stream captures all ha.events.> subjects published by the gateway and adapters.
-// No MaxAge or MaxMsgs limit is set — messages are retained until storage is exhausted.
-// This ensures original payloads remain available for DLQ routing during the full BackOff window.
+// Bounded by both age and bytes (ADR-0034): the age limit keeps original payloads
+// available well past the consumer retry/DLQ-routing window, and the byte cap is a hard
+// ceiling so this high-volume firehose can never exhaust the JetStream store — its prior
+// unbounded retention filled the account and starved the discard=new KV buckets.
 func EnsureHAEventsStream(js nats.JetStreamContext) error {
 	return ensureStream(js, &nats.StreamConfig{
 		Name:      "HA_EVENTS",
 		Subjects:  []string{"ha.events.>"},
 		Storage:   nats.FileStorage,
 		Retention: nats.LimitsPolicy,
+		MaxAge:    config.DefaultHAEventsMaxAge,
+		MaxBytes:  config.MaxBytesHAEvents,
 	})
 }
 
@@ -33,6 +37,7 @@ func EnsureDLQStream(js nats.JetStreamContext) error {
 		Storage:   nats.FileStorage,
 		Retention: nats.LimitsPolicy,
 		MaxAge:    config.DefaultDLQMaxAge,
+		MaxBytes:  config.MaxBytesDLQ,
 	})
 }
 
@@ -55,6 +60,7 @@ func EnsureAuditStream(js nats.JetStreamContext) error {
 		Storage:   nats.FileStorage,
 		Retention: nats.LimitsPolicy,
 		MaxAge:    config.DefaultAuditMaxAge,
+		MaxBytes:  config.MaxBytesAudit,
 	})
 }
 
@@ -68,6 +74,7 @@ func EnsureCommandsStream(js nats.JetStreamContext) error {
 		Storage:   nats.FileStorage,
 		Retention: nats.LimitsPolicy,
 		MaxAge:    config.DefaultCommandsMaxAge,
+		MaxBytes:  config.MaxBytesCommands,
 	})
 }
 
@@ -81,20 +88,40 @@ func EnsurePresenceStream(js nats.JetStreamContext) error {
 		Storage:   nats.FileStorage,
 		Retention: nats.LimitsPolicy,
 		MaxAge:    24 * time.Hour,
+		MaxBytes:  config.MaxBytesPresence,
 	})
 }
 
-// ensureStream creates a stream only if it does not already exist. Idempotent.
+// ensureStream creates a stream if absent, or reconciles its mutable retention limits
+// if it already exists with drifted config. Idempotent. Reconciliation is what lets a
+// limit change in code (e.g. a new MaxAge/MaxBytes) actually take effect on an existing
+// deployment instead of being silently ignored — the gap that let HA_EVENTS grow
+// unbounded after its limits were assumed but never applied (ADR-0034).
 func ensureStream(js nats.JetStreamContext, cfg *nats.StreamConfig) error {
-	_, err := js.StreamInfo(cfg.Name)
-	if err == nil {
+	info, err := js.StreamInfo(cfg.Name)
+	if errors.Is(err, nats.ErrStreamNotFound) {
+		if _, err = js.AddStream(cfg); err != nil {
+			return fmt.Errorf("add stream %q: %w", cfg.Name, err)
+		}
 		return nil
 	}
-	if !errors.Is(err, nats.ErrStreamNotFound) {
+	if err != nil {
 		return fmt.Errorf("stream info %q: %w", cfg.Name, err)
 	}
-	if _, err = js.AddStream(cfg); err != nil {
-		return fmt.Errorf("add stream %q: %w", cfg.Name, err)
+	// Only retention limits are reconciled — these are safe to UpdateStream. Immutable
+	// fields (name, storage, retention policy, subjects) are never changed here.
+	if streamLimitsDrifted(&info.Config, cfg) {
+		if _, err = js.UpdateStream(cfg); err != nil {
+			return fmt.Errorf("update stream %q: %w", cfg.Name, err)
+		}
 	}
 	return nil
+}
+
+// streamLimitsDrifted reports whether the live stream's mutable retention limits differ
+// from the desired config. Pure, so the reconcile trigger is unit-testable.
+func streamLimitsDrifted(existing, desired *nats.StreamConfig) bool {
+	return existing.MaxAge != desired.MaxAge ||
+		existing.MaxBytes != desired.MaxBytes ||
+		existing.MaxMsgs != desired.MaxMsgs
 }

@@ -42,6 +42,25 @@ const (
 	// Stale command messages (push notifications) are not worth replaying after this window.
 	DefaultCommandsMaxAge = 1 * time.Hour
 
+	// DefaultHAEventsMaxAge bounds the HA_EVENTS firehose (ADR-0034). It must exceed
+	// the maximum consumer retry window (MaxDeliver × AckWait + BackOff ≈ a few minutes)
+	// so original payloads stay available for DLQ routing, and comfortably covers
+	// reconciliation/replay after an outage. Previously unbounded, the stream grew until
+	// it exhausted the JetStream store and starved the discard=new KV buckets.
+	DefaultHAEventsMaxAge = 48 * time.Hour
+)
+
+// Per-stream byte caps (ADR-0034) — defense in depth so no single stream can exhaust
+// the JetStream account store and starve the discard=new KV buckets. Each stream uses
+// discard=old, so it self-evicts at its cap rather than failing new writes; the sum
+// sits under the server's max_file_store. Age limits remain the primary bound.
+const (
+	MaxBytesHAEvents int64 = 512 * 1024 * 1024 // 512 MiB
+	MaxBytesAudit    int64 = 256 * 1024 * 1024 // 256 MiB
+	MaxBytesDLQ      int64 = 64 * 1024 * 1024  // 64 MiB
+	MaxBytesCommands int64 = 16 * 1024 * 1024  // 16 MiB
+	MaxBytesPresence int64 = 32 * 1024 * 1024  // 32 MiB
+
 	// Audit-sink consumer defaults — lower throughput than the engine consumer
 	// because audit events are emitted only on critical actions (low volume).
 
