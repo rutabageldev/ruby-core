@@ -1,6 +1,6 @@
 # PLAN-0024 - Bound JetStream stream retention + reconcile (JetStream-full incident)
 
-* **Status:** In Progress
+* **Status:** Complete
 * **Date:** 2026-06-18
 * **Project:** ruby-core
 * **Roadmap Item:** none (operational reliability fix)
