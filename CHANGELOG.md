@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.1](https://github.com/rutabageldev/ruby-core/compare/v0.17.0...v0.17.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **natsx:** bound JetStream stream retention + reconcile existing streams (ADR-0034) ([c1a175a](https://github.com/rutabageldev/ruby-core/commit/c1a175a7920666ef35ff9101e084c57d57d96158))
+* **natsx:** bound JetStream stream retention and reconcile existing streams (ADR-0034) ([8f03577](https://github.com/rutabageldev/ruby-core/commit/8f035777edf4a1725302d19d0a88c92408dbbdd9))
+
 ## [0.17.0](https://github.com/rutabageldev/ruby-core/compare/v0.16.1...v0.17.0) (2026-06-18)
 
 
