@@ -22,6 +22,7 @@ const (
 	AdaEventBedtimeConfig       = "ha.events.ada.config_bedtime"
 	AdaEventGrowthLogged        = "ha.events.ada.growth_logged"
 	AdaEventFeedingClaimed      = "ha.events.ada.feeding_claimed"
+	AdaEventTrendsQuery         = "ha.events.ada.trends_query"
 
 	// Edit/delete (#77, #78, #79). Updates are full-resolution replacements.
 	AdaEventFeedingUpdate = "ha.events.ada.feeding_updated"
@@ -270,6 +271,17 @@ type AdaFeedingClaimedData struct {
 	GotItUser string `json:"got_it_user"`
 	Timestamp string `json:"timestamp,omitempty"`
 	LoggedBy  string `json:"logged_by,omitempty"`
+}
+
+// AdaTrendsQueryData is the request for a bucketed activity aggregation (#82, ADR-0032).
+// The dashboard mints an opaque RequestID per query; ruby-core echoes it in
+// sensor.ada_trends so the dashboard renders only the response to its latest request.
+// Metric ∈ diapers|feeding|sleep|tummy; View depends on Metric; Period ∈ week|month|year.
+type AdaTrendsQueryData struct {
+	Metric    string `json:"metric"`
+	View      string `json:"view"`
+	Period    string `json:"period"`
+	RequestID string `json:"request_id"`
 }
 
 // AdaGrowthLoggedData is the payload for a logged growth measurement.

@@ -250,6 +250,8 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleGrowthUpdate(ctx, evt)
 	case schemas.AdaEventGrowthDelete:
 		return p.handleGrowthDelete(ctx, evt)
+	case schemas.AdaEventTrendsQuery:
+		return p.handleTrendsQuery(ctx, evt)
 	case "ha.events.input_number.ada_alert_threshold_h":
 		return p.handleThresholdChange(ctx, evt)
 	default:

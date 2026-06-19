@@ -26,6 +26,8 @@ The `ada.born` event persists Ada's birth datetime to the `ada_profile` table. T
 
 Recorded events can be corrected or removed via `ada.{feeding,diaper,sleep,tummy,growth}.update` (full-resolution replacement) and `ada.{...}.delete {id}` (soft-delete via `deleted_at`), each recomputing the derived sensors. Every row carries a `test BOOLEAN` marker (ADR-0031): test data behaves identically in every projection but is selectable for bulk teardown by the seed/clear tooling — see [docs/runbooks/ada-test-data.md](../../docs/runbooks/ada-test-data.md).
 
+The Trends view is served by request/response (ADR-0032): the dashboard fires `ada.trends.query {metric, view, period, request_id}`; the engine computes boundary-aligned buckets (week 7×1-day, month 4×7-day, year 12×~30-day) and publishes the result — `{request_id, metric, view, period, generated_at, buckets, totals, grand, prevGrand}` — to `sensor.ada_trends`, echoing the `request_id` so the dashboard renders only its latest request.
+
 ## Configuration
 
 | Variable | Default | Notes |
