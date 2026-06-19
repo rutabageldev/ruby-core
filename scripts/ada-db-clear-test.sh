@@ -35,7 +35,7 @@ if [[ "${CONFIRM:-}" != "yes" ]]; then
     exit 0
 fi
 
-if [[ "${ENV}" == "prod" ]]; then
+if [[ "${ENV}" == "prod" && "${ASSUME_YES:-}" != "1" ]]; then
     echo ""
     echo "!! PRODUCTION CLEAR !! This permanently deletes test=true Ada rows from"
     echo "   ${PG_DBNAME}@${PG_HOST}. Real (test=false) data is NOT affected."
@@ -44,6 +44,8 @@ if [[ "${ENV}" == "prod" ]]; then
         echo "aborted (input did not match)"
         exit 1
     fi
+elif [[ "${ENV}" == "prod" ]]; then
+    echo "ASSUME_YES=1 — skipping the prod confirmation prompt (non-interactive automation)."
 fi
 
 echo "=== Pre-delete snapshot ==="

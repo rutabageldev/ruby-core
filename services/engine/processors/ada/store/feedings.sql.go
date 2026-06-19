@@ -41,17 +41,6 @@ func (q *Queries) AddFeedingBottleDetailAmounts(ctx context.Context, arg *AddFee
 	return err
 }
 
-const deleteAllFeedings = `-- name: DeleteAllFeedings :exec
-DELETE FROM feedings
-`
-
-// Hard-delete every feeding (children cascade). Used by the first ada.born to
-// clear the pre-birth slate (ADR-0035), and selectable for ongoing test teardown.
-func (q *Queries) DeleteAllFeedings(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteAllFeedings)
-	return err
-}
-
 const deleteFeedingBottleDetail = `-- name: DeleteFeedingBottleDetail :exec
 DELETE FROM feeding_bottle_detail WHERE feeding_id = $1
 `

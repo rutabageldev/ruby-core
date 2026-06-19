@@ -26,6 +26,3 @@ WHERE id = @id AND deleted_at IS NULL;
 
 -- name: SoftDeleteTummySession :exec
 UPDATE tummy_time_sessions SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;
-
--- name: DeleteAllTummy :exec
-DELETE FROM tummy_time_sessions;

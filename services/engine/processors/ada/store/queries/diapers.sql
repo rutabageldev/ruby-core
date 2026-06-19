@@ -32,6 +32,3 @@ WHERE id = @id AND deleted_at IS NULL;
 
 -- name: SoftDeleteDiaper :exec
 UPDATE diapers SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;
-
--- name: DeleteAllDiapers :exec
-DELETE FROM diapers;

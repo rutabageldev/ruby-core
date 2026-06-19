@@ -62,20 +62,33 @@ Guards: dry-run unless `CONFIRM=yes`; `ENV=prod` additionally prompts for the da
 snapshot is taken before any delete; every statement is `WHERE test = true`, so real data is never
 touched. The prod engine is restarted afterward to recompute sensors.
 
-## Birth clean slate (automatic, ADR-0035)
+## Birth clean slate (automatic, ADR-0035 + ADR-0036)
 
 Pre-birth, the engine **forces `test=true` on every Ada event** (regardless of the dashboard's
-`live_test` toggle), and the `000007` migration backfilled all pre-existing rows to `test=true`.
-This keeps the `test` flag accurate so the operator clear above is comprehensive during testing.
+`live_test` toggle), and the `000007` migration backfilled all pre-existing rows to `test=true` — so
+the entire pre-birth dataset is `test=true`.
 
-The **first** `ada.born` (when no `ada_profile` row exists yet) automatically **deletes ALL Ada
-tracking data** — feeds, diapers, sleep, tummy, growth — not only `test=true` rows, so it also
-catches any API-seeded data that never carried a flag. **Config is preserved** (caretakers, bedtime/
-boundary, tummy target, alert threshold). Ada's real record starts from a clean slate. A re-fired
-`ada.born` (profile already present) is a no-op and never clears anything.
+On the first `ada.born`, the **`ada-birth-watcher`** (a host service) automatically runs the
+existing snapshot-then-nuke: **`pg_dump` the database first** (real backup, `make ada-db-snapshot`),
+then clear the `test=true` rows, then restart the engine. It **validates** the result (snapshot
+file present; zero `test=true` rows remain; engine running) before declaring success, retrying if
+not, and then **spins itself down** (a sentinel at `~/.ada-birth-handled`) so no later `ada.born`
+can ever trigger a second nuke. **Config is preserved** (caretakers, bedtime/boundary, tummy target,
+alert threshold). The engine itself no longer wipes — it only records the birth profile.
 
-This clear is **irreversible** and the engine cannot snapshot. If you want to keep a copy of the
-pre-birth test dataset, run `make ada-db-snapshot ENV=prod` **before** confirming the birth.
+**No birth-time action is required.** The only prerequisite is a one-time install of the watcher
+(see `deploy/prod/ada-birth-watcher.service`):
+
+```bash
+sudo cp /opt/ruby-core/deploy/prod/ada-birth-watcher.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ada-birth-watcher
+journalctl -u ada-birth-watcher -f      # watch it
+```
+
+Because the engine no longer wipes, **the watcher must be installed before go-live** — without it,
+no birth clean-slate happens. The snapshot it takes is the recovery path (the clear is otherwise
+irreversible).
 
 ## One-time junk purge (pre-existing non-test rows)
 
