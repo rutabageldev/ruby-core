@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0](https://github.com/rutabageldev/ruby-core/compare/v0.17.1...v0.18.0) (2026-06-19)
+
+
+### Features
+
+* **ada:** trends aggregation via ada.trends.query -&gt; sensor.ada_trends ([#82](https://github.com/rutabageldev/ruby-core/issues/82), ADR-0032) ([0b01b48](https://github.com/rutabageldev/ruby-core/commit/0b01b48e83a8922f7893441d45e016ca344baf29))
+* **ada:** Trends aggregation via ada.trends.query -&gt; sensor.ada_trends (ROADMAP-0010.7, [#82](https://github.com/rutabageldev/ruby-core/issues/82)) ([8c364d1](https://github.com/rutabageldev/ruby-core/commit/8c364d1c562793e49c4cf3e097a98146e2e3d0df))
+
 ## [0.17.1](https://github.com/rutabageldev/ruby-core/compare/v0.17.0...v0.17.1) (2026-06-19)
 
 
