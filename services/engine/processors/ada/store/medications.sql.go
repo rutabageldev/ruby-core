@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countGivenForRoutine = `-- name: CountGivenForRoutine :one
+
+SELECT count(*)::int FROM medication_events
+WHERE routine_id = $1 AND status = 'given' AND deleted_at IS NULL
+`
+
+// ── Server-owned computations (ROADMAP-0011 effort 0011.3) ────────────────────
+// Total given doses for a routine (drives max_doses auto-complete; not windowed).
+func (q *Queries) CountGivenForRoutine(ctx context.Context, routineID pgtype.Text) (int32, error) {
+	row := q.db.QueryRow(ctx, countGivenForRoutine, routineID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const endMedicationSeries = `-- name: EndMedicationSeries :exec
 UPDATE medication_temp_series
 SET status = $1, ended_reason = $2
@@ -26,6 +41,19 @@ type EndMedicationSeriesParams struct {
 func (q *Queries) EndMedicationSeries(ctx context.Context, arg *EndMedicationSeriesParams) error {
 	_, err := q.db.Exec(ctx, endMedicationSeries, arg.Status, arg.EndedReason, arg.ID)
 	return err
+}
+
+const getLastGivenForMedication = `-- name: GetLastGivenForMedication :one
+SELECT timestamp FROM medication_events
+WHERE medication_id = $1 AND status = 'given' AND deleted_at IS NULL
+ORDER BY timestamp DESC LIMIT 1
+`
+
+func (q *Queries) GetLastGivenForMedication(ctx context.Context, medicationID string) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLastGivenForMedication, medicationID)
+	var timestamp pgtype.Timestamptz
+	err := row.Scan(&timestamp)
+	return timestamp, err
 }
 
 const insertMedicationEvent = `-- name: InsertMedicationEvent :exec
@@ -325,6 +353,20 @@ func (q *Queries) ListRecentMedicationEvents(ctx context.Context, since pgtype.T
 		return nil, err
 	}
 	return items, nil
+}
+
+const setRoutineStatus = `-- name: SetRoutineStatus :exec
+UPDATE medication_routines SET status = $1 WHERE id = $2 AND deleted_at IS NULL
+`
+
+type SetRoutineStatusParams struct {
+	Status string
+	ID     string
+}
+
+func (q *Queries) SetRoutineStatus(ctx context.Context, arg *SetRoutineStatusParams) error {
+	_, err := q.db.Exec(ctx, setRoutineStatus, arg.Status, arg.ID)
+	return err
 }
 
 const softDeleteMedication = `-- name: SoftDeleteMedication :exec

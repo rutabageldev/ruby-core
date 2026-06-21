@@ -114,3 +114,18 @@ SELECT id, medication_id, interval_hours, anchor_dose_id, status, ended_reason
 FROM medication_temp_series
 WHERE deleted_at IS NULL AND status = 'active'
 ORDER BY created_at;
+
+-- ── Server-owned computations (ROADMAP-0011 effort 0011.3) ────────────────────
+
+-- name: CountGivenForRoutine :one
+-- Total given doses for a routine (drives max_doses auto-complete; not windowed).
+SELECT count(*)::int FROM medication_events
+WHERE routine_id = @routine_id AND status = 'given' AND deleted_at IS NULL;
+
+-- name: SetRoutineStatus :exec
+UPDATE medication_routines SET status = @status WHERE id = @id AND deleted_at IS NULL;
+
+-- name: GetLastGivenForMedication :one
+SELECT timestamp FROM medication_events
+WHERE medication_id = @medication_id AND status = 'given' AND deleted_at IS NULL
+ORDER BY timestamp DESC LIMIT 1;

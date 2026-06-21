@@ -137,6 +137,8 @@ func (p *Processor) handleMedicationRoutineDelete(ctx context.Context, evt schem
 
 // medicationItem mirrors the adaMeds.ts Medication type so the dashboard read-seam
 // repoint is a pure binding swap. Nullable safety limits stay null, never zero.
+// The server-owned guard values (ADR-0038) ride along as absolute timestamps/counts;
+// the dashboard derives the live "unsafe" flag from earliest_safe vs. its own clock.
 type medicationItem struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
@@ -145,6 +147,9 @@ type medicationItem struct {
 	MinIntervalHours *float64 `json:"min_interval_hours"`
 	MaxPer24h        *int     `json:"max_per_24h"`
 	Active           bool     `json:"active"`
+	LastGiven        *string  `json:"last_given,omitempty"`    // RFC3339, most recent given dose
+	EarliestSafe     *string  `json:"earliest_safe,omitempty"` // RFC3339, last_given + min_interval
+	DosesIn24h       *int     `json:"doses_in_24h,omitempty"`  // count in (now-24h, now]
 }
 
 // routineEnd mirrors the nested {type, value?} end rule.
@@ -153,7 +158,9 @@ type routineEnd struct {
 	Value any    `json:"value,omitempty"`
 }
 
-// routineItem mirrors the adaMeds.ts Routine type.
+// routineItem mirrors the adaMeds.ts Routine type. next_due is the server-computed
+// due time for an interval routine (last given + interval, or now if none); fixed
+// routines schedule by fixed_times and carry no single next_due.
 type routineItem struct {
 	ID            string     `json:"id"`
 	MedicationID  string     `json:"medication_id"`
@@ -163,6 +170,7 @@ type routineItem struct {
 	IntervalHours *float64   `json:"interval_hours"`
 	End           routineEnd `json:"end"`
 	Status        string     `json:"status"`
+	NextDue       *string    `json:"next_due,omitempty"`
 }
 
 // pushMedicationSensors re-projects the registry and routine sensors. Called after
@@ -179,9 +187,19 @@ func (p *Processor) pushMedications(ctx context.Context) {
 		p.log.Warn("ada: list medications", slog.String("error", err.Error()))
 		return
 	}
+	// Given doses in the last 24h (across meds) for the rolling-24h ceiling.
+	now := time.Now()
+	givenByMed := map[string][]time.Time{}
+	if recent, err := p.q.ListRecentMedicationEvents(ctx, pgtype.Timestamptz{Time: now.Add(-24 * medHour).UTC(), Valid: true}); err == nil {
+		for _, e := range recent {
+			if e.Status == "given" {
+				givenByMed[e.MedicationID] = append(givenByMed[e.MedicationID], e.Timestamp.Time)
+			}
+		}
+	}
 	items := make([]medicationItem, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, medicationItem{
+		item := medicationItem{
 			ID:               r.ID,
 			Name:             r.Name,
 			Route:            r.Route,
@@ -189,7 +207,22 @@ func (p *Processor) pushMedications(ctx context.Context) {
 			MinIntervalHours: numericToFloatPtr(r.MinIntervalHours),
 			MaxPer24h:        int4ToIntPtr(r.MaxPer24h),
 			Active:           r.Active,
-		})
+		}
+		// Guard (ADR-0038): last given (any age) + earliest safe; doses-in-24h only
+		// when a ceiling is set, matching computeGuard.
+		if lg, err := p.q.GetLastGivenForMedication(ctx, r.ID); err == nil && lg.Valid {
+			s := lg.Time.UTC().Format(time.RFC3339)
+			item.LastGiven = &s
+			if min := numericToFloatPtr(r.MinIntervalHours); min != nil && *min > 0 {
+				es := earliestSafe(lg.Time, *min).UTC().Format(time.RFC3339)
+				item.EarliestSafe = &es
+			}
+		}
+		if item.MaxPer24h != nil {
+			d := dosesInRolling24h(givenByMed[r.ID], now)
+			item.DosesIn24h = &d
+		}
+		items = append(items, item)
 	}
 	attrs := map[string]any{"items": items, "last_updated": time.Now().UTC().Format(time.RFC3339)}
 	if err := p.ha.PushState(ctx, sensorMedications, strconv.Itoa(len(items)), attrs); err != nil {
@@ -203,13 +236,19 @@ func (p *Processor) pushMedRoutines(ctx context.Context) {
 		p.log.Warn("ada: list medication routines", slog.String("error", err.Error()))
 		return
 	}
+	// Recent events to compute interval next_due (last given for the routine).
+	now := time.Now()
+	var events []*store.ListRecentMedicationEventsRow
+	if evs, err := p.q.ListRecentMedicationEvents(ctx, pgtype.Timestamptz{Time: now.Add(-48 * medHour).UTC(), Valid: true}); err == nil {
+		events = evs
+	}
 	items := make([]routineItem, 0, len(rows))
 	for _, r := range rows {
 		ft := r.FixedTimes
 		if ft == nil {
 			ft = []string{}
 		}
-		items = append(items, routineItem{
+		item := routineItem{
 			ID:            r.ID,
 			MedicationID:  r.MedicationID,
 			DoseAmount:    numericToFloat(r.DoseAmount),
@@ -218,7 +257,16 @@ func (p *Processor) pushMedRoutines(ctx context.Context) {
 			IntervalHours: numericToFloatPtr(r.IntervalHours),
 			End:           routineEnd{Type: r.EndType, Value: endValueParse(r.EndType, r.EndValue.String)},
 			Status:        r.Status,
-		})
+		}
+		if r.ScheduleType == "interval" && r.Status != "completed" {
+			nd := now // computeDue: an interval routine with no prior dose is due now
+			if last := lastGivenForRoutine(events, r.ID); last != nil {
+				nd = last.Timestamp.Time.Add(time.Duration(numericToFloat(r.IntervalHours) * float64(medHour)))
+			}
+			s := nd.UTC().Format(time.RFC3339)
+			item.NextDue = &s
+		}
+		items = append(items, item)
 	}
 	attrs := map[string]any{"items": items, "last_updated": time.Now().UTC().Format(time.RFC3339)}
 	if err := p.ha.PushState(ctx, sensorMedRoutines, strconv.Itoa(len(items)), attrs); err != nil {
