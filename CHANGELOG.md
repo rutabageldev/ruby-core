@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.0](https://github.com/rutabageldev/ruby-core/compare/v0.20.0...v0.21.0) (2026-06-21)
+
+
+### Features
+
+* **ada:** medications schema + registry/routines CRUD (ROADMAP-0011.1) ([63bd1ad](https://github.com/rutabageldev/ruby-core/commit/63bd1ad1cf822863fd2f6f2743cfd30775f1ff72))
+* **ada:** medications schema + registry/routines CRUD (ROADMAP-0011.1) ([a6c82d5](https://github.com/rutabageldev/ruby-core/commit/a6c82d571f0c214c08772af1c43cda2055df9c52))
+
 ## [0.20.0](https://github.com/rutabageldev/ruby-core/compare/v0.19.0...v0.20.0) (2026-06-19)
 
 
