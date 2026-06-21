@@ -54,3 +54,63 @@ ORDER BY created_at;
 
 -- name: SoftDeleteRoutine :exec
 UPDATE medication_routines SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;
+
+-- ── Dose events + temporary series (ROADMAP-0011 effort 0011.2) ────────────────
+
+-- name: InsertMedicationEvent :exec
+INSERT INTO medication_events (id, medication_id, status, timestamp, routine_id, slot_time,
+    dose_amount, dose_unit, source, within_window_override, series_id, started_watch, notes, logged_by, test)
+VALUES (@id, @medication_id, @status, @timestamp, @routine_id, @slot_time,
+    @dose_amount, @dose_unit, @source, @within_window_override, @series_id, @started_watch, @notes, @logged_by, @test)
+ON CONFLICT (id) DO UPDATE
+    SET status                 = EXCLUDED.status,
+        timestamp              = EXCLUDED.timestamp,
+        routine_id             = EXCLUDED.routine_id,
+        slot_time              = EXCLUDED.slot_time,
+        dose_amount            = EXCLUDED.dose_amount,
+        dose_unit              = EXCLUDED.dose_unit,
+        source                 = EXCLUDED.source,
+        within_window_override = EXCLUDED.within_window_override,
+        series_id              = EXCLUDED.series_id,
+        started_watch          = EXCLUDED.started_watch,
+        notes                  = EXCLUDED.notes,
+        logged_by              = EXCLUDED.logged_by,
+        deleted_at             = NULL;
+
+-- name: UpdateMedicationEvent :exec
+-- History dose correction: timestamp + dose only. The actor (logged_by) is the
+-- immutable record of who administered the dose and is never rewritten by an edit.
+UPDATE medication_events
+SET timestamp = @timestamp, dose_amount = @dose_amount
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: SoftDeleteMedicationEvent :exec
+UPDATE medication_events SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;
+
+-- name: ListRecentMedicationEvents :many
+SELECT id, medication_id, status, timestamp, routine_id, slot_time, dose_amount, dose_unit,
+    source, within_window_override, series_id, started_watch, notes, logged_by
+FROM medication_events
+WHERE deleted_at IS NULL AND timestamp >= @since
+ORDER BY timestamp DESC;
+
+-- name: InsertMedicationSeries :exec
+INSERT INTO medication_temp_series (id, medication_id, interval_hours, anchor_dose_id, status, logged_by, test)
+VALUES (@id, @medication_id, @interval_hours, @anchor_dose_id, 'active', @logged_by, @test)
+ON CONFLICT (id) DO UPDATE
+    SET interval_hours = EXCLUDED.interval_hours,
+        anchor_dose_id = EXCLUDED.anchor_dose_id,
+        status         = 'active',
+        logged_by      = EXCLUDED.logged_by,
+        deleted_at     = NULL;
+
+-- name: EndMedicationSeries :exec
+UPDATE medication_temp_series
+SET status = @status, ended_reason = @ended_reason
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: ListActiveMedicationSeries :many
+SELECT id, medication_id, interval_hours, anchor_dose_id, status, ended_reason
+FROM medication_temp_series
+WHERE deleted_at IS NULL AND status = 'active'
+ORDER BY created_at;

@@ -74,6 +74,41 @@ func TestRoutineUpsertDecode(t *testing.T) {
 	}
 }
 
+// A `given` dose carries the full MedEvent incl. the dose snapshot; a `skipped`
+// one carries no dose. Optional fields must round-trip, dose_amount as nullable.
+func TestMedicationEventDecode(t *testing.T) {
+	var given schemas.AdaMedicationEventData
+	if err := remarshal(map[string]any{
+		"id": "ev-1718900000000", "medication_id": "m-1", "status": "given",
+		"timestamp": "2026-06-20T16:00:00Z", "actor": "Katie",
+		"dose_amount": 1.25, "dose_unit": "mL", "source": "prn",
+		"series_id": "s-1", "started_watch": true,
+	}, &given); err != nil {
+		t.Fatalf("remarshal given: %v", err)
+	}
+	if given.Status != "given" || given.DoseAmount == nil || *given.DoseAmount != 1.25 {
+		t.Errorf("given decode wrong: status=%q dose=%v", given.Status, given.DoseAmount)
+	}
+	if given.Source != "prn" || given.SeriesID != "s-1" || !given.StartedWatch {
+		t.Errorf("given optional fields wrong: %+v", given)
+	}
+
+	var skipped schemas.AdaMedicationEventData
+	if err := remarshal(map[string]any{
+		"id": "ev-2", "medication_id": "m-1", "status": "skipped",
+		"timestamp": "2026-06-20T18:00:00Z", "actor": "Michael",
+		"routine_id": "rt-1", "slot_time": "18:00",
+	}, &skipped); err != nil {
+		t.Fatalf("remarshal skipped: %v", err)
+	}
+	if skipped.Status != "skipped" || skipped.DoseAmount != nil {
+		t.Errorf("skipped should carry no dose: %+v", skipped)
+	}
+	if skipped.RoutineID != "rt-1" || skipped.SlotTime != "18:00" {
+		t.Errorf("skipped slot fields wrong: %+v", skipped)
+	}
+}
+
 // A medication's nullable safety limits must decode as nil (no limit), never zero.
 func TestMedicationUpsertNullableLimits(t *testing.T) {
 	var d schemas.AdaMedicationUpsertData

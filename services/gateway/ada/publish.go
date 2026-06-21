@@ -50,6 +50,14 @@ var eventRoutes = map[string]string{
 	"ada.medication.delete":         schemas.AdaEventMedicationDelete,
 	"ada.medication.routine.upsert": schemas.AdaEventMedicationRoutineUpsert,
 	"ada.medication.routine.delete": schemas.AdaEventMedicationRoutineDelete,
+
+	// Dose events + series (effort 0011.2).
+	"ada.medication.given":        schemas.AdaEventMedicationGiven,
+	"ada.medication.skipped":      schemas.AdaEventMedicationSkipped,
+	"ada.medication.series.start": schemas.AdaEventMedicationSeriesStart,
+	"ada.medication.series.end":   schemas.AdaEventMedicationSeriesEnd,
+	"ada.medication.event.update": schemas.AdaEventMedicationEventUpdate,
+	"ada.medication.event.delete": schemas.AdaEventMedicationEventDelete,
 }
 
 // Publish wraps payload in a CloudEvent and publishes to the appropriate
