@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.22.0](https://github.com/rutabageldev/ruby-core/compare/v0.21.0...v0.22.0) (2026-06-21)
+
+
+### Features
+
+* **ada:** medication dose events + history/edit-delete (ROADMAP-0011.2) ([6469e13](https://github.com/rutabageldev/ruby-core/commit/6469e13cc34111a6a1fa256942b14d693218e516))
+* **ada:** medication dose events + series + history/edit-delete (0011.2) ([e1d2df2](https://github.com/rutabageldev/ruby-core/commit/e1d2df238b18abfd5da06c128546b7a971bb7cb3))
+
+
+### Bug Fixes
+
+* **ada:** 000008 deployed as UUID — convert medication ids to TEXT via 000009 ([088acbc](https://github.com/rutabageldev/ruby-core/commit/088acbc1d2c5ae56044235dfa1340ebaded3172b))
+* **ada:** medication ids are dashboard-provided strings, not UUIDs ([21af52f](https://github.com/rutabageldev/ruby-core/commit/21af52f3c318b8ea438129f9c12815744da32703))
+
 ## [0.21.0](https://github.com/rutabageldev/ruby-core/compare/v0.20.0...v0.21.0) (2026-06-21)
 
 
