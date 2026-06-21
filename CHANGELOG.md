@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.1](https://github.com/rutabageldev/ruby-core/compare/v0.24.0...v0.24.1) (2026-06-21)
+
+
+### Bug Fixes
+
+* **ada:** recompute medication next_due on every dose event ([a5cce04](https://github.com/rutabageldev/ruby-core/commit/a5cce04281ab822b9d73e79c109714bd274bc926))
+* **ada:** recompute medication next_due on every dose event ([4d1e15a](https://github.com/rutabageldev/ruby-core/commit/4d1e15ab734b30346147d144950f78aecf57a62c))
+
 ## [0.24.0](https://github.com/rutabageldev/ruby-core/compare/v0.23.0...v0.24.0) (2026-06-21)
 
 
