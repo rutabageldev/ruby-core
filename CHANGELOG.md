@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.23.0](https://github.com/rutabageldev/ruby-core/compare/v0.22.0...v0.23.0) (2026-06-21)
+
+
+### Features
+
+* **ada:** server-owned medication safety computations (ROADMAP-0011.3) ([62f4575](https://github.com/rutabageldev/ruby-core/commit/62f4575ebd3065d5823d9c8eebc53d0838001636))
+* **ada:** server-owned medication safety computations (ROADMAP-0011.3) ([4808785](https://github.com/rutabageldev/ruby-core/commit/4808785491499c409aee22b8ffd3a83222d33b33))
+
+
+### Bug Fixes
+
+* **ada:** drop medication_id FKs — events process concurrently out of order ([1e3f8a0](https://github.com/rutabageldev/ruby-core/commit/1e3f8a0e8e2a55edb69c79f5e47b6f3e4efe1b80))
+
 ## [0.22.0](https://github.com/rutabageldev/ruby-core/compare/v0.21.0...v0.22.0) (2026-06-21)
 
 
