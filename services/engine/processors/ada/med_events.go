@@ -71,7 +71,15 @@ func (p *Processor) handleMedicationEvent(ctx context.Context, evt schemas.Cloud
 	}); err != nil {
 		return fmt.Errorf("ada: insert medication event: %w", err)
 	}
-	p.pushMedEventsSensor(ctx)
+	// A watched given dose re-anchors its series to the latest dose, so the watch's
+	// next_due and 24h auto-expire track it (the dashboard re-anchors only locally,
+	// without firing an event). Robust to back-dated doses — always the max-timestamp.
+	if status == "given" && d.SeriesID != "" {
+		if err := p.q.ReanchorSeriesToLatestDose(ctx, d.SeriesID); err != nil {
+			p.log.Warn("ada: re-anchor series", slog.String("error", err.Error()))
+		}
+	}
+	p.pushAllMedSensors(ctx)
 	return nil
 }
 
@@ -137,7 +145,7 @@ func (p *Processor) handleMedEventUpdate(ctx context.Context, evt schemas.CloudE
 	}); err != nil {
 		return fmt.Errorf("ada: update medication event: %w", err)
 	}
-	p.pushMedEventsSensor(ctx)
+	p.pushAllMedSensors(ctx)
 	return nil
 }
 
@@ -150,7 +158,7 @@ func (p *Processor) handleMedEventDelete(ctx context.Context, evt schemas.CloudE
 	if err := p.q.SoftDeleteMedicationEvent(ctx, d.ID); err != nil {
 		return fmt.Errorf("ada: soft-delete medication event: %w", err)
 	}
-	p.pushMedEventsSensor(ctx)
+	p.pushAllMedSensors(ctx)
 	return nil
 }
 
@@ -230,8 +238,17 @@ func (p *Processor) pushMedEventsSensor(ctx context.Context) {
 			AnchorDoseID:  s.AnchorDoseID.String,
 			Status:        s.Status,
 		}
-		if at, ok := eventTime[s.AnchorDoseID.String]; ok {
-			nd := seriesNextDue(at, si.IntervalHours).UTC().Format(time.RFC3339)
+		// next_due tracks the latest watched dose, not the (possibly stale) stored
+		// anchor — the reconcile re-anchors the DB, but project the live value too.
+		anchorTime, ok := time.Time{}, false
+		if latest := latestWatchedDose(rows, s.ID); latest != nil {
+			si.AnchorDoseID = latest.ID
+			anchorTime, ok = latest.Timestamp.Time, true
+		} else if at, found := eventTime[s.AnchorDoseID.String]; found {
+			anchorTime, ok = at, true
+		}
+		if ok {
+			nd := seriesNextDue(anchorTime, si.IntervalHours).UTC().Format(time.RFC3339)
 			si.NextDue = &nd
 		}
 		series = append(series, si)
@@ -245,4 +262,30 @@ func (p *Processor) pushMedEventsSensor(ctx context.Context) {
 	if err := p.ha.PushState(ctx, sensorMedEvents, strconv.Itoa(len(items)), attrs); err != nil {
 		p.log.Warn("ada: push medication events", slog.String("error", err.Error()))
 	}
+}
+
+// pushAllMedSensors re-projects every medication sensor. A dose event shifts the
+// per-med guard (sensor.ada_medications), interval routine next_due
+// (sensor.ada_med_routines), and the dose history + watch next_due
+// (sensor.ada_med_events), so all three must refresh — not just the events sensor.
+func (p *Processor) pushAllMedSensors(ctx context.Context) {
+	p.pushMedicationSensors(ctx) // medications (guard) + med_routines (next_due)
+	p.pushMedEventsSensor(ctx)   // med_events + watch next_due
+}
+
+// latestWatchedDose returns the most recent given dose belonging to a series.
+func latestWatchedDose(events []*store.ListRecentMedicationEventsRow, seriesID string) *store.ListRecentMedicationEventsRow {
+	if seriesID == "" {
+		return nil
+	}
+	var latest *store.ListRecentMedicationEventsRow
+	for _, e := range events {
+		if e.Status != "given" || e.SeriesID.String != seriesID {
+			continue
+		}
+		if latest == nil || e.Timestamp.Time.After(latest.Timestamp.Time) {
+			latest = e
+		}
+	}
+	return latest
 }

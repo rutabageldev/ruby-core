@@ -129,3 +129,15 @@ UPDATE medication_routines SET status = @status WHERE id = @id AND deleted_at IS
 SELECT timestamp FROM medication_events
 WHERE medication_id = @medication_id AND status = 'given' AND deleted_at IS NULL
 ORDER BY timestamp DESC LIMIT 1;
+
+-- name: ReanchorSeriesToLatestDose :exec
+-- Move an active watch's anchor to its most recent given dose, so next_due and the
+-- auto-expire backstop track the latest watched dose (the dashboard re-anchors
+-- locally without firing an event, so the engine infers it from the dose history).
+UPDATE medication_temp_series AS s
+SET anchor_dose_id = (
+    SELECT e.id FROM medication_events e
+    WHERE e.series_id = s.id AND e.status = 'given' AND e.deleted_at IS NULL
+    ORDER BY e.timestamp DESC LIMIT 1
+)
+WHERE s.id = @id AND s.status = 'active' AND s.deleted_at IS NULL;
