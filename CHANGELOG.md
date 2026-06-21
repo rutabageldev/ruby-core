@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.0](https://github.com/rutabageldev/ruby-core/compare/v0.23.0...v0.24.0) (2026-06-21)
+
+
+### Features
+
+* **ada:** emergency card + seed + docs — completes ROADMAP-0011 (0011.4) ([1ad9056](https://github.com/rutabageldev/ruby-core/commit/1ad9056947c979ba4c1b1c6f5bac8be7162469ee))
+* **ada:** emergency card + seed coverage + docs (ROADMAP-0011.4) ([bc57ed5](https://github.com/rutabageldev/ruby-core/commit/bc57ed5afbeacc353e58e5cf85de326983804ba6))
+
 ## [0.23.0](https://github.com/rutabageldev/ruby-core/compare/v0.22.0...v0.23.0) (2026-06-21)
 
 
