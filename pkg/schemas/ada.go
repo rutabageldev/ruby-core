@@ -51,6 +51,11 @@ const (
 	AdaEventMedicationSeriesEnd   = "ha.events.ada.medication_series_end"
 	AdaEventMedicationEventUpdate = "ha.events.ada.medication_event_update"
 	AdaEventMedicationEventDelete = "ha.events.ada.medication_event_delete"
+
+	// Emergency card (effort 0011.4). Standing config rows + their order.
+	AdaEventEmergencyRowUpsert = "ha.events.ada.emergency_row_upsert"
+	AdaEventEmergencyRowDelete = "ha.events.ada.emergency_row_delete"
+	AdaEventEmergencyReorder   = "ha.events.ada.emergency_reorder"
 )
 
 // AdaDeleteData is the payload for every ada.<area>.delete event — a single id.
@@ -140,6 +145,26 @@ type AdaMedicationEventUpdateData struct {
 	Timestamp  string   `json:"timestamp"`
 	DoseAmount *float64 `json:"dose_amount"`
 	LoggedBy   string   `json:"logged_by,omitempty"`
+}
+
+// AdaEmergencyRowUpsertData is an emergency card row (ada.emergency.row.upsert).
+// A `contact` carries name/phone/address; a `live_field` carries field_key only
+// (its value resolves client-side off existing sensors).
+type AdaEmergencyRowUpsertData struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"` // contact|live_field
+	Label    string `json:"label"`
+	Name     string `json:"name,omitempty"`
+	Phone    string `json:"phone,omitempty"`
+	Address  string `json:"address,omitempty"`
+	FieldKey string `json:"field_key,omitempty"`
+	LoggedBy string `json:"logged_by,omitempty"`
+}
+
+// AdaEmergencyReorderData carries the full ordered list of row ids.
+type AdaEmergencyReorderData struct {
+	Order    []string `json:"order"`
+	LoggedBy string   `json:"logged_by,omitempty"`
 }
 
 // AdaFeedingUpdateData is the full-resolution replacement payload for a feeding (#79).

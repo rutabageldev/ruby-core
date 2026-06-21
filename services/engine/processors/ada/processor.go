@@ -280,6 +280,12 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleMedEventUpdate(ctx, evt)
 	case schemas.AdaEventMedicationEventDelete:
 		return p.handleMedEventDelete(ctx, evt)
+	case schemas.AdaEventEmergencyRowUpsert:
+		return p.handleEmergencyRowUpsert(ctx, evt)
+	case schemas.AdaEventEmergencyRowDelete:
+		return p.handleEmergencyRowDelete(ctx, evt)
+	case schemas.AdaEventEmergencyReorder:
+		return p.handleEmergencyReorder(ctx, evt)
 	case "ha.events.input_number.ada_alert_threshold_h":
 		return p.handleThresholdChange(ctx, evt)
 	default:
@@ -1240,6 +1246,7 @@ func (p *Processor) refreshAllSensors(ctx context.Context) {
 	p.pushGrowthCurves(ctx)
 	p.pushMedicationSensors(ctx)
 	p.pushMedEventsSensor(ctx)
+	p.pushEmergencyCard(ctx)
 }
 
 // pushLastEventSensors pushes sensors derived from the most recent event of each

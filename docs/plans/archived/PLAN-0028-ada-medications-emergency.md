@@ -1,6 +1,6 @@
 # PLAN-0028 — Ada Medications & Emergency: backend persistence
 
-* **Status:** Approved
+* **Status:** Complete
 * **Date:** 2026-06-20
 * **Project:** ruby-core
 * **Roadmap Item:** ROADMAP-0011 (to be drafted alongside — see “Deliverables created by this plan”)
