@@ -58,6 +58,11 @@ var eventRoutes = map[string]string{
 	"ada.medication.series.end":   schemas.AdaEventMedicationSeriesEnd,
 	"ada.medication.event.update": schemas.AdaEventMedicationEventUpdate,
 	"ada.medication.event.delete": schemas.AdaEventMedicationEventDelete,
+
+	// Emergency card (effort 0011.4).
+	"ada.emergency.row.upsert": schemas.AdaEventEmergencyRowUpsert,
+	"ada.emergency.row.delete": schemas.AdaEventEmergencyRowDelete,
+	"ada.emergency.reorder":    schemas.AdaEventEmergencyReorder,
 }
 
 // Publish wraps payload in a CloudEvent and publishes to the appropriate

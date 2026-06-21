@@ -1,10 +1,10 @@
 # Persist & compute Ada Medications and Emergency server-side
 
-* **Status:** In Progress
+* **Status:** Complete
 * **Date:** 2026-06-20
 * **Project:** ruby-core
 * **Related ADRs:** ADR-0037 (persistence + contract), ADR-0038 (server-owned safety computations)
-* **Linked Plan:** docs/plans/PLAN-0028-ada-medications-emergency.md
+* **Linked Plan:** docs/plans/archived/PLAN-0028-ada-medications-emergency.md (Complete)
 
 ---
 
