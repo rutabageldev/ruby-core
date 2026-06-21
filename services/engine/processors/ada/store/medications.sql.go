@@ -19,8 +19,8 @@ ORDER BY created_at
 `
 
 type ListMedicationRoutinesRow struct {
-	ID            pgtype.UUID
-	MedicationID  pgtype.UUID
+	ID            string
+	MedicationID  string
 	DoseAmount    pgtype.Numeric
 	ScheduleType  string
 	FixedTimes    []string
@@ -72,7 +72,7 @@ ORDER BY name
 `
 
 type ListMedicationsRow struct {
-	ID               pgtype.UUID
+	ID               string
 	Name             string
 	Route            string
 	MeasureUnit      string
@@ -117,7 +117,7 @@ const softDeleteMedication = `-- name: SoftDeleteMedication :exec
 UPDATE medications SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteMedication(ctx context.Context, id pgtype.UUID) error {
+func (q *Queries) SoftDeleteMedication(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, softDeleteMedication, id)
 	return err
 }
@@ -126,7 +126,7 @@ const softDeleteRoutine = `-- name: SoftDeleteRoutine :exec
 UPDATE medication_routines SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteRoutine(ctx context.Context, id pgtype.UUID) error {
+func (q *Queries) SoftDeleteRoutine(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, softDeleteRoutine, id)
 	return err
 }
@@ -135,7 +135,7 @@ const softDeleteRoutinesForMedication = `-- name: SoftDeleteRoutinesForMedicatio
 UPDATE medication_routines SET deleted_at = NOW() WHERE medication_id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteRoutinesForMedication(ctx context.Context, medicationID pgtype.UUID) error {
+func (q *Queries) SoftDeleteRoutinesForMedication(ctx context.Context, medicationID string) error {
 	_, err := q.db.Exec(ctx, softDeleteRoutinesForMedication, medicationID)
 	return err
 }
@@ -144,7 +144,7 @@ const softDeleteSeriesForMedication = `-- name: SoftDeleteSeriesForMedication :e
 UPDATE medication_temp_series SET deleted_at = NOW() WHERE medication_id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteSeriesForMedication(ctx context.Context, medicationID pgtype.UUID) error {
+func (q *Queries) SoftDeleteSeriesForMedication(ctx context.Context, medicationID string) error {
 	_, err := q.db.Exec(ctx, softDeleteSeriesForMedication, medicationID)
 	return err
 }
@@ -165,7 +165,7 @@ ON CONFLICT (id) DO UPDATE
 `
 
 type UpsertMedicationParams struct {
-	ID               pgtype.UUID
+	ID               string
 	Name             string
 	Route            string
 	MeasureUnit      string
@@ -212,8 +212,8 @@ ON CONFLICT (id) DO UPDATE
 `
 
 type UpsertMedicationRoutineParams struct {
-	ID            pgtype.UUID
-	MedicationID  pgtype.UUID
+	ID            string
+	MedicationID  string
 	DoseAmount    pgtype.Numeric
 	ScheduleType  string
 	FixedTimes    []string

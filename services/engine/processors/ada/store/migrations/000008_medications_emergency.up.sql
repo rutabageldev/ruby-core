@@ -5,16 +5,18 @@
 -- emergency card rows. Field names mirror adaMeds.ts / adaEmergency.ts so the
 -- future dashboard read-seam repoint is a pure binding swap.
 --
--- test/deleted_at/created_at follow the established Ada conventions (ADR-0031
--- test-data; soft-delete). All tables carry a `WHERE test=true` partial index
--- for cheap clear/birth scans. series_id (on events) and anchor_dose_id (on
--- series) are loose UUIDs, not FKs: the dose and its series arrive as independent
+-- ids are TEXT, not UUID: the dashboard is the id authority and generates string
+-- ids (m-/rt-/ev-/s-/ec- prefixed millisecond timestamps), so the engine stores
+-- them verbatim. test/deleted_at/created_at follow the established Ada conventions
+-- (ADR-0031 test-data; soft-delete). All tables carry a `WHERE test=true` partial
+-- index for cheap clear/birth scans. series_id (on events) and anchor_dose_id (on
+-- series) are loose refs, not FKs: the dose and its series arrive as independent
 -- events and reference each other, so app-level integrity avoids a circular FK.
 
 -- medications: identity + optional safety limits ONLY. No dose, no schedule —
 -- a contextual infant dose lives on the routine or the dose event, never here.
 CREATE TABLE IF NOT EXISTS medications (
-    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                 TEXT PRIMARY KEY,
     name               TEXT NOT NULL,
     route              TEXT NOT NULL,                       -- oral|drops|topical|suppository
     measure_unit       TEXT NOT NULL,                       -- mL|mg|drops|supp
@@ -31,8 +33,8 @@ CREATE TABLE IF NOT EXISTS medications (
 -- sends `end` as a nested {type, value?}; persisted here as end_type + end_value
 -- (value stringified — number for max_doses, date string for end_date).
 CREATE TABLE IF NOT EXISTS medication_routines (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    medication_id  UUID NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
+    id             TEXT PRIMARY KEY,
+    medication_id  TEXT NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
     dose_amount    NUMERIC(8,3) NOT NULL,
     schedule_type  TEXT NOT NULL,                           -- fixed_times|interval
     fixed_times    TEXT[] NOT NULL DEFAULT '{}',            -- ["08:00","13:00"] for fixed_times
@@ -50,17 +52,17 @@ CREATE TABLE IF NOT EXISTS medication_routines (
 -- caregiver-logged; missed is system-emitted (actorless) per ADR-0038.
 -- dose_amount/dose_unit are a SNAPSHOT of what was actually given.
 CREATE TABLE IF NOT EXISTS medication_events (
-    id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    medication_id          UUID NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
+    id                     TEXT PRIMARY KEY,
+    medication_id          TEXT NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
     status                 TEXT NOT NULL,                   -- given|skipped|missed
     timestamp              TIMESTAMPTZ NOT NULL,
-    routine_id             UUID,                            -- the routine this resolves, if scheduled
+    routine_id             TEXT,                            -- the routine this resolves, if scheduled
     slot_time              TEXT,                            -- "HH:MM" fixed slot this resolves
     dose_amount            NUMERIC(8,3),                    -- given only (snapshot)
     dose_unit              TEXT,                            -- given only (snapshot)
     source                 TEXT,                            -- scheduled|prn (given only)
     within_window_override BOOLEAN NOT NULL DEFAULT false,
-    series_id              UUID,                            -- loose ref to medication_temp_series
+    series_id              TEXT,                            -- loose ref to medication_temp_series
     started_watch          BOOLEAN NOT NULL DEFAULT false,  -- this dose opened a new watch
     notes                  TEXT,
     logged_by              TEXT NOT NULL DEFAULT '',         -- actor; '' for system missed
@@ -72,10 +74,10 @@ CREATE TABLE IF NOT EXISTS medication_events (
 -- medication_temp_series: an as-needed watch. Holds no clock — next-due reads
 -- the anchor dose. anchor_dose_id is a loose ref to a given medication_event.
 CREATE TABLE IF NOT EXISTS medication_temp_series (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    medication_id  UUID NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
+    id             TEXT PRIMARY KEY,
+    medication_id  TEXT NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
     interval_hours NUMERIC(8,3) NOT NULL,
-    anchor_dose_id UUID,                                    -- references a given dose, not a clock
+    anchor_dose_id TEXT,                                    -- references a given dose, not a clock
     status         TEXT NOT NULL DEFAULT 'active',          -- active|resolved|disregarded|expired
     ended_reason   TEXT,                                    -- planned|dismissed|auto_expire
     logged_by      TEXT NOT NULL DEFAULT '',
@@ -87,7 +89,7 @@ CREATE TABLE IF NOT EXISTS medication_temp_series (
 -- emergency_rows: the ordered emergency card. Live-field rows resolve their
 -- value client-side off existing sensors; we persist rows + order only.
 CREATE TABLE IF NOT EXISTS emergency_rows (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id          TEXT PRIMARY KEY,
     sort_order  INTEGER NOT NULL DEFAULT 0,
     type        TEXT NOT NULL,                              -- contact|live_field
     label       TEXT NOT NULL DEFAULT '',

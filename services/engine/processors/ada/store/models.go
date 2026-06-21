@@ -32,7 +32,7 @@ type Diaper struct {
 }
 
 type EmergencyRow struct {
-	ID        pgtype.UUID
+	ID        string
 	SortOrder int32
 	Type      string
 	Label     string
@@ -90,7 +90,7 @@ type GrowthMeasurement struct {
 }
 
 type Medication struct {
-	ID               pgtype.UUID
+	ID               string
 	Name             string
 	Route            string
 	MeasureUnit      string
@@ -104,17 +104,17 @@ type Medication struct {
 }
 
 type MedicationEvent struct {
-	ID                   pgtype.UUID
-	MedicationID         pgtype.UUID
+	ID                   string
+	MedicationID         string
 	Status               string
 	Timestamp            pgtype.Timestamptz
-	RoutineID            pgtype.UUID
+	RoutineID            pgtype.Text
 	SlotTime             pgtype.Text
 	DoseAmount           pgtype.Numeric
 	DoseUnit             pgtype.Text
 	Source               pgtype.Text
 	WithinWindowOverride bool
-	SeriesID             pgtype.UUID
+	SeriesID             pgtype.Text
 	StartedWatch         bool
 	Notes                pgtype.Text
 	LoggedBy             string
@@ -124,8 +124,8 @@ type MedicationEvent struct {
 }
 
 type MedicationRoutine struct {
-	ID            pgtype.UUID
-	MedicationID  pgtype.UUID
+	ID            string
+	MedicationID  string
 	DoseAmount    pgtype.Numeric
 	ScheduleType  string
 	FixedTimes    []string
@@ -140,10 +140,10 @@ type MedicationRoutine struct {
 }
 
 type MedicationTempSeries struct {
-	ID            pgtype.UUID
-	MedicationID  pgtype.UUID
+	ID            string
+	MedicationID  string
 	IntervalHours pgtype.Numeric
-	AnchorDoseID  pgtype.UUID
+	AnchorDoseID  pgtype.Text
 	Status        string
 	EndedReason   pgtype.Text
 	LoggedBy      string

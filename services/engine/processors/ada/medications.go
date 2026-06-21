@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
@@ -17,7 +16,9 @@ import (
 // Medication registry + dosing routines (ROADMAP-0011 effort 0011.1, ADR-0037).
 // Registry and routines are standing config: they use eventTest(evt) only (no
 // pre-birth forcing), so a real entry made before birth survives the clean-slate.
-// Dose events, computations, and emergency land in later efforts.
+//
+// ids are dashboard-provided strings (m-/rt-/... prefixed), not UUIDs — the
+// dashboard is the id authority, so the engine stores them verbatim.
 
 const (
 	sensorMedications = "sensor.ada_medications"
@@ -30,12 +31,11 @@ func (p *Processor) handleMedicationUpsert(ctx context.Context, evt schemas.Clou
 	if err := remarshal(evt.Data, &d); err != nil {
 		return fmt.Errorf("ada: decode medication_upsert: %w", err)
 	}
-	id, err := parseUUID(d.ID)
-	if err != nil {
-		return fmt.Errorf("ada: medication_upsert id: %w", err)
+	if d.ID == "" {
+		return fmt.Errorf("ada: medication_upsert missing id")
 	}
 	if err := p.q.UpsertMedication(ctx, &store.UpsertMedicationParams{
-		ID:               id,
+		ID:               d.ID,
 		Name:             d.Name,
 		Route:            d.Route,
 		MeasureUnit:      d.MeasureUnit,
@@ -54,9 +54,9 @@ func (p *Processor) handleMedicationUpsert(ctx context.Context, evt schemas.Clou
 // handleMedicationDelete soft-deletes a medication and cascades to its routines
 // and any active series in one transaction (app-level cascade, ADR-0037 #2).
 func (p *Processor) handleMedicationDelete(ctx context.Context, evt schemas.CloudEvent) error {
-	id, err := p.decodeDeleteID(evt, "medication")
-	if err != nil {
-		return err
+	var d schemas.AdaDeleteData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode medication_delete: %w", err)
 	}
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -64,13 +64,13 @@ func (p *Processor) handleMedicationDelete(ctx context.Context, evt schemas.Clou
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := p.q.WithTx(tx)
-	if err := qtx.SoftDeleteMedication(ctx, id); err != nil {
+	if err := qtx.SoftDeleteMedication(ctx, d.ID); err != nil {
 		return fmt.Errorf("ada: soft-delete medication: %w", err)
 	}
-	if err := qtx.SoftDeleteRoutinesForMedication(ctx, id); err != nil {
+	if err := qtx.SoftDeleteRoutinesForMedication(ctx, d.ID); err != nil {
 		return fmt.Errorf("ada: soft-delete medication routines: %w", err)
 	}
-	if err := qtx.SoftDeleteSeriesForMedication(ctx, id); err != nil {
+	if err := qtx.SoftDeleteSeriesForMedication(ctx, d.ID); err != nil {
 		return fmt.Errorf("ada: soft-delete medication series: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -86,13 +86,8 @@ func (p *Processor) handleMedicationRoutineUpsert(ctx context.Context, evt schem
 	if err := remarshal(evt.Data, &d); err != nil {
 		return fmt.Errorf("ada: decode medication_routine_upsert: %w", err)
 	}
-	id, err := parseUUID(d.ID)
-	if err != nil {
-		return fmt.Errorf("ada: routine id: %w", err)
-	}
-	medID, err := parseUUID(d.MedicationID)
-	if err != nil {
-		return fmt.Errorf("ada: routine medication_id: %w", err)
+	if d.ID == "" || d.MedicationID == "" {
+		return fmt.Errorf("ada: medication_routine_upsert missing id/medication_id")
 	}
 	fixedTimes := d.FixedTimes
 	if fixedTimes == nil {
@@ -107,8 +102,8 @@ func (p *Processor) handleMedicationRoutineUpsert(ctx context.Context, evt schem
 		status = "active"
 	}
 	if err := p.q.UpsertMedicationRoutine(ctx, &store.UpsertMedicationRoutineParams{
-		ID:            id,
-		MedicationID:  medID,
+		ID:            d.ID,
+		MedicationID:  d.MedicationID,
 		DoseAmount:    numericFromFloat(d.DoseAmount),
 		ScheduleType:  d.ScheduleType,
 		FixedTimes:    fixedTimes,
@@ -127,11 +122,11 @@ func (p *Processor) handleMedicationRoutineUpsert(ctx context.Context, evt schem
 
 // handleMedicationRoutineDelete soft-deletes a single routine.
 func (p *Processor) handleMedicationRoutineDelete(ctx context.Context, evt schemas.CloudEvent) error {
-	id, err := p.decodeDeleteID(evt, "medication_routine")
-	if err != nil {
-		return err
+	var d schemas.AdaDeleteData
+	if err := remarshal(evt.Data, &d); err != nil {
+		return fmt.Errorf("ada: decode medication_routine_delete: %w", err)
 	}
-	if err := p.q.SoftDeleteRoutine(ctx, id); err != nil {
+	if err := p.q.SoftDeleteRoutine(ctx, d.ID); err != nil {
 		return fmt.Errorf("ada: soft-delete medication routine: %w", err)
 	}
 	p.pushMedicationSensors(ctx)
@@ -187,7 +182,7 @@ func (p *Processor) pushMedications(ctx context.Context) {
 	items := make([]medicationItem, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, medicationItem{
-			ID:               uuid.UUID(r.ID.Bytes).String(),
+			ID:               r.ID,
 			Name:             r.Name,
 			Route:            r.Route,
 			MeasureUnit:      r.MeasureUnit,
@@ -215,8 +210,8 @@ func (p *Processor) pushMedRoutines(ctx context.Context) {
 			ft = []string{}
 		}
 		items = append(items, routineItem{
-			ID:            uuid.UUID(r.ID.Bytes).String(),
-			MedicationID:  uuid.UUID(r.MedicationID.Bytes).String(),
+			ID:            r.ID,
+			MedicationID:  r.MedicationID,
 			DoseAmount:    numericToFloat(r.DoseAmount),
 			ScheduleType:  r.ScheduleType,
 			FixedTimes:    ft,
