@@ -181,6 +181,7 @@ type seriesItem struct {
 	IntervalHours float64 `json:"interval_hours"`
 	AnchorDoseID  string  `json:"anchor_dose_id"`
 	Status        string  `json:"status"`
+	NextDue       *string `json:"next_due,omitempty"` // anchor dose + interval
 }
 
 // pushMedEventsSensor projects the recent dose events + active watches to
@@ -191,6 +192,10 @@ func (p *Processor) pushMedEventsSensor(ctx context.Context) {
 	if err != nil {
 		p.log.Warn("ada: list medication events", slog.String("error", err.Error()))
 		return
+	}
+	eventTime := make(map[string]time.Time, len(rows))
+	for _, r := range rows {
+		eventTime[r.ID] = r.Timestamp.Time
 	}
 	items := make([]medEventItem, 0, len(rows))
 	for _, r := range rows {
@@ -218,13 +223,18 @@ func (p *Processor) pushMedEventsSensor(ctx context.Context) {
 	}
 	series := make([]seriesItem, 0, len(seriesRows))
 	for _, s := range seriesRows {
-		series = append(series, seriesItem{
+		si := seriesItem{
 			ID:            s.ID,
 			MedicationID:  s.MedicationID,
 			IntervalHours: numericToFloat(s.IntervalHours),
 			AnchorDoseID:  s.AnchorDoseID.String,
 			Status:        s.Status,
-		})
+		}
+		if at, ok := eventTime[s.AnchorDoseID.String]; ok {
+			nd := seriesNextDue(at, si.IntervalHours).UTC().Format(time.RFC3339)
+			si.NextDue = &nd
+		}
+		series = append(series, si)
 	}
 
 	attrs := map[string]any{

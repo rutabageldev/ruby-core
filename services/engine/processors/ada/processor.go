@@ -1569,6 +1569,13 @@ func (p *Processor) startBoundaryTicker(ctx context.Context) {
 // runSafetyNet implements the 4-hour safety-net full sensor refresh and the
 // sleep session elapsed-time push (formerly in onTick).
 func (p *Processor) runSafetyNet(ctx context.Context) {
+	// Medication reconcile: emit missed, auto-complete routines, expire watches,
+	// and remind on due — the time-edge transitions that must fire with the app
+	// closed (ADR-0038). Runs every tick, independent of the 4-hour refresh below.
+	medCtx, medCancel := context.WithTimeout(ctx, 30*time.Second)
+	p.reconcileMedications(medCtx)
+	medCancel()
+
 	// 4-hour safety net: full refresh.
 	if time.Since(p.lastFullRefresh) >= 4*time.Hour {
 		p.log.Info("ada: 4-hour safety net — full sensor refresh")
