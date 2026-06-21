@@ -31,6 +31,21 @@ type Diaper struct {
 	Test      bool
 }
 
+type EmergencyRow struct {
+	ID        pgtype.UUID
+	SortOrder int32
+	Type      string
+	Label     string
+	Name      pgtype.Text
+	Phone     pgtype.Text
+	Address   pgtype.Text
+	FieldKey  pgtype.Text
+	LoggedBy  string
+	DeletedAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+	Test      bool
+}
+
 type Feeding struct {
 	ID        pgtype.UUID
 	Timestamp pgtype.Timestamptz
@@ -72,6 +87,69 @@ type GrowthMeasurement struct {
 	DeletedAt           pgtype.Timestamptz
 	CreatedAt           pgtype.Timestamptz
 	Test                bool
+}
+
+type Medication struct {
+	ID               pgtype.UUID
+	Name             string
+	Route            string
+	MeasureUnit      string
+	MinIntervalHours pgtype.Numeric
+	MaxPer24h        pgtype.Int4
+	Active           bool
+	LoggedBy         string
+	DeletedAt        pgtype.Timestamptz
+	CreatedAt        pgtype.Timestamptz
+	Test             bool
+}
+
+type MedicationEvent struct {
+	ID                   pgtype.UUID
+	MedicationID         pgtype.UUID
+	Status               string
+	Timestamp            pgtype.Timestamptz
+	RoutineID            pgtype.UUID
+	SlotTime             pgtype.Text
+	DoseAmount           pgtype.Numeric
+	DoseUnit             pgtype.Text
+	Source               pgtype.Text
+	WithinWindowOverride bool
+	SeriesID             pgtype.UUID
+	StartedWatch         bool
+	Notes                pgtype.Text
+	LoggedBy             string
+	DeletedAt            pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+	Test                 bool
+}
+
+type MedicationRoutine struct {
+	ID            pgtype.UUID
+	MedicationID  pgtype.UUID
+	DoseAmount    pgtype.Numeric
+	ScheduleType  string
+	FixedTimes    []string
+	IntervalHours pgtype.Numeric
+	EndType       string
+	EndValue      pgtype.Text
+	Status        string
+	LoggedBy      string
+	DeletedAt     pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	Test          bool
+}
+
+type MedicationTempSeries struct {
+	ID            pgtype.UUID
+	MedicationID  pgtype.UUID
+	IntervalHours pgtype.Numeric
+	AnchorDoseID  pgtype.UUID
+	Status        string
+	EndedReason   pgtype.Text
+	LoggedBy      string
+	DeletedAt     pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	Test          bool
 }
 
 type Person struct {

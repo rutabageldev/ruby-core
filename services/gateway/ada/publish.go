@@ -44,6 +44,12 @@ var eventRoutes = map[string]string{
 	"ada.tummy.delete":        schemas.AdaEventTummyDelete,
 	"ada.growth.update":       schemas.AdaEventGrowthUpdate,
 	"ada.growth.delete":       schemas.AdaEventGrowthDelete,
+
+	// Medications & Emergency (ROADMAP-0011) — registry + routines (effort 0011.1).
+	"ada.medication.upsert":         schemas.AdaEventMedicationUpsert,
+	"ada.medication.delete":         schemas.AdaEventMedicationDelete,
+	"ada.medication.routine.upsert": schemas.AdaEventMedicationRoutineUpsert,
+	"ada.medication.routine.delete": schemas.AdaEventMedicationRoutineDelete,
 }
 
 // Publish wraps payload in a CloudEvent and publishes to the appropriate

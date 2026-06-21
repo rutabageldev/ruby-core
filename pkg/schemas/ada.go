@@ -35,12 +35,56 @@ const (
 	AdaEventTummyDelete   = "ha.events.ada.tummy_deleted"
 	AdaEventGrowthUpdate  = "ha.events.ada.growth_updated"
 	AdaEventGrowthDelete  = "ha.events.ada.growth_deleted"
+
+	// Medications & Emergency (ROADMAP-0011, ADR-0037). Registry + routines are
+	// standing config; dose events + emergency rows land in later efforts.
+	AdaEventMedicationUpsert        = "ha.events.ada.medication_upsert"
+	AdaEventMedicationDelete        = "ha.events.ada.medication_delete"
+	AdaEventMedicationRoutineUpsert = "ha.events.ada.medication_routine_upsert"
+	AdaEventMedicationRoutineDelete = "ha.events.ada.medication_routine_delete"
 )
 
 // AdaDeleteData is the payload for every ada.<area>.delete event — a single id.
+// Also used by ada.medication.delete and ada.medication.routine.delete.
 type AdaDeleteData struct {
 	ID       string `json:"id"`
 	LoggedBy string `json:"logged_by,omitempty"`
+}
+
+// AdaMedicationUpsertData is the medication-registry payload (ada.medication.upsert).
+// Identity + optional safety limits only — no dose, no schedule (those live on the
+// routine). min_interval_hours and max_per_24h are nullable, so pointers distinguish
+// "no limit" from zero.
+type AdaMedicationUpsertData struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Route            string   `json:"route"`        // oral|drops|topical|suppository
+	MeasureUnit      string   `json:"measure_unit"` // mL|mg|drops|supp
+	MinIntervalHours *float64 `json:"min_interval_hours"`
+	MaxPer24h        *int     `json:"max_per_24h"`
+	Active           bool     `json:"active"`
+	LoggedBy         string   `json:"logged_by,omitempty"`
+}
+
+// AdaRoutineEnd is the nested `end` rule on a routine ({type, value?}). Value is a
+// number for max_doses or a date string for end_date; absent for none.
+type AdaRoutineEnd struct {
+	Type  string `json:"type"` // none|max_doses|end_date
+	Value any    `json:"value,omitempty"`
+}
+
+// AdaMedicationRoutineUpsertData is the dosing-routine payload
+// (ada.medication.routine.upsert) — the standing dose + cadence + end rule.
+type AdaMedicationRoutineUpsertData struct {
+	ID            string        `json:"id"`
+	MedicationID  string        `json:"medication_id"`
+	DoseAmount    float64       `json:"dose_amount"`
+	ScheduleType  string        `json:"schedule_type"` // fixed_times|interval
+	FixedTimes    []string      `json:"fixed_times"`
+	IntervalHours *float64      `json:"interval_hours"`
+	End           AdaRoutineEnd `json:"end"`
+	Status        string        `json:"status"` // active|completed
+	LoggedBy      string        `json:"logged_by,omitempty"`
 }
 
 // AdaFeedingUpdateData is the full-resolution replacement payload for a feeding (#79).

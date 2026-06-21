@@ -43,7 +43,12 @@ validate_nuke() {
              + (SELECT count(*) FROM diapers WHERE test = true)
              + (SELECT count(*) FROM sleep_sessions WHERE test = true)
              + (SELECT count(*) FROM tummy_time_sessions WHERE test = true)
-             + (SELECT count(*) FROM growth_measurements WHERE test = true);" 2>/dev/null | tr -d '[:space:]')"
+             + (SELECT count(*) FROM growth_measurements WHERE test = true)
+             + (SELECT count(*) FROM medication_events WHERE test = true)
+             + (SELECT count(*) FROM medication_routines WHERE test = true)
+             + (SELECT count(*) FROM medication_temp_series WHERE test = true)
+             + (SELECT count(*) FROM medications WHERE test = true)
+             + (SELECT count(*) FROM emergency_rows WHERE test = true);" 2>/dev/null | tr -d '[:space:]')"
     if [[ "${remaining}" != "0" ]]; then
         log "validate: ${remaining:-?} test=true rows remain — nuke incomplete"
         return 1
