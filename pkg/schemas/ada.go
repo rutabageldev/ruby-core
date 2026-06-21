@@ -42,6 +42,15 @@ const (
 	AdaEventMedicationDelete        = "ha.events.ada.medication_delete"
 	AdaEventMedicationRoutineUpsert = "ha.events.ada.medication_routine_upsert"
 	AdaEventMedicationRoutineDelete = "ha.events.ada.medication_routine_delete"
+
+	// Dose events + temporary series (effort 0011.2). given/skipped are
+	// caregiver-logged doses; series start/end bracket an as-needed watch.
+	AdaEventMedicationGiven       = "ha.events.ada.medication_given"
+	AdaEventMedicationSkipped     = "ha.events.ada.medication_skipped"
+	AdaEventMedicationSeriesStart = "ha.events.ada.medication_series_start"
+	AdaEventMedicationSeriesEnd   = "ha.events.ada.medication_series_end"
+	AdaEventMedicationEventUpdate = "ha.events.ada.medication_event_update"
+	AdaEventMedicationEventDelete = "ha.events.ada.medication_event_delete"
 )
 
 // AdaDeleteData is the payload for every ada.<area>.delete event — a single id.
@@ -85,6 +94,52 @@ type AdaMedicationRoutineUpsertData struct {
 	End           AdaRoutineEnd `json:"end"`
 	Status        string        `json:"status"` // active|completed
 	LoggedBy      string        `json:"logged_by,omitempty"`
+}
+
+// AdaMedicationEventData is the dose-event payload (ada.medication.given / skipped) —
+// the full MedEvent. Only `given` carries the dose snapshot; `skipped` carries none.
+// Actor is the caregiver (== logged_by); system-emitted `missed` rows are actorless.
+type AdaMedicationEventData struct {
+	ID                   string   `json:"id"`
+	MedicationID         string   `json:"medication_id"`
+	Status               string   `json:"status"` // given|skipped
+	Timestamp            string   `json:"timestamp"`
+	RoutineID            string   `json:"routine_id,omitempty"`
+	SlotTime             string   `json:"slot_time,omitempty"`
+	Actor                string   `json:"actor,omitempty"`
+	DoseAmount           *float64 `json:"dose_amount,omitempty"`
+	DoseUnit             string   `json:"dose_unit,omitempty"`
+	Source               string   `json:"source,omitempty"` // scheduled|prn
+	WithinWindowOverride bool     `json:"within_window_override,omitempty"`
+	SeriesID             string   `json:"series_id,omitempty"`
+	StartedWatch         bool     `json:"started_watch,omitempty"`
+	Notes                string   `json:"notes,omitempty"`
+	LoggedBy             string   `json:"logged_by,omitempty"`
+}
+
+// AdaMedicationSeriesStartData opens an as-needed watch anchored to a given dose.
+type AdaMedicationSeriesStartData struct {
+	ID            string  `json:"id"`
+	MedicationID  string  `json:"medication_id"`
+	IntervalHours float64 `json:"interval_hours"`
+	AnchorDoseID  string  `json:"anchor_dose_id"`
+	LoggedBy      string  `json:"logged_by,omitempty"`
+}
+
+// AdaMedicationSeriesEndData closes a watch. EndedReason ∈ planned | dismissed.
+type AdaMedicationSeriesEndData struct {
+	ID           string `json:"id"`
+	MedicationID string `json:"medication_id"`
+	EndedReason  string `json:"ended_reason"`
+	LoggedBy     string `json:"logged_by,omitempty"`
+}
+
+// AdaMedicationEventUpdateData is a history dose correction (timestamp + amount).
+type AdaMedicationEventUpdateData struct {
+	ID         string   `json:"id"`
+	Timestamp  string   `json:"timestamp"`
+	DoseAmount *float64 `json:"dose_amount"`
+	LoggedBy   string   `json:"logged_by,omitempty"`
 }
 
 // AdaFeedingUpdateData is the full-resolution replacement payload for a feeding (#79).

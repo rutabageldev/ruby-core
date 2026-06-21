@@ -11,6 +11,160 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const endMedicationSeries = `-- name: EndMedicationSeries :exec
+UPDATE medication_temp_series
+SET status = $1, ended_reason = $2
+WHERE id = $3 AND deleted_at IS NULL
+`
+
+type EndMedicationSeriesParams struct {
+	Status      string
+	EndedReason pgtype.Text
+	ID          string
+}
+
+func (q *Queries) EndMedicationSeries(ctx context.Context, arg *EndMedicationSeriesParams) error {
+	_, err := q.db.Exec(ctx, endMedicationSeries, arg.Status, arg.EndedReason, arg.ID)
+	return err
+}
+
+const insertMedicationEvent = `-- name: InsertMedicationEvent :exec
+
+INSERT INTO medication_events (id, medication_id, status, timestamp, routine_id, slot_time,
+    dose_amount, dose_unit, source, within_window_override, series_id, started_watch, notes, logged_by, test)
+VALUES ($1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, $11, $12, $13, $14, $15)
+ON CONFLICT (id) DO UPDATE
+    SET status                 = EXCLUDED.status,
+        timestamp              = EXCLUDED.timestamp,
+        routine_id             = EXCLUDED.routine_id,
+        slot_time              = EXCLUDED.slot_time,
+        dose_amount            = EXCLUDED.dose_amount,
+        dose_unit              = EXCLUDED.dose_unit,
+        source                 = EXCLUDED.source,
+        within_window_override = EXCLUDED.within_window_override,
+        series_id              = EXCLUDED.series_id,
+        started_watch          = EXCLUDED.started_watch,
+        notes                  = EXCLUDED.notes,
+        logged_by              = EXCLUDED.logged_by,
+        deleted_at             = NULL
+`
+
+type InsertMedicationEventParams struct {
+	ID                   string
+	MedicationID         string
+	Status               string
+	Timestamp            pgtype.Timestamptz
+	RoutineID            pgtype.Text
+	SlotTime             pgtype.Text
+	DoseAmount           pgtype.Numeric
+	DoseUnit             pgtype.Text
+	Source               pgtype.Text
+	WithinWindowOverride bool
+	SeriesID             pgtype.Text
+	StartedWatch         bool
+	Notes                pgtype.Text
+	LoggedBy             string
+	Test                 bool
+}
+
+// ── Dose events + temporary series (ROADMAP-0011 effort 0011.2) ────────────────
+func (q *Queries) InsertMedicationEvent(ctx context.Context, arg *InsertMedicationEventParams) error {
+	_, err := q.db.Exec(ctx, insertMedicationEvent,
+		arg.ID,
+		arg.MedicationID,
+		arg.Status,
+		arg.Timestamp,
+		arg.RoutineID,
+		arg.SlotTime,
+		arg.DoseAmount,
+		arg.DoseUnit,
+		arg.Source,
+		arg.WithinWindowOverride,
+		arg.SeriesID,
+		arg.StartedWatch,
+		arg.Notes,
+		arg.LoggedBy,
+		arg.Test,
+	)
+	return err
+}
+
+const insertMedicationSeries = `-- name: InsertMedicationSeries :exec
+INSERT INTO medication_temp_series (id, medication_id, interval_hours, anchor_dose_id, status, logged_by, test)
+VALUES ($1, $2, $3, $4, 'active', $5, $6)
+ON CONFLICT (id) DO UPDATE
+    SET interval_hours = EXCLUDED.interval_hours,
+        anchor_dose_id = EXCLUDED.anchor_dose_id,
+        status         = 'active',
+        logged_by      = EXCLUDED.logged_by,
+        deleted_at     = NULL
+`
+
+type InsertMedicationSeriesParams struct {
+	ID            string
+	MedicationID  string
+	IntervalHours pgtype.Numeric
+	AnchorDoseID  pgtype.Text
+	LoggedBy      string
+	Test          bool
+}
+
+func (q *Queries) InsertMedicationSeries(ctx context.Context, arg *InsertMedicationSeriesParams) error {
+	_, err := q.db.Exec(ctx, insertMedicationSeries,
+		arg.ID,
+		arg.MedicationID,
+		arg.IntervalHours,
+		arg.AnchorDoseID,
+		arg.LoggedBy,
+		arg.Test,
+	)
+	return err
+}
+
+const listActiveMedicationSeries = `-- name: ListActiveMedicationSeries :many
+SELECT id, medication_id, interval_hours, anchor_dose_id, status, ended_reason
+FROM medication_temp_series
+WHERE deleted_at IS NULL AND status = 'active'
+ORDER BY created_at
+`
+
+type ListActiveMedicationSeriesRow struct {
+	ID            string
+	MedicationID  string
+	IntervalHours pgtype.Numeric
+	AnchorDoseID  pgtype.Text
+	Status        string
+	EndedReason   pgtype.Text
+}
+
+func (q *Queries) ListActiveMedicationSeries(ctx context.Context) ([]*ListActiveMedicationSeriesRow, error) {
+	rows, err := q.db.Query(ctx, listActiveMedicationSeries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*ListActiveMedicationSeriesRow
+	for rows.Next() {
+		var i ListActiveMedicationSeriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MedicationID,
+			&i.IntervalHours,
+			&i.AnchorDoseID,
+			&i.Status,
+			&i.EndedReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMedicationRoutines = `-- name: ListMedicationRoutines :many
 SELECT id, medication_id, dose_amount, schedule_type, fixed_times, interval_hours, end_type, end_value, status, logged_by, test
 FROM medication_routines
@@ -19,8 +173,8 @@ ORDER BY created_at
 `
 
 type ListMedicationRoutinesRow struct {
-	ID            pgtype.UUID
-	MedicationID  pgtype.UUID
+	ID            string
+	MedicationID  string
 	DoseAmount    pgtype.Numeric
 	ScheduleType  string
 	FixedTimes    []string
@@ -72,7 +226,7 @@ ORDER BY name
 `
 
 type ListMedicationsRow struct {
-	ID               pgtype.UUID
+	ID               string
 	Name             string
 	Route            string
 	MeasureUnit      string
@@ -113,12 +267,81 @@ func (q *Queries) ListMedications(ctx context.Context) ([]*ListMedicationsRow, e
 	return items, nil
 }
 
+const listRecentMedicationEvents = `-- name: ListRecentMedicationEvents :many
+SELECT id, medication_id, status, timestamp, routine_id, slot_time, dose_amount, dose_unit,
+    source, within_window_override, series_id, started_watch, notes, logged_by
+FROM medication_events
+WHERE deleted_at IS NULL AND timestamp >= $1
+ORDER BY timestamp DESC
+`
+
+type ListRecentMedicationEventsRow struct {
+	ID                   string
+	MedicationID         string
+	Status               string
+	Timestamp            pgtype.Timestamptz
+	RoutineID            pgtype.Text
+	SlotTime             pgtype.Text
+	DoseAmount           pgtype.Numeric
+	DoseUnit             pgtype.Text
+	Source               pgtype.Text
+	WithinWindowOverride bool
+	SeriesID             pgtype.Text
+	StartedWatch         bool
+	Notes                pgtype.Text
+	LoggedBy             string
+}
+
+func (q *Queries) ListRecentMedicationEvents(ctx context.Context, since pgtype.Timestamptz) ([]*ListRecentMedicationEventsRow, error) {
+	rows, err := q.db.Query(ctx, listRecentMedicationEvents, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*ListRecentMedicationEventsRow
+	for rows.Next() {
+		var i ListRecentMedicationEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MedicationID,
+			&i.Status,
+			&i.Timestamp,
+			&i.RoutineID,
+			&i.SlotTime,
+			&i.DoseAmount,
+			&i.DoseUnit,
+			&i.Source,
+			&i.WithinWindowOverride,
+			&i.SeriesID,
+			&i.StartedWatch,
+			&i.Notes,
+			&i.LoggedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteMedication = `-- name: SoftDeleteMedication :exec
 UPDATE medications SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteMedication(ctx context.Context, id pgtype.UUID) error {
+func (q *Queries) SoftDeleteMedication(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, softDeleteMedication, id)
+	return err
+}
+
+const softDeleteMedicationEvent = `-- name: SoftDeleteMedicationEvent :exec
+UPDATE medication_events SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteMedicationEvent(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, softDeleteMedicationEvent, id)
 	return err
 }
 
@@ -126,7 +349,7 @@ const softDeleteRoutine = `-- name: SoftDeleteRoutine :exec
 UPDATE medication_routines SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteRoutine(ctx context.Context, id pgtype.UUID) error {
+func (q *Queries) SoftDeleteRoutine(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, softDeleteRoutine, id)
 	return err
 }
@@ -135,7 +358,7 @@ const softDeleteRoutinesForMedication = `-- name: SoftDeleteRoutinesForMedicatio
 UPDATE medication_routines SET deleted_at = NOW() WHERE medication_id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteRoutinesForMedication(ctx context.Context, medicationID pgtype.UUID) error {
+func (q *Queries) SoftDeleteRoutinesForMedication(ctx context.Context, medicationID string) error {
 	_, err := q.db.Exec(ctx, softDeleteRoutinesForMedication, medicationID)
 	return err
 }
@@ -144,8 +367,27 @@ const softDeleteSeriesForMedication = `-- name: SoftDeleteSeriesForMedication :e
 UPDATE medication_temp_series SET deleted_at = NOW() WHERE medication_id = $1 AND deleted_at IS NULL
 `
 
-func (q *Queries) SoftDeleteSeriesForMedication(ctx context.Context, medicationID pgtype.UUID) error {
+func (q *Queries) SoftDeleteSeriesForMedication(ctx context.Context, medicationID string) error {
 	_, err := q.db.Exec(ctx, softDeleteSeriesForMedication, medicationID)
+	return err
+}
+
+const updateMedicationEvent = `-- name: UpdateMedicationEvent :exec
+UPDATE medication_events
+SET timestamp = $1, dose_amount = $2
+WHERE id = $3 AND deleted_at IS NULL
+`
+
+type UpdateMedicationEventParams struct {
+	Timestamp  pgtype.Timestamptz
+	DoseAmount pgtype.Numeric
+	ID         string
+}
+
+// History dose correction: timestamp + dose only. The actor (logged_by) is the
+// immutable record of who administered the dose and is never rewritten by an edit.
+func (q *Queries) UpdateMedicationEvent(ctx context.Context, arg *UpdateMedicationEventParams) error {
+	_, err := q.db.Exec(ctx, updateMedicationEvent, arg.Timestamp, arg.DoseAmount, arg.ID)
 	return err
 }
 
@@ -165,7 +407,7 @@ ON CONFLICT (id) DO UPDATE
 `
 
 type UpsertMedicationParams struct {
-	ID               pgtype.UUID
+	ID               string
 	Name             string
 	Route            string
 	MeasureUnit      string
@@ -212,8 +454,8 @@ ON CONFLICT (id) DO UPDATE
 `
 
 type UpsertMedicationRoutineParams struct {
-	ID            pgtype.UUID
-	MedicationID  pgtype.UUID
+	ID            string
+	MedicationID  string
 	DoseAmount    pgtype.Numeric
 	ScheduleType  string
 	FixedTimes    []string
