@@ -100,10 +100,19 @@ func (p *Processor) reconcileMedications(ctx context.Context) {
 		series = nil
 	}
 	for _, s := range series {
-		anchor, ok := eventByID[s.AnchorDoseID.String]
-		// No anchor in the 48h window (>48h old, or the dose was deleted) → past the
-		// 24h backstop, expire. Otherwise expire once the anchor crosses the backstop.
-		if !ok || now.Sub(anchor.Timestamp.Time) > seriesExpiryBackstop {
+		latest := latestWatchedDose(events, s.ID)
+		// Re-anchor to the latest watched dose so next_due + expiry track it (the
+		// handler does this live for new doses; this self-heals edits/deletes).
+		if latest != nil && latest.ID != s.AnchorDoseID.String {
+			if err := p.q.ReanchorSeriesToLatestDose(ctx, s.ID); err != nil {
+				p.log.Warn("ada: re-anchor series", slog.String("error", err.Error()))
+			} else {
+				changed = true
+			}
+		}
+		// No watched dose within the 48h window (none, >48h old, or all deleted) → past
+		// the 24h backstop, expire; otherwise expire once the latest crosses the backstop.
+		if latest == nil || now.Sub(latest.Timestamp.Time) > seriesExpiryBackstop {
 			if err := p.q.EndMedicationSeries(ctx, &store.EndMedicationSeriesParams{
 				ID: s.ID, Status: "expired", EndedReason: textFromString("auto_expire"),
 			}); err != nil {
@@ -114,7 +123,7 @@ func (p *Processor) reconcileMedications(ctx context.Context) {
 		}
 	}
 
-	p.remindDueMedications(ctx, now, routines, series, events, eventByID, medActive, medName)
+	p.remindDueMedications(ctx, now, routines, series, events, medActive, medName)
 
 	if changed {
 		p.pushMedEventsSensor(ctx)
@@ -217,7 +226,6 @@ func (p *Processor) remindDueMedications(
 	routines []*store.ListMedicationRoutinesRow,
 	series []*store.ListActiveMedicationSeriesRow,
 	events []*store.ListRecentMedicationEventsRow,
-	eventByID map[string]*store.ListRecentMedicationEventsRow,
 	medActive map[string]bool,
 	medName map[string]string,
 ) {
@@ -248,12 +256,12 @@ func (p *Processor) remindDueMedications(
 		}
 	}
 	for _, s := range series {
-		anchor, ok := eventByID[s.AnchorDoseID.String]
-		if !ok {
+		latest := latestWatchedDose(events, s.ID)
+		if latest == nil {
 			continue
 		}
-		if nd := seriesNextDue(anchor.Timestamp.Time, numericToFloat(s.IntervalHours)); !nd.After(now) {
-			dues = append(dues, due{s.MedicationID, "medremind:series:" + s.ID, s.AnchorDoseID.String})
+		if nd := seriesNextDue(latest.Timestamp.Time, numericToFloat(s.IntervalHours)); !nd.After(now) {
+			dues = append(dues, due{s.MedicationID, "medremind:series:" + s.ID, latest.ID})
 		}
 	}
 	if len(dues) == 0 {
