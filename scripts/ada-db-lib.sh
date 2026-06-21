@@ -78,5 +78,7 @@ run_pg_dump() {
         pg_dump -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -d "${PG_DBNAME}" \
             --no-owner --no-privileges \
             -t feedings -t feeding_segments -t feeding_bottle_detail \
-            -t diapers -t sleep_sessions -t tummy_time_sessions -t growth_measurements
+            -t diapers -t sleep_sessions -t tummy_time_sessions -t growth_measurements \
+            -t medications -t medication_routines -t medication_events \
+            -t medication_temp_series -t emergency_rows
 }

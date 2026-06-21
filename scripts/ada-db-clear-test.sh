@@ -22,11 +22,16 @@ ada_fetch_pg_creds
 echo "=== Ada test-data CLEAR (ENV=${ENV} → ${PG_DBNAME}@${PG_HOST}) ==="
 echo "Current test=true row counts:"
 run_psql -tA -c "
-    SELECT 'feedings='            || count(*) FROM feedings            WHERE test = true
-    UNION ALL SELECT 'diapers='   || count(*) FROM diapers             WHERE test = true
-    UNION ALL SELECT 'sleep='     || count(*) FROM sleep_sessions      WHERE test = true
-    UNION ALL SELECT 'tummy='     || count(*) FROM tummy_time_sessions WHERE test = true
-    UNION ALL SELECT 'growth='    || count(*) FROM growth_measurements WHERE test = true;"
+    SELECT 'feedings='            || count(*) FROM feedings              WHERE test = true
+    UNION ALL SELECT 'diapers='   || count(*) FROM diapers               WHERE test = true
+    UNION ALL SELECT 'sleep='     || count(*) FROM sleep_sessions        WHERE test = true
+    UNION ALL SELECT 'tummy='     || count(*) FROM tummy_time_sessions   WHERE test = true
+    UNION ALL SELECT 'growth='    || count(*) FROM growth_measurements   WHERE test = true
+    UNION ALL SELECT 'medications='  || count(*) FROM medications            WHERE test = true
+    UNION ALL SELECT 'med_routines=' || count(*) FROM medication_routines    WHERE test = true
+    UNION ALL SELECT 'med_events='   || count(*) FROM medication_events      WHERE test = true
+    UNION ALL SELECT 'med_series='   || count(*) FROM medication_temp_series WHERE test = true
+    UNION ALL SELECT 'emergency='    || count(*) FROM emergency_rows         WHERE test = true;"
 
 if [[ "${CONFIRM:-}" != "yes" ]]; then
     echo ""
@@ -57,15 +62,28 @@ run_psql -c "
     DELETE FROM diapers             WHERE test = true;
     DELETE FROM sleep_sessions      WHERE test = true;
     DELETE FROM tummy_time_sessions WHERE test = true;
-    DELETE FROM growth_measurements WHERE test = true;"
+    DELETE FROM growth_measurements WHERE test = true;
+    -- Medication children are deleted by their own test flag (a real, surviving
+    -- medication can carry pre-birth practice doses that must still be wiped), so
+    -- never rely on FK cascade from the parent medication here.
+    DELETE FROM medication_events      WHERE test = true;
+    DELETE FROM medication_temp_series WHERE test = true;
+    DELETE FROM medication_routines    WHERE test = true;
+    DELETE FROM medications            WHERE test = true;
+    DELETE FROM emergency_rows         WHERE test = true;"
 
 echo "=== Verify (all must be 0) ==="
 run_psql -tA -c "
-    SELECT 'feedings='            || count(*) FROM feedings            WHERE test = true
-    UNION ALL SELECT 'diapers='   || count(*) FROM diapers             WHERE test = true
-    UNION ALL SELECT 'sleep='     || count(*) FROM sleep_sessions      WHERE test = true
-    UNION ALL SELECT 'tummy='     || count(*) FROM tummy_time_sessions WHERE test = true
-    UNION ALL SELECT 'growth='    || count(*) FROM growth_measurements WHERE test = true;"
+    SELECT 'feedings='            || count(*) FROM feedings              WHERE test = true
+    UNION ALL SELECT 'diapers='   || count(*) FROM diapers               WHERE test = true
+    UNION ALL SELECT 'sleep='     || count(*) FROM sleep_sessions        WHERE test = true
+    UNION ALL SELECT 'tummy='     || count(*) FROM tummy_time_sessions   WHERE test = true
+    UNION ALL SELECT 'growth='    || count(*) FROM growth_measurements   WHERE test = true
+    UNION ALL SELECT 'medications='  || count(*) FROM medications            WHERE test = true
+    UNION ALL SELECT 'med_routines=' || count(*) FROM medication_routines    WHERE test = true
+    UNION ALL SELECT 'med_events='   || count(*) FROM medication_events      WHERE test = true
+    UNION ALL SELECT 'med_series='   || count(*) FROM medication_temp_series WHERE test = true
+    UNION ALL SELECT 'emergency='    || count(*) FROM emergency_rows         WHERE test = true;"
 
 if [[ "${ENV}" == "prod" ]]; then
     echo "=== Restarting prod engine to recompute sensors ==="

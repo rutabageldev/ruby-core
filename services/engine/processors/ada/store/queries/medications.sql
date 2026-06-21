@@ -1,0 +1,56 @@
+-- Medication registry + dosing routines (ROADMAP-0011 effort 0011.1).
+-- ids are client-generated (dashboard), so writes are upserts by id; a re-upsert
+-- revives a soft-deleted row (deleted_at = NULL). The test flag is set on insert
+-- and left untouched on update, so an edit never reclassifies a real row as test.
+
+-- name: UpsertMedication :exec
+INSERT INTO medications (id, name, route, measure_unit, min_interval_hours, max_per_24h, active, logged_by, test)
+VALUES (@id, @name, @route, @measure_unit, @min_interval_hours, @max_per_24h, @active, @logged_by, @test)
+ON CONFLICT (id) DO UPDATE
+    SET name               = EXCLUDED.name,
+        route              = EXCLUDED.route,
+        measure_unit       = EXCLUDED.measure_unit,
+        min_interval_hours = EXCLUDED.min_interval_hours,
+        max_per_24h        = EXCLUDED.max_per_24h,
+        active             = EXCLUDED.active,
+        logged_by          = EXCLUDED.logged_by,
+        deleted_at         = NULL;
+
+-- name: ListMedications :many
+SELECT id, name, route, measure_unit, min_interval_hours, max_per_24h, active, logged_by, test
+FROM medications
+WHERE deleted_at IS NULL
+ORDER BY name;
+
+-- name: SoftDeleteMedication :exec
+UPDATE medications SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;
+
+-- name: SoftDeleteRoutinesForMedication :exec
+UPDATE medication_routines SET deleted_at = NOW() WHERE medication_id = @medication_id AND deleted_at IS NULL;
+
+-- name: SoftDeleteSeriesForMedication :exec
+UPDATE medication_temp_series SET deleted_at = NOW() WHERE medication_id = @medication_id AND deleted_at IS NULL;
+
+-- name: UpsertMedicationRoutine :exec
+INSERT INTO medication_routines (id, medication_id, dose_amount, schedule_type, fixed_times, interval_hours, end_type, end_value, status, logged_by, test)
+VALUES (@id, @medication_id, @dose_amount, @schedule_type, @fixed_times, @interval_hours, @end_type, @end_value, @status, @logged_by, @test)
+ON CONFLICT (id) DO UPDATE
+    SET medication_id  = EXCLUDED.medication_id,
+        dose_amount    = EXCLUDED.dose_amount,
+        schedule_type  = EXCLUDED.schedule_type,
+        fixed_times    = EXCLUDED.fixed_times,
+        interval_hours = EXCLUDED.interval_hours,
+        end_type       = EXCLUDED.end_type,
+        end_value      = EXCLUDED.end_value,
+        status         = EXCLUDED.status,
+        logged_by      = EXCLUDED.logged_by,
+        deleted_at     = NULL;
+
+-- name: ListMedicationRoutines :many
+SELECT id, medication_id, dose_amount, schedule_type, fixed_times, interval_hours, end_type, end_value, status, logged_by, test
+FROM medication_routines
+WHERE deleted_at IS NULL
+ORDER BY created_at;
+
+-- name: SoftDeleteRoutine :exec
+UPDATE medication_routines SET deleted_at = NOW() WHERE id = @id AND deleted_at IS NULL;
