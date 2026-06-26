@@ -65,21 +65,36 @@ mv "$KEY_TMP"  "$CERTS_DIR/server-key.pem"
 mv "$CA_TMP"   "$CERTS_DIR/ca.pem"
 rm -f "$BUNDLE"
 
-# SIGHUP NATS via the Docker API. /kill (not /restart) with signal=SIGHUP
-# triggers NATS's config reload without dropping existing connections.
-# NATS validates the new cert during reload; if it's malformed it keeps the
-# old config (server/reload.go's validateOptions runs before Apply).
-HTTP_CODE=$(curl --silent --unix-socket /var/run/docker.sock \
-  -X POST --max-time 10 \
-  -o /dev/null -w '%{http_code}' \
-  "http://localhost/containers/${NATS_CONTAINER}/kill?signal=SIGHUP" || echo "000")
+# Reload or recover NATS via the Docker API, depending on its current state:
+#   - running → POST /kill?signal=SIGHUP: NATS reloads TLS in place without
+#     dropping existing connections (server/reload.go validates the new cert
+#     before Apply; a malformed cert keeps the old config).
+#   - stopped → POST /start: bring NATS up with the freshly written cert. This
+#     is the boot-recovery path (ADR-0039) — a SIGHUP cannot start a stopped
+#     container, so the renewer must start it rather than deadlock retrying.
+# Only a genuine Docker API/transport error is fatal; NATS being down is an
+# expected, recoverable state and must not fail the render.
+SOCK=/var/run/docker.sock
+API="http://localhost/containers/${NATS_CONTAINER}"
 
-case "$HTTP_CODE" in
-  204)
-    echo "post-render: cert+key+ca written to ${CERTS_DIR}; SIGHUP sent to ${NATS_CONTAINER}"
-    ;;
-  *)
-    echo "post-render: write OK but SIGHUP call returned HTTP $HTTP_CODE" >&2
-    exit 1
-    ;;
-esac
+RUNNING=$(curl --silent --unix-socket "$SOCK" --max-time 10 "${API}/json" |
+  grep -o '"Running":[a-z]*' | head -n1 | cut -d: -f2)
+
+if [ "$RUNNING" = "true" ]; then
+  HTTP_CODE=$(curl --silent --unix-socket "$SOCK" -X POST --max-time 10 \
+    -o /dev/null -w '%{http_code}' "${API}/kill?signal=SIGHUP" || echo "000")
+  case "$HTTP_CODE" in
+    204) echo "post-render: cert written to ${CERTS_DIR}; SIGHUP reloaded ${NATS_CONTAINER}" ;;
+    *) echo "post-render: cert written but SIGHUP of ${NATS_CONTAINER} returned HTTP $HTTP_CODE" >&2; exit 1 ;;
+  esac
+elif [ "$RUNNING" = "false" ]; then
+  HTTP_CODE=$(curl --silent --unix-socket "$SOCK" -X POST --max-time 10 \
+    -o /dev/null -w '%{http_code}' "${API}/start" || echo "000")
+  case "$HTTP_CODE" in
+    204 | 304) echo "post-render: cert written to ${CERTS_DIR}; ${NATS_CONTAINER} was stopped — started it (ADR-0039 recovery)" ;;
+    *) echo "post-render: cert written but start of ${NATS_CONTAINER} returned HTTP $HTTP_CODE" >&2; exit 1 ;;
+  esac
+else
+  echo "post-render: cert written but could not read ${NATS_CONTAINER} state from Docker API" >&2
+  exit 1
+fi
