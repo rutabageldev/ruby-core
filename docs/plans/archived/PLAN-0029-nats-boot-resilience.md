@@ -1,6 +1,6 @@
 # PLAN-0029 - NATS Boot Resilience
 
-* **Status:** Draft
+* **Status:** Complete
 * **Date:** 2026-06-26
 * **Project:** ruby-core
 * **Roadmap Item:** none (operational reliability fix arising from the 2026-06-23 outage)
@@ -95,6 +95,13 @@ back up.
 timestamp, healthy), the dependent services connect without crash-looping, and no manual
 intervention is required. This mirrors the original failure and is the acceptance criterion.
 
+**Result (2026-06-26):** PASS. After a real host reboot, all three NATS came up **7s after
+boot** — `running`, `healthy`, `restarts=0`, no manual `docker start`. The `wait-for-certs`
+entrypoint ran and JetStream recovered (`Server is ready`). ruby-core app services landed at
+`restarts=0–1` (vs 14–18 on the pre-fix reboot, where they crash-looped for ~5 min until NATS
+was hand-started). The prod gateway reconnected to NATS and re-subscribed to `ada_event` at
+boot. Vault (foundation static-IP fix) also came up unsealed on all 7 networks.
+
 ---
 
 ## Rollback
@@ -107,8 +114,7 @@ rollback is `git revert` + `docker compose up -d`. No data migration, no statefu
 
 ## Open Questions
 
-* **Entrypoint wait-timeout behavior.** On a genuinely certless fresh deploy with Vault down,
-  should NATS wait indefinitely (self-heal whenever Vault returns) or fail after a bounded
-  timeout so the orchestrator surfaces it? **Proposed:** bounded ~120s, then exit non-zero so
-  `restart: unless-stopped` retries — visibility without a hard deadlock. Confirm preference
-  before Step 1 lands.
+* **Entrypoint wait-timeout behavior.** *Resolved:* bounded ~120s, then exit non-zero so
+  `restart: unless-stopped` retries — visibility without a hard deadlock. Implemented in
+  `wait-for-certs.sh` (`CERT_WAIT_TIMEOUT`, default 120s); unit-tested both the timeout and
+  cert-present paths.
