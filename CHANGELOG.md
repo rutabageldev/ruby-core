@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.2](https://github.com/rutabageldev/ruby-core/compare/v0.24.1...v0.24.2) (2026-06-27)
+
+
+### Bug Fixes
+
+* **nats:** auto-recover NATS after host reboot (ADR-0039) ([d3a4e15](https://github.com/rutabageldev/ruby-core/commit/d3a4e151240ae878c284219e0619e7211bc6657b))
+* **nats:** auto-recover NATS after host reboot (ADR-0039) ([d1bac53](https://github.com/rutabageldev/ruby-core/commit/d1bac534a75a12aed0f2fd7e897d9ed9167e3637))
+
 ## [0.24.1](https://github.com/rutabageldev/ruby-core/compare/v0.24.0...v0.24.1) (2026-06-21)
 
 
