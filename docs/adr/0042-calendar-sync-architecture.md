@@ -1,6 +1,6 @@
 # ADR-0042 - Calendar Sync Architecture: Google as Source of Record, Local Durable Mirror
 
-* **Status:** Proposed
+* **Status:** Accepted
 * **Date:** 2026-06-27
 * **Supersedes:** *(none)*
 * **Superseded by:** *(none)*
