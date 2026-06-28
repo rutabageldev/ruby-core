@@ -1,6 +1,6 @@
 module github.com/primaryrutabaga/ruby-core
 
-go 1.25.8
+go 1.25.0
 
 require (
 	github.com/go-faster/errors v0.7.1
