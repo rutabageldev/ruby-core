@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.26.0](https://github.com/rutabageldev/ruby-core/compare/v0.25.1...v0.26.0) (2026-06-28)
+
+
+### Features
+
+* **api:** activate api deploy + provisioning runbook (Slice D) ([c39ba8e](https://github.com/rutabageldev/ruby-core/commit/c39ba8efb63eab8634e50032b4c69872f56f78fc))
+* **overlay:** household overlay — registries, associations, suggestions (Slice D, ROADMAP-0012.4) ([c2276a0](https://github.com/rutabageldev/ruby-core/commit/c2276a0172949355e499a3c8044103ac9ccde130))
+* **overlay:** household overlay — tables, write handlers, read endpoints (Slice D core) ([0c3dc1d](https://github.com/rutabageldev/ruby-core/commit/0c3dc1d3ebe8d093a2167a927bd348ba7346718b))
+
 ## [0.25.1](https://github.com/rutabageldev/ruby-core/compare/v0.25.0...v0.25.1) (2026-06-28)
 
 
