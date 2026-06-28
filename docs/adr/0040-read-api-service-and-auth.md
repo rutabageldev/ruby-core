@@ -1,6 +1,6 @@
 # ADR-0040 - Synchronous Read API Service (`services/api`) with Defense-in-Depth Auth
 
-* **Status:** Proposed
+* **Status:** Accepted
 * **Date:** 2026-06-27
 * **Supersedes:** *(none)*
 * **Superseded by:** *(none)*

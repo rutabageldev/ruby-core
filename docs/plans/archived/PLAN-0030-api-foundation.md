@@ -1,6 +1,6 @@
 # PLAN-0030 - API Foundation (`services/api`)
 
-* **Status:** Draft
+* **Status:** Complete
 * **Date:** 2026-06-27
 * **Project:** ruby-core
 * **Roadmap Item:** docs/roadmap/ROADMAP-0012-home-calendar.md (effort 0012.1)
@@ -172,3 +172,30 @@ the workflow commit. No data migration → clean rollback.
 * **mTLS on `services/api`** (Traefik→api) per ADR-0040: should it land in this slice or as a
   fast-follow? This plan implements network isolation + in-app bearer now and recommends mTLS as a
   scoped follow-up using the gateway's PKI-role pattern — confirm acceptable, or fold it into Step 9.
+
+---
+
+## Completion Notes
+
+Delivered on branch `feat/api-foundation`. Deviations from the plan as written, and their reasons:
+
+* **ogen pinned via `go run …@v1.22.0`, not `tools.go`/`go tool`.** ogen v1.14 cannot model the
+  `application/problem+json` media type (it silently skips the whole operation); v1.22.0 supports it
+  and generates convenient typed RFC 9457 errors. Pinned in the `//go:generate` directive in
+  `services/api/oas/generate.go`; the ogen runtime is a normal `go.mod` require.
+* **Codegen-diff CI gate scoped to OpenAPI artifacts, not sqlc.** Adding repo-wide `sqlc generate`
+  enforcement would touch the Ada domain — out of concern for this single-concern branch. sqlc joins
+  the gate in Slice C when `pkg/calendar/store` lands; that is when drift issue #117 closes.
+* **Traefik→api mTLS deferred to a fast-follow** (resolves the open question above). This slice ships
+  network isolation + the in-app bearer; mTLS needs a foundation `ruby-core-api` PKI AppRole that does
+  not exist yet. ADR-0040 obligation stands; tracked for the deploy hardening follow-up.
+* **Python client tooling installs via `pipx`** (Debian PEP-668 blocks plain `pip --user`); CI runs
+  `pipx install openapi-python-client==0.29.0`. `post_hooks: []` keeps generation deterministic.
+* **`go:embed` of the bundled spec** required a small Go package at `api/` (`apispec`), since embed
+  cannot reach a parent directory — the bundle stays the single source at `api/openapi.gen.yaml`.
+
+**Not verifiable in-repo (host-side pre-conditions, unchanged):** runtime container start and
+`/health` need the SELECT-only Postgres role (`secret/ruby-core/postgres_readonly`), the bearer token
+(`secret/ruby-core/api`, field `token`), and the `ruby-api-auth` Traefik middleware. Everything else
+(build, unit tests, codegen, lint, oasdiff, compose validation, all pre-commit + pre-push hooks) is
+verified.

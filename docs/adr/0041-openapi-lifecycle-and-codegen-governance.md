@@ -1,6 +1,6 @@
 # ADR-0041 - OpenAPI Lifecycle & Codegen Governance for the HTTP API
 
-* **Status:** Proposed
+* **Status:** Accepted
 * **Date:** 2026-06-27
 * **Supersedes:** *(none)*
 * **Superseded by:** *(none)*
