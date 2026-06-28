@@ -383,6 +383,54 @@ func FetchKVField(addr, token, path, field string) (string, error) {
 	return value, err
 }
 
+// GoogleConfig holds the OAuth credentials and target calendar for Google Calendar
+// sync (ROADMAP-0012, ADR-0042). RefreshToken is a long-lived offline token minted
+// once via cmd/google-auth; the OAuth app must be in production publishing status.
+type GoogleConfig struct {
+	ClientID     string
+	ClientSecret string
+	RefreshToken string
+	CalendarID   string
+}
+
+// FetchGoogleConfig retrieves Google Calendar OAuth config from Vault at the given
+// path (defaults to "secret/data/ruby-core/google"). Reads fields: client_id,
+// client_secret, refresh_token, calendar_id.
+func FetchGoogleConfig(addr, token, path string) (*GoogleConfig, error) {
+	if path == "" {
+		path = "secret/data/ruby-core/google"
+	}
+	client, err := newVaultClient(addr, token)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg *GoogleConfig
+	err = withRetry(func() error {
+		secret, fetchErr := client.Logical().Read(path)
+		if fetchErr != nil {
+			return fmt.Errorf("read %s: %w", path, fetchErr)
+		}
+		if secret == nil || secret.Data == nil {
+			return fmt.Errorf("no data at %s", path)
+		}
+		data, ok := secret.Data["data"].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected data format at %s", path)
+		}
+		clientID, _ := data["client_id"].(string)
+		clientSecret, _ := data["client_secret"].(string)
+		refreshToken, _ := data["refresh_token"].(string)
+		calendarID, _ := data["calendar_id"].(string)
+		if clientID == "" || clientSecret == "" || refreshToken == "" || calendarID == "" {
+			return fmt.Errorf("missing google fields in %s (need client_id, client_secret, refresh_token, calendar_id)", path)
+		}
+		cfg = &GoogleConfig{ClientID: clientID, ClientSecret: clientSecret, RefreshToken: refreshToken, CalendarID: calendarID}
+		return nil
+	})
+	return cfg, err
+}
+
 // withRetry retries fn up to 3 times with exponential backoff (1s, 2s, 4s).
 func withRetry(fn func() error) error {
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}

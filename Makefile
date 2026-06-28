@@ -13,7 +13,7 @@
         docker-ps docker-images docker-volumes docker-clean \
         setup-creds setup-creds-force setup-staging-creds nats-validate \
         ada-db-snapshot ada-db-seed ada-db-clear-test \
-        openapi-bundle openapi-gen openapi-lint openapi-diff openapi-verify
+        openapi-bundle openapi-gen openapi-lint openapi-diff openapi-verify sqlc-gen
 
 # Default target
 .DEFAULT_GOAL := help
@@ -115,7 +115,11 @@ clean: ## Remove build artifacts
 REDOCLY_VERSION  ?= 1.34.5
 SPECTRAL_VERSION ?= 6.15.0
 OASDIFF_VERSION  ?= v1.20.1
+SQLC_VERSION     ?= v1.30.0
 OPENAPI_PY_CLIENT ?= openapi-python-client
+
+sqlc-gen: ## Regenerate sqlc code for the calendar store (pinned)
+	cd pkg/calendar/store && go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
 
 openapi-bundle: ## Bundle the OpenAPI fragments into api/openapi.gen.yaml
 	npx --yes @redocly/cli@$(REDOCLY_VERSION) bundle api/openapi/openapi.root.yaml -o api/openapi.gen.yaml

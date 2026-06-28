@@ -1,6 +1,6 @@
 # PLAN-0032 - Calendar Core (mirror, sync, write consumer, read endpoint)
 
-* **Status:** Draft
+* **Status:** Complete
 * **Date:** 2026-06-27
 * **Project:** ruby-core
 * **Roadmap Item:** docs/roadmap/ROADMAP-0012-home-calendar.md (effort 0012.3)
@@ -184,3 +184,32 @@ revert + `CALENDAR_SYNC_ENABLED=false`, leaving tables intact.
 * **`logged_by` attribution:** the write contracts inject `logged_by` for per-edit attribution on the
   shared calendar — confirm whether it is persisted on `calendar_event` (audit column) or only emitted
   to the audit stream. (Recommendation: audit stream only this slice; add a column if needed later.)
+
+---
+
+## Completion Notes
+
+Delivered on branch `feat/calendar-core` (3 commits: foundation, core, reminders). Notes and
+decisions:
+
+* **Open questions resolved as recommended.** Reminders use a single configurable lead
+  (`CALENDAR_REMINDER_LEAD`, default 10m). `logged_by` is emitted to logs/audit only this slice,
+  not persisted on `calendar_event`.
+* **Reminders built** (`reminders.go` + `hapush.go`): NATS `calendar.reminder.due` (deduped per
+  occurrence) + `sensor.ruby_home_calendar_status`. The calendar got its own minimal HA REST client
+  rather than reusing ada's (ADR-0007 self-containment) — a shared `pkg/haclient` is a drift candidate.
+* **ogen + Spectral cannot model `nullable` schemas** (nimma crash), so the read endpoint's
+  `childcare` is an optional omitted-when-absent field rather than explicitly `null`. Minor contract
+  nuance; revisit if a tri-state is ever needed.
+* **Overlay fields deferred to Slice D.** The read response returns `subjects: []` and omits
+  `childcare`/attendees; the shape is established so Slice D fills them non-breaking.
+* **All-day derived UTC** anchors at midnight UTC (internal range key only); the native date trio is
+  preserved for output.
+* **sqlc CI gate added** (regenerate + fail-on-diff) for the calendar store, closing drift #117 for
+  calendar. Ada's sqlc remains manual (out of concern for this branch).
+* **No Postgres integration test** — the repo has no PG-testcontainer pattern, so the processor is
+  unit-tested with a fake store + fake Google client; real SQL is exercised only by the running engine.
+  A PG-testcontainer harness is a possible follow-up.
+* **Not verified end-to-end against live Google** — requires the engine deployed/run with this code,
+  `CALENDAR_SYNC_ENABLED=true`, and the consent screen in production status. Credentials are confirmed
+  present in Vault and readable by the engine token.

@@ -21,9 +21,13 @@ security:
 tags:
   - name: meta
     description: Service metadata and liveness of the API surface itself.
+  - name: calendar
+    description: Read access to the family calendar mirror (ROADMAP-0012).
 paths:
   /ping:
     $ref: "./paths/ping.yaml"
+  /calendar/events:
+    $ref: "./paths/calendar.yaml"
 components:
   securitySchemes:
     bearerAuth:

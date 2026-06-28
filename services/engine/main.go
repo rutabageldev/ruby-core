@@ -14,6 +14,7 @@ import (
 
 	"github.com/primaryrutabaga/ruby-core/pkg/audit"
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
+	calendarstore "github.com/primaryrutabaga/ruby-core/pkg/calendar/store"
 	"github.com/primaryrutabaga/ruby-core/pkg/config"
 	"github.com/primaryrutabaga/ruby-core/pkg/idempotency"
 	"github.com/primaryrutabaga/ruby-core/pkg/logging"
@@ -21,6 +22,7 @@ import (
 	engineconfig "github.com/primaryrutabaga/ruby-core/services/engine/config"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processors/ada"
 	adastore "github.com/primaryrutabaga/ruby-core/services/engine/processors/ada/store"
+	"github.com/primaryrutabaga/ruby-core/services/engine/processors/calendar"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processors/presence_notify"
 )
 
@@ -127,7 +129,8 @@ func main() {
 		logger.Error("config: rule loading failed — cannot start without valid rules", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-	logger.Info("config: rules loaded",
+	logger.Info(
+		"config: rules loaded",
 		slog.Int("critical_entities", len(ruleCfg.CriticalEntities)),
 		slog.Int("passlist_domains", len(ruleCfg.Passlist)),
 	)
@@ -167,7 +170,8 @@ func main() {
 		logger.Error("nats: ensure pull consumer failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-	logger.Info("nats: pull consumer ready",
+	logger.Info(
+		"nats: pull consumer ready",
 		slog.String("consumer", "engine_processor"),
 		slog.Int("max_ack_pending", consumerCfg.MaxAckPending),
 		slog.Duration("ack_wait", consumerCfg.AckWait),
@@ -176,6 +180,7 @@ func main() {
 	host := NewProcessorHost(logger)
 	host.Register(presence_notify.New(logger))
 	host.Register(ada.New(logger))
+	host.Register(calendar.New(logger))
 
 	// --- Conditional Postgres boot (ADR-0029) ---
 	// If any registered processor implements StatefulProcessor and RequiresStorage,
@@ -201,6 +206,12 @@ func main() {
 			os.Exit(1)
 		}
 		logger.Info("postgres: ada migrations applied")
+
+		if err := calendarstore.MigrateUp(context.Background(), pgCfg.DSN()); err != nil {
+			logger.Error("postgres: calendar migration failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		logger.Info("postgres: calendar migrations applied")
 
 		pool, err = pgxpool.New(context.Background(), pgCfg.DSN())
 		if err != nil {
@@ -264,7 +275,8 @@ func main() {
 		logger.Error("nats: ensure presence pull consumer failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-	logger.Info("nats: presence pull consumer ready",
+	logger.Info(
+		"nats: presence pull consumer ready",
 		slog.String("consumer", "engine_presence_processor"),
 	)
 
@@ -307,7 +319,8 @@ func main() {
 		}
 	}()
 
-	logger.Info("consumer and DLQ forwarder started",
+	logger.Info(
+		"consumer and DLQ forwarder started",
 		slog.Int("workers", consumerCfg.WorkerCount),
 		slog.Int("batch", consumerCfg.FetchBatch),
 	)

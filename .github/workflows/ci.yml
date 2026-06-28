@@ -55,6 +55,7 @@ jobs:
               - 'clients/**'
               - 'package.json'
               - 'package-lock.json'
+              - 'pkg/calendar/store/**'
 
   # ==========================================================================
   # Stage 1a: Static Analysis & Linting (ADR-0011, ADR-0013)
@@ -167,10 +168,13 @@ jobs:
       - name: Regenerate OpenAPI artifacts (bundle, ogen, Python client)
         run: make openapi-gen
 
+      - name: Regenerate sqlc (calendar store)
+        run: cd pkg/calendar/store && go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
+
       - name: Fail on drift
         run: |
-          git diff --exit-code -- api/openapi.gen.yaml services/api/oas clients/python \
-            || { echo "::error::Generated OpenAPI artifacts are out of date. Run 'make openapi-gen' and commit."; exit 1; }
+          git diff --exit-code -- api/openapi.gen.yaml services/api/oas clients/python pkg/calendar/store \
+            || { echo "::error::Generated code is out of date. Run 'make openapi-gen' / 'make sqlc-gen' and commit."; exit 1; }
 
   openapi-lint:
     name: OpenAPI Lint (Spectral)

@@ -7,6 +7,30 @@ import (
 	"github.com/ogen-go/ogen/validate"
 )
 
+func (s *ListCalendarEventsBadRequest) Validate() error {
+	alias := (*Problem)(s)
+	if err := alias.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s ListCalendarEventsOKApplicationJSON) Validate() error {
+	alias := ([]CalendarInstance)(s)
+	if alias == nil {
+		return errors.New("nil is invalid value")
+	}
+	return nil
+}
+
+func (s *ListCalendarEventsUnauthorized) Validate() error {
+	alias := (*Problem)(s)
+	if err := alias.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Problem) Validate() error {
 	if s == nil {
 		return validate.ErrNilPointer

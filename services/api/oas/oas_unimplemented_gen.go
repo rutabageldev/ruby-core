@@ -13,6 +13,19 @@ type UnimplementedHandler struct{}
 
 var _ Handler = UnimplementedHandler{}
 
+// ListCalendarEvents implements listCalendarEvents operation.
+//
+// Returns a flat, sorted list of calendar event instances whose time overlaps the requested
+// `[start, end)` window. Single events are returned directly; recurring series are expanded
+// timezone-aware (EXDATEs and cancelled occurrences subtracted, modified occurrences applied). The
+// window is bounded — a request that would expand an excessive range is rejected with a 400 Problem
+// (ADR-0042).
+//
+// GET /calendar/events
+func (UnimplementedHandler) ListCalendarEvents(ctx context.Context, params ListCalendarEventsParams) (r ListCalendarEventsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // Ping implements ping operation.
 //
 // Returns a small payload confirming the API is reachable and the caller's bearer token was accepted.

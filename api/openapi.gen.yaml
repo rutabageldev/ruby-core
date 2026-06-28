@@ -21,6 +21,8 @@ security:
 tags:
   - name: meta
     description: Service metadata and liveness of the API surface itself.
+  - name: calendar
+    description: Read access to the family calendar mirror (ROADMAP-0012).
 paths:
   /ping:
     get:
@@ -54,6 +56,87 @@ paths:
               example:
                 status: ok
                 service: api
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Unauthorized
+                status: 401
+                detail: A valid bearer token is required.
+        default:
+          description: Unexpected error, as an RFC 9457 Problem Details object.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Internal Server Error
+                status: 500
+                detail: An unexpected error occurred.
+  /calendar/events:
+    get:
+      operationId: listCalendarEvents
+      tags:
+        - calendar
+      summary: List calendar event instances in a date range
+      description: |
+        Returns a flat, sorted list of calendar event instances whose time overlaps the
+        requested `[start, end)` window. Single events are returned directly; recurring
+        series are expanded timezone-aware (EXDATEs and cancelled occurrences subtracted,
+        modified occurrences applied). The window is bounded — a request that would expand
+        an excessive range is rejected with a 400 Problem (ADR-0042).
+      parameters:
+        - name: start
+          in: query
+          required: true
+          description: Inclusive start of the window, as an RFC 3339 timestamp.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-06-01T00:00:00Z'
+        - name: end
+          in: query
+          required: true
+          description: Exclusive end of the window, as an RFC 3339 timestamp. Must be after start and within the maximum window.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-07-01T00:00:00Z'
+      responses:
+        '200':
+          description: The expanded, sorted instances in the window.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CalendarInstance'
+              example:
+                - google_event_id: abc123
+                  summary: Dentist
+                  start: '2026-06-26T13:00:00Z'
+                  end: '2026-06-26T14:00:00Z'
+                  all_day: false
+                  status: confirmed
+                  location: 123 Main St
+                  description: Cleaning
+                  subjects: []
+        '400':
+          description: Invalid range (end not after start) or the window exceeds the maximum.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Bad Request
+                status: 400
+                detail: The requested date range exceeds the maximum allowed window.
         '401':
           description: Missing or invalid bearer token.
           content:
@@ -121,3 +204,63 @@ components:
         status: 400
         detail: The requested date range exceeds the maximum allowed window.
         instance: /v1/calendar/events
+    CalendarInstance:
+      type: object
+      description: |
+        One concrete occurrence of a calendar event in the requested window. Recurring
+        series are expanded into instances server-side, timezone-aware. Times are RFC 3339
+        UTC instants; for all-day events `all_day` is true and `end` is EXCLUSIVE (a
+        one-day event on the 26th ends on the 27th — surfaced, not hidden; see ADR-0042).
+        `subjects` and `childcare` are resolved from the local overlay (populated in the
+        household-overlay slice).
+      properties:
+        google_event_id:
+          type: string
+          description: The Google event id of the master (or override child) this instance came from.
+        summary:
+          type: string
+          description: The event title.
+        start:
+          type: string
+          format: date-time
+          description: Instance start as an RFC 3339 UTC instant.
+        end:
+          type: string
+          format: date-time
+          description: Instance end as an RFC 3339 UTC instant (exclusive for all-day events).
+        all_day:
+          type: boolean
+          description: Whether this is an all-day event (date-only in Google).
+        status:
+          type: string
+          description: Google event status — confirmed, tentative, or cancelled.
+        location:
+          type: string
+          description: Free-text location, when set.
+        description:
+          type: string
+          description: Free-text description, when set.
+        subjects:
+          type: array
+          items:
+            type: string
+          description: Resolved subject person ids (the "FOR" lane) — local overlay, never written to Google.
+        childcare:
+          type: string
+          description: Resolved childcare provider id for this event; omitted when none — local overlay.
+      required:
+        - google_event_id
+        - start
+        - end
+        - all_day
+        - status
+      example:
+        google_event_id: abc123
+        summary: Dentist
+        start: '2026-06-26T13:00:00Z'
+        end: '2026-06-26T14:00:00Z'
+        all_day: false
+        status: confirmed
+        location: 123 Main St
+        description: Cleaning
+        subjects: []

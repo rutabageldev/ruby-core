@@ -1,9 +1,8 @@
 # api
 
 ruby-core's synchronous HTTP **read plane** — the spec-first, self-documenting read API
-that every domain inherits (ROADMAP-0012). Calendar, directory, and childcare endpoints are
-added against this platform in later slices; this slice ships the platform plus a meta
-`/ping` placeholder.
+that every domain inherits (ROADMAP-0012). The calendar read endpoint is served here;
+directory and childcare endpoints are added by the household-overlay slice.
 
 See ADR-0040 (service + auth) and ADR-0041 (OpenAPI lifecycle & codegen governance).
 
@@ -13,6 +12,7 @@ See ADR-0040 (service + auth) and ADR-0041 (OpenAPI lifecycle & codegen governan
 |---|---|---|
 | `GET /health` | none | Liveness for Traefik + Uptime Kuma. Outside the generated/versioned surface. |
 | `GET /v1/ping` | bearer | Confirms reachability + accepted token. Placeholder. |
+| `GET /v1/calendar/events?start=&end=` | bearer | Flat, sorted, tz-aware calendar instances in the range (recurring expanded; max-window guarded). |
 | `GET /openapi.yaml` | bearer | The bundled OpenAPI document (embedded at build time). |
 | `GET /docs` | bearer | Scalar API reference rendering `/openapi.yaml`. |
 
