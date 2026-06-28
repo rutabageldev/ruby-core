@@ -1,6 +1,6 @@
 # PLAN-0034 - Calendar Idempotency Hardening
 
-* **Status:** In Progress
+* **Status:** Complete
 * **Date:** 2026-06-28
 * **Project:** ruby-core
 * **Roadmap Item:** [docs/roadmap/ROADMAP-0012-home-calendar.md](../roadmap/ROADMAP-0012-home-calendar.md)
@@ -114,3 +114,29 @@ simply returns to Google-assigned ids for new creates. No data rollback required
 * Does the gateway populate `idempotency_key` on every calendar upsert? If not, the
   `CloudEvent.id` fallback is load-bearing — verify it is stable across redeliveries.
   (Follow-up; does not block this plan since the fallback covers it.)
+
+---
+
+## Completion Notes (2026-06-28)
+
+Steps 1–4 are implemented, unit-tested (`go test -tags=fast ./...` green), and linted
+clean. Commits on `fix/calendar-idempotency-hardening`:
+
+* `6defb1b` — code: deterministic create id + 409 convergence; ensure-absent delete +
+  410/404 backstop; `idempotency` TTL 24h→30m; `CreateOrBindKVBucket` TTL-mismatch WARN;
+  tests.
+* `e3ae61f` — docs: ADR-0025/0042 amendments, calendar README, idempotency-kv runbook.
+
+**Deviations from the plan as written:**
+
+* The `calendar_idempotency` KV bucket is **not** deprecated — `reminders.go` still uses it
+  for reminder-firing dedup. Only the create path stopped using it.
+* No mark-failure **metric** was added: there is no Prometheus/OTEL counter infrastructure
+  in the repo yet (known OTEL gap). Observability is the existing structured WARN plus the
+  new startup TTL-mismatch WARN; a real metric + KV-size alert is deferred to the OTEL
+  effort (tracked as drift).
+
+**Step 5 (live operational apply) is post-deploy and user-run** — deploy the engine, purge
+
+* recreate the `idempotency` bucket per `docs/runbooks/idempotency-kv.md`, and run the live
+create/redeliver/delete checks.
