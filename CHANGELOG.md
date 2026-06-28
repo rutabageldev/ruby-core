@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.1](https://github.com/rutabageldev/ruby-core/compare/v0.26.0...v0.26.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **calendar:** idempotent write-through at Google + shrink dedup TTL (PLAN-0034) ([088b76c](https://github.com/rutabageldev/ruby-core/commit/088b76c72b2081c6aa04797cffb11665db18173e))
+* **calendar:** make write-through idempotent at Google + shrink dedup TTL ([6defb1b](https://github.com/rutabageldev/ruby-core/commit/6defb1ba5438c797f4f70aae28dbbecc71d9bb5f))
+
 ## [0.26.0](https://github.com/rutabageldev/ruby-core/compare/v0.25.1...v0.26.0) (2026-06-28)
 
 
