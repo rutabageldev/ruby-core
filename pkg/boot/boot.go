@@ -351,6 +351,38 @@ func FetchPostgresConfig(addr, token, path string) (*PostgresConfig, error) {
 	return cfg, err
 }
 
+// FetchKVField retrieves a single non-empty string field from a Vault KV v2 secret
+// at the given path (e.g. path "secret/data/ruby-core/api", field "token"). Returns
+// an error if the path is missing, the field is absent, or the value is empty.
+func FetchKVField(addr, token, path, field string) (string, error) {
+	client, err := newVaultClient(addr, token)
+	if err != nil {
+		return "", err
+	}
+
+	var value string
+	err = withRetry(func() error {
+		secret, fetchErr := client.Logical().Read(path)
+		if fetchErr != nil {
+			return fmt.Errorf("read %s: %w", path, fetchErr)
+		}
+		if secret == nil || secret.Data == nil {
+			return fmt.Errorf("no data at %s", path)
+		}
+		data, ok := secret.Data["data"].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected data format at %s", path)
+		}
+		v, ok := data[field].(string)
+		if !ok || v == "" {
+			return fmt.Errorf("missing %s in %s", field, path)
+		}
+		value = v
+		return nil
+	})
+	return value, err
+}
+
 // withRetry retries fn up to 3 times with exponential backoff (1s, 2s, 4s).
 func withRetry(fn func() error) error {
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}

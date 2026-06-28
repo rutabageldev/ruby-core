@@ -175,6 +175,54 @@ services:
       - "traefik.http.services.ruby-gateway.loadbalancer.server.port=8080"
 
   # ==========================================================================
+  # API Service (read plane — ROADMAP-0012, ADR-0040)
+  # ==========================================================================
+  # First synchronous HTTP read API. Connects to Postgres with a SELECT-only
+  # role and runs no migrations; no NATS. ADR-0020: port NOT published — Traefik
+  # fronts it, and the in-app bearer is defense-in-depth behind the edge gate.
+  # Traefik->api mTLS is a planned fast-follow (PLAN-0030 open question).
+  #
+  # Host-side pre-conditions (provision before first deploy):
+  #   - SELECT-only Postgres role at secret/ruby-core/postgres_readonly
+  #     (fields: host, port, dbname, user, password)
+  #   - API bearer token at secret/ruby-core/api (field: token)
+  #   - the ruby-api-auth Traefik middleware in Traefik's dynamic config
+  api:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-api:${VERSION:?VERSION env var required}
+    container_name: ruby-core-prod-api
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - default
+      - vault-ruby-core-prod
+      - postgres
+      - traefik_proxy
+      - traefik-public
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - ENVIRONMENT=production
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - HTTP_ADDR=:8080
+      - VAULT_PG_PATH=secret/data/ruby-core/postgres_readonly
+      - VAULT_API_TOKEN_PATH=secret/data/ruby-core/api
+      - TZ=America/New_York
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_proxy"
+      - "traefik.http.routers.ruby-api.rule=Host(`${API_HOST:-ruby-api.internal}`)"
+      - "traefik.http.routers.ruby-api.entrypoints=websecure"
+      - "traefik.http.routers.ruby-api.tls=true"
+      - "traefik.http.routers.ruby-api.middlewares=ruby-api-auth"
+      - "traefik.http.services.ruby-api.loadbalancer.server.port=8080"
+
+  # ==========================================================================
   # Engine Service
   # ==========================================================================
   engine:

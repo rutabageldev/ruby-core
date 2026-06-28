@@ -1,0 +1,51 @@
+# Spectral ruleset for the ruby-core OpenAPI surface (ADR-0041).
+# Enforces the documentation bar: a description on every operation, parameter, and
+# response, and an example on every parameter and response body. Runs in CI as a
+# blocking gate.
+extends:
+  - "spectral:oas"
+rules:
+  # --- Descriptions (required everywhere) ---
+  operation-summary-required:
+    description: Every operation must have a summary.
+    severity: error
+    given: "$.paths[*][get,put,post,delete,patch,options,head,trace]"
+    then:
+      field: summary
+      function: truthy
+  operation-description-required:
+    description: Every operation must have a description.
+    severity: error
+    given: "$.paths[*][get,put,post,delete,patch,options,head,trace]"
+    then:
+      field: description
+      function: truthy
+  parameter-description-required:
+    description: Every parameter must have a description.
+    severity: error
+    given: "$.paths[*][get,put,post,delete,patch,options,head,trace].parameters[*]"
+    then:
+      field: description
+      function: truthy
+  response-description-required:
+    description: Every response must have a description.
+    severity: error
+    given: "$.paths[*][get,put,post,delete,patch,options,head,trace].responses[*]"
+    then:
+      field: description
+      function: truthy
+  # --- Examples (required on parameters and response bodies) ---
+  parameter-example-required:
+    description: Every parameter must carry an example.
+    severity: error
+    given: "$.paths[*][get,put,post,delete,patch,options,head,trace].parameters[*]"
+    then:
+      field: example
+      function: truthy
+  response-content-example-required:
+    description: Every response body media type must carry an example.
+    severity: error
+    given: "$.paths[*][get,put,post,delete,patch,options,head,trace].responses[*].content[*]"
+    then:
+      field: example
+      function: truthy

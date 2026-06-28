@@ -2,6 +2,7 @@
 
 * **Status:** Accepted
 * **Date:** 2026-02-01
+* **Related:** ADR-0040 generalizes this edge-auth posture to `services/api` and adds an in-app Vault-issued bearer as defense-in-depth (this ADR remains in force for the gateway).
 
 ## Context
 

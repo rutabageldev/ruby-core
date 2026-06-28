@@ -12,7 +12,8 @@
         staging-up staging-down deploy-staging \
         docker-ps docker-images docker-volumes docker-clean \
         setup-creds setup-creds-force setup-staging-creds nats-validate \
-        ada-db-snapshot ada-db-seed ada-db-clear-test
+        ada-db-snapshot ada-db-seed ada-db-clear-test \
+        openapi-bundle openapi-gen openapi-lint openapi-diff openapi-verify
 
 # Default target
 .DEFAULT_GOAL := help
@@ -104,6 +105,45 @@ lint: ## Run golangci-lint (enforced per ADR-0011/ADR-0013)
 
 clean: ## Remove build artifacts
 	go clean ./...
+
+# =============================================================================
+# API / OpenAPI (spec-first; ADR-0041)
+# =============================================================================
+# Pinned tool versions. ogen is pinned in services/api/oas/generate.go.
+# redocly + spectral run via npx (Node); oasdiff via go run; the Python client is
+# expected on PATH (install once: pipx install openapi-python-client).
+REDOCLY_VERSION  ?= 1.34.5
+SPECTRAL_VERSION ?= 6.15.0
+OASDIFF_VERSION  ?= v1.20.1
+OPENAPI_PY_CLIENT ?= openapi-python-client
+
+openapi-bundle: ## Bundle the OpenAPI fragments into api/openapi.gen.yaml
+	npx --yes @redocly/cli@$(REDOCLY_VERSION) bundle api/openapi/openapi.root.yaml -o api/openapi.gen.yaml
+
+openapi-gen: openapi-bundle ## Regenerate all OpenAPI artifacts: bundle, ogen Go server/client, Python client
+	go generate ./services/api/oas/...
+	@mkdir -p clients
+	@if ! command -v $(OPENAPI_PY_CLIENT) >/dev/null 2>&1; then \
+		echo "ERROR: $(OPENAPI_PY_CLIENT) not found. Install with: pipx install openapi-python-client"; exit 1; \
+	fi
+	$(OPENAPI_PY_CLIENT) generate --path api/openapi.gen.yaml --output-path clients/python \
+		--meta none --overwrite --config api/openapi-python-client.yaml
+
+openapi-lint: openapi-bundle ## Lint the bundled spec (Spectral: description + example required everywhere)
+	npx --yes @stoplight/spectral-cli@$(SPECTRAL_VERSION) lint api/openapi.gen.yaml --ruleset api/.spectral.yaml
+
+openapi-diff: openapi-bundle ## Detect breaking API changes vs origin/main (oasdiff)
+	@base=$$(mktemp); \
+	if git show origin/main:api/openapi.gen.yaml > $$base 2>/dev/null && [ -s $$base ]; then \
+		go run github.com/oasdiff/oasdiff@$(OASDIFF_VERSION) breaking $$base api/openapi.gen.yaml; \
+	else \
+		echo "openapi-diff: no base spec on origin/main yet — skipping breaking-change check"; \
+	fi; \
+	rm -f $$base
+
+openapi-verify: openapi-gen ## Regenerate and fail if anything drifted (mirrors the CI codegen gate)
+	@git diff --exit-code -- api/openapi.gen.yaml services/api/oas clients/python \
+		|| { echo "ERROR: generated OpenAPI artifacts are out of date. Run 'make openapi-gen' and commit."; exit 1; }
 	rm -f coverage.out
 
 # =============================================================================

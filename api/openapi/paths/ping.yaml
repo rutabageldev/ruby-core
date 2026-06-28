@@ -1,0 +1,53 @@
+get:
+  operationId: ping
+  tags:
+    - meta
+  summary: Liveness of the authenticated API surface
+  description: |
+    Returns a small payload confirming the API is reachable and the caller's bearer
+    token was accepted. This is the placeholder endpoint that establishes the read
+    platform; domain endpoints (calendar, directory, childcare) are added against it
+    in later slices. Distinct from the unauthenticated `/health` probe, which lives
+    outside the versioned, generated surface for Traefik and Uptime Kuma.
+  responses:
+    "200":
+      description: The API is reachable and the bearer token was accepted.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                description: Always `ok` when the surface is healthy.
+              service:
+                type: string
+                description: The service name reporting liveness.
+            required:
+              - status
+              - service
+          example:
+            status: ok
+            service: api
+    "401":
+      description: Missing or invalid bearer token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "../components/problem.yaml#/Problem"
+          example:
+            type: about:blank
+            title: Unauthorized
+            status: 401
+            detail: A valid bearer token is required.
+    default:
+      description: Unexpected error, as an RFC 9457 Problem Details object.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "../components/problem.yaml#/Problem"
+          example:
+            type: about:blank
+            title: Internal Server Error
+            status: 500
+            detail: An unexpected error occurred.

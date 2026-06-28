@@ -1,0 +1,36 @@
+Problem:
+  type: object
+  description: |
+    RFC 9457 Problem Details. The single error shape returned by every operation in
+    this API (ADR-0041). Domain-specific context is carried in extension members rather
+    than by string-munging `detail`.
+  properties:
+    type:
+      type: string
+      format: uri-reference
+      description: A URI reference identifying the problem type. Defaults to `about:blank` when no specific type applies.
+    title:
+      type: string
+      description: A short, human-readable, stable summary of the problem type.
+    status:
+      type: integer
+      format: int32
+      description: The HTTP status code, duplicated here for clients that read the body.
+      minimum: 100
+      maximum: 599
+    detail:
+      type: string
+      description: A human-readable explanation specific to this occurrence of the problem.
+    instance:
+      type: string
+      format: uri-reference
+      description: A URI reference identifying the specific occurrence (typically the request path).
+  required:
+    - title
+    - status
+  example:
+    type: about:blank
+    title: Bad Request
+    status: 400
+    detail: The requested date range exceeds the maximum allowed window.
+    instance: /v1/calendar/events

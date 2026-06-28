@@ -1,0 +1,5 @@
+# openapi-python-client config (ADR-0041).
+# Disable post-generation formatters (ruff/black/isort/autoflake) so the generated
+# client is byte-for-byte reproducible regardless of which formatters happen to be
+# installed — required for the codegen fail-on-diff CI gate.
+post_hooks: []
