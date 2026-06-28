@@ -3,7 +3,6 @@
 | # | Title | Status | Roadmap Item |
 |---|---|---|---|
 | [0009](PLAN-0009-full-stack-observability.md) | Full-Stack Observability | Approved | [ROADMAP-0009](../roadmap/ROADMAP-0009-full-stack-observability.md) |
-| [0031](PLAN-0031-event-bus-generalization.md) | Event-Bus Generalization | Draft | [ROADMAP-0012](../roadmap/ROADMAP-0012-home-calendar.md) |
 | [0032](PLAN-0032-calendar-core.md) | Calendar Core | Draft | [ROADMAP-0012](../roadmap/ROADMAP-0012-home-calendar.md) |
 | [0033](PLAN-0033-household-overlay.md) | Household Overlay | Draft | [ROADMAP-0012](../roadmap/ROADMAP-0012-home-calendar.md) |
 
