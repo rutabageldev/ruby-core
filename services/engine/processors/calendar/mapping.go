@@ -1,8 +1,11 @@
 package calendar
 
 import (
+	"crypto/sha256"
+	"encoding/base32"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -13,6 +16,18 @@ import (
 )
 
 const dateLayout = "2006-01-02"
+
+// deterministicEventID derives a stable Google Calendar event id from a seed (the
+// payload's idempotency_key, or the CloudEvent id as fallback). A redelivered create
+// derives the same id, so Google returns 409 instead of creating a second event
+// (ADR-0042). Google requires client-assigned ids to be base32hex (chars a-v + 0-9),
+// length 5–1024. base32.HexEncoding emits 0-9A-V; lowercasing yields the required
+// alphabet. 32 chars = 160 bits of the SHA-256 digest — collision-negligible.
+func deterministicEventID(seed string) string {
+	sum := sha256.Sum256([]byte(seed))
+	enc := base32.HexEncoding.WithPadding(base32.NoPadding).EncodeToString(sum[:])
+	return strings.ToLower(enc[:32])
+}
 
 // payloadToGoogle maps a calendar.event.upsert payload to a Google Calendar event
 // for write-through. Only Google-owned fields are set; overlay fields (subjects,

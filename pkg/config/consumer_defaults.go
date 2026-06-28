@@ -26,9 +26,17 @@ const (
 	// Must be >= DefaultFetchBatch.
 	DefaultWorkerCount = 20
 
-	// DefaultIdempotencyTTL is how long a processed event ID is retained in the
-	// idempotency store before expiry (ADR-0025).
-	DefaultIdempotencyTTL = 24 * time.Hour
+	// DefaultIdempotencyTTL is how long a processed event ID is retained in the shared
+	// idempotency store before expiry (ADR-0025). Dedup only needs to outlive the
+	// maximum redelivery window — MaxDeliver(5) × AckWait(30s) + Σ BackOff(15s) ≈ 165s
+	// before a message is DLQ'd — so 30m is an ~11× safety margin. It was previously
+	// 24h, which retained ~470× more entries than necessary: the consumer marks every
+	// processed event including the high-volume state_changed firehose, so the bucket
+	// bloated (~97k entries in prod), slowing KV ops until marks timed out and
+	// redeliveries leaked through. Correctness no longer depends on this window — the
+	// calendar write-through is idempotent at Google (ADR-0042) — so this is bloat
+	// hygiene, not the dedup guarantee.
+	DefaultIdempotencyTTL = 30 * time.Minute
 
 	// DefaultDLQMaxAge is the retention window for messages in the DLQ stream.
 	// This is a starting default; tune as DLQ monitoring tooling matures (ADR-0022).

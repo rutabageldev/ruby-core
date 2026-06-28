@@ -1,6 +1,6 @@
 # ADR-0042 - Calendar Sync Architecture: Google as Source of Record, Local Durable Mirror
 
-* **Status:** Accepted
+* **Status:** Accepted (amended 2026-06-28, see Amendments)
 * **Date:** 2026-06-27
 * **Supersedes:** *(none)*
 * **Superseded by:** *(none)*
@@ -50,13 +50,13 @@ The decision records how sync, write-through, persistence shape, recurrence, and
 
 4. **Incremental sync.** The poller **MUST** use Google's sync-token incremental polling (~60s), persisting `nextSyncToken` in a `SYNC_STATE` row keyed by `calendar_id`. A **410** on sync **MUST** trigger a full resync with a fresh token (clear the stored token, page through, record the new token) and **MUST** be logged — never a silent stop. The poller **MUST** be structured so a future Google `watch`/push can replace the timer by triggering the same incremental sync.
 
-5. **Write-through + echo reconciliation.** A local write **MUST** call Google, take the returned id/etag, and upsert the mirror in the same operation. Creates **MUST** dedupe on an `idempotency_key` carried in the payload so a redelivered create cannot double-insert into Google. Updates **MUST** send the stored `etag` as `If-Match`; a Google **412** **MUST** be handled by resyncing and retrying, not by clobbering. The poller **MUST** reconcile re-observed self-writes by `etag` so a write does not trigger reprocessing (no ping-pong).
+5. **Write-through + echo reconciliation.** A local write **MUST** call Google, take the returned id/etag, and upsert the mirror in the same operation. Creates **MUST** be idempotent **at Google**: the Google event id **MUST** be derived deterministically from the payload's `idempotency_key` (falling back to the CloudEvent id), so a redelivered create hits the same id and Google returns **409**; the **409** **MUST** be handled by fetching the existing event and converging the mirror, never by a second insert. (An application-layer dedup store cannot close the at-least-once redelivery/`AckWait`-expiry window — ADR-0025 — so correctness lives at the sink, not the KV.) Updates **MUST** send the stored `etag` as `If-Match`; a Google **412** **MUST** be handled by resyncing and retrying, not by clobbering. The poller **MUST** reconcile re-observed self-writes by `etag` so a write does not trigger reprocessing (no ping-pong).
 
 6. **Mirror shape.** The `CALENDAR_EVENT` table **MUST** reproduce Google's native shape: `google_event_id` as primary key (single-calendar boundary); start/end/original-start each a **date XOR datetime+timezone** trio with `all_day` distinguishing; all-day `end` stored and surfaced as **exclusive**; `recurrence` as a `text[]` of RRULE/EXDATE/RDATE lines; `recurring_event_id` and the `original_start_*` trio on override/cancelled children; `status` as `text` + CHECK (`confirmed|tentative|cancelled`); `etag`, `sequence`, full `raw` jsonb. Derived `start_utc`/`end_utc` columns **MUST** exist for range queries and sorting only — internal, one-directional, never an output transform. Enum-like columns **MUST** be `text` + CHECK constraints, not Postgres native enums.
 
 7. **Recurrence.** A modified or cancelled single occurrence **MUST** be stored as a separate event carrying `recurring_event_id` + the `original_start_*` trio. Cancelled children **MUST** be retained (`status = cancelled`) and subtracted during expansion like implicit EXDATEs. Expansion **MUST** be on-demand and **timezone-aware** (a weekly 9am slot stays 9am local across DST), with a **max-window guard** so a single request cannot expand an unbounded range.
 
-8. **Delete & cascade.** MVP delete **MUST** be series-level (per-instance delete deferred). A true event delete/cancel **MUST** cascade the overlay rows; cancelled events **MUST** otherwise be retained and filtered from reads and from suggestion counting (no destructive cascade on cancel).
+8. **Delete & cascade.** MVP delete **MUST** be series-level (per-instance delete deferred). Delete **MUST** be idempotent via **ensure-absent** semantics: the local mirror is the source of truth for "already deleted" — if the mirror row is absent or a cancelled tombstone, the delete already completed and **MUST** be skipped before any Google call (so the redelivery never reprocesses). A Google **410/404** **MUST** be treated as the satisfied "event absent" postcondition (finish the mirror cleanup), not as a failure — but only as a crash-window backstop beneath the mirror check, never as the primary mechanism. A true event delete/cancel **MUST** cascade the overlay rows; cancelled events **MUST** otherwise be retained and filtered from reads and from suggestion counting (no destructive cascade on cancel).
 
 9. **Reminders.** ruby-core **MUST** own reminder policy outright and **MUST NOT** read or honor Google's per-event reminder overrides (no `reminders` mirror column). The engine **MUST** compute reminders from event start times over the mirror and surface them via `sensor.ruby_home_calendar_status` (next event + active-reminder flag, always-on) and a NATS `calendar.reminder.due`.
 
@@ -86,3 +86,32 @@ The decision records how sync, write-through, persistence shape, recurrence, and
 * Establishes the engine as the single calendar writer/poller and `services/api` as the read surface — a fixed division of responsibility.
 * `google_event_id` as PK and overlay FKs bake in the single-calendar assumption; going multi-calendar later is a known, scoped migration (add the calendar dimension to the PK and every overlay FK).
 * The full `raw` jsonb column trades storage for forward compatibility.
+
+---
+
+## Amendments
+
+### 2026-06-28 — Sink-level idempotency for create + delete (PLAN-0034)
+
+Live validation showed the original Decision §5/§8 wording — "creates MUST dedupe on an
+`idempotency_key`" and a blind series-level Google delete — was insufficient under
+at-least-once delivery. A redelivered create double-inserted into Google (the dedup KV
+mark timed out during a slow `Insert` and an `AckWait` expiry let a second worker run);
+a redelivered delete hit a Google 410 and DLQ'd.
+
+§5 and §8 above are amended to move idempotency to the sink, per ADR-0025's strengthened
+requirement that write-through side-effects be idempotent themselves:
+
+* **Create** uses a deterministic, client-assigned Google event id derived from the
+  `idempotency_key` (fallback CloudEvent id); a duplicate insert returns 409 → Get +
+  converge the mirror.
+* **Delete** checks the local mirror first (absent / cancelled → already applied → skip
+  Google); a 410/404 is a crash-window backstop, not the primary guarantee.
+
+Implementation: `services/engine/processors/calendar/{writethrough.go,gcal/client.go,
+mapping.go}`. The `calendar_idempotency` KV bucket is retained for reminder-firing dedup
+(`reminders.go`); only the create path stopped using it.
+
+Caveat: Google retains the ids of deleted events, so reusing an `idempotency_key` after a
+delete yields a 409 for a genuinely-new create. This is acceptable provided
+`idempotency_key` is unique per logical create — the producer contract.

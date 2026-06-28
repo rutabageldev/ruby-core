@@ -78,9 +78,23 @@ func (h *hybridStore) Close() error {
 
 // CreateOrBindKVBucket opens the named NATS KV bucket or creates it with the given TTL.
 // Idempotent: safe to call on every service start.
+//
+// A bucket's TTL is fixed at creation; binding an existing bucket does NOT apply a new
+// ttl. So when the requested ttl differs from the live bucket's configured TTL, we WARN
+// rather than silently run with the stale value — the operator must delete + recreate
+// the bucket to apply the change (see the idempotency-KV runbook). This catches the
+// footgun where lowering DefaultIdempotencyTTL has no effect until the bucket is purged.
 func CreateOrBindKVBucket(js nats.JetStreamContext, bucket string, ttl time.Duration) (nats.KeyValue, error) {
 	kv, err := js.KeyValue(bucket)
 	if err == nil {
+		if st, serr := kv.Status(); serr == nil && st.TTL() != ttl {
+			slog.Warn("idempotency: kv bucket TTL differs from configured value — delete+recreate the bucket to apply",
+				slog.String("bucket", bucket),
+				slog.Duration("bucket_ttl", st.TTL()),
+				slog.Duration("configured_ttl", ttl),
+				slog.Uint64("entries", st.Values()),
+			)
+		}
 		return kv, nil
 	}
 	if !errors.Is(err, nats.ErrBucketNotFound) {
