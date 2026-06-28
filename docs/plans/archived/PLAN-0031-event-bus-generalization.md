@@ -1,6 +1,6 @@
 # PLAN-0031 - Event-Bus Generalization (gateway `ruby_home_event`)
 
-* **Status:** Draft
+* **Status:** Complete
 * **Date:** 2026-06-27
 * **Project:** ruby-core
 * **Roadmap Item:** docs/roadmap/ROADMAP-0012-home-calendar.md (effort 0012.2)
@@ -109,3 +109,22 @@ subscription simply stops. No stateful change, no schema, no impact on the exist
   Confirm this is the desired on-bus subject, versus collapsing childcare under a flatter
   `ha.events.ruby_home.*`. (Recommendation: keep the `ruby_home.childcare.provider_upsert` structure
   for clarity; the engine processor subscribes with a `.>` pattern regardless.)
+
+---
+
+## Completion Notes
+
+Delivered on branch `feat/event-bus-generalization`. Built as planned; notes:
+
+* **Open question resolved as recommended** — kept the structured subject
+  `ha.events.ruby_home.childcare.provider_upsert` (`provider.upsert` → `provider_upsert` per
+  ADR-0027). A unit test asserts every routed subject is composed of valid ADR-0027 tokens.
+* **Shared subject constants live in `pkg/schemas/homecal.go`** (not inline in the gateway), so the
+  Slice C/D engine consumers import the same contract (ADR-0014). `HomeEventCalendar{Upsert,Delete}`
+  and `HomeEventChildcareProvider{Upsert,Delete}`.
+* **HA producer convention:** `ruby_home_event` wraps the caller payload under a `payload` key, same
+  as `ada_event`'s `script.fire_ada_event` intermediary — documented in the gateway README.
+* **`ada_event` untouched** — dual-subscribe only; the HA-side producer migration and eventual
+  `ada_event` retirement are cross-repo follow-ups in the `homeassistant` repo, out of scope here.
+* Integration test (`-tags=integration`, testcontainers NATS) proves both new subjects land in
+  `HA_EVENTS` and that `ada_event` still routes unchanged.

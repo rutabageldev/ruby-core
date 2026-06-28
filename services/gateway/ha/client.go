@@ -16,6 +16,7 @@ import (
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 	"github.com/primaryrutabaga/ruby-core/services/gateway/ada"
 	gatewayNats "github.com/primaryrutabaga/ruby-core/services/gateway/nats"
+	"github.com/primaryrutabaga/ruby-core/services/gateway/rubyhome"
 )
 
 // haWSMessage is a generic HA WebSocket protocol message envelope.
@@ -181,11 +182,12 @@ func (c *Client) runOnce(ctx context.Context) error {
 	}
 
 	// ── subscribe to events ────────────────────────────────────────────────
-	// IDs must be unique per connection; 1 and 2 are used by the two subscriptions.
+	// IDs must be unique per connection; 1–3 are used by the three subscriptions.
 	// msgID is incremented for any subsequent command (e.g. config/auth/list).
-	const subID = 1    // state_changed
-	const adaSubID = 2 // ada_event (Phase 3b dashboard write path)
-	msgID := 3         // next available ID for on-demand commands
+	const subID = 1          // state_changed
+	const adaSubID = 2       // ada_event (Phase 3b dashboard write path)
+	const homeEventSubID = 3 // ruby_home_event (ROADMAP-0012 domain-neutral write path)
+	msgID := 4               // next available ID for on-demand commands
 
 	if err := conn.WriteJSON(haWSMessage{
 		ID:        subID,
@@ -219,7 +221,23 @@ func (c *Client) runOnce(ctx context.Context) error {
 	}
 	c.log.Info("ha websocket: subscribed to ada_event")
 
-	// Mark connected only after both subscriptions are confirmed — the health
+	if err := conn.WriteJSON(haWSMessage{
+		ID:        homeEventSubID,
+		Type:      "subscribe_events",
+		EventType: "ruby_home_event",
+	}); err != nil {
+		return fmt.Errorf("write subscribe_events ruby_home_event: %w", err)
+	}
+	var homeSubResp haWSMessage
+	if err := conn.ReadJSON(&homeSubResp); err != nil {
+		return fmt.Errorf("read subscribe ruby_home_event result: %w", err)
+	}
+	if !homeSubResp.Success {
+		return fmt.Errorf("ha websocket: subscribe ruby_home_event rejected")
+	}
+	c.log.Info("ha websocket: subscribed to ruby_home_event")
+
+	// Mark connected only after all subscriptions are confirmed — the health
 	// heartbeat reads this flag to publish ha_connected, which the engine watches
 	// to trigger restoreSensors on the false→true transition.
 	c.haConnected.Store(true)
@@ -255,9 +273,28 @@ func (c *Client) handleEvent(ctx context.Context, conn *websocket.Conn, nextID *
 	switch ev.EventType {
 	case "ada_event":
 		return c.handleAdaEvent(ctx, conn, nextID, ev)
+	case "ruby_home_event":
+		return c.handleRubyHomeEvent(ev)
 	default:
 		return c.handleStateChanged(ev)
 	}
+}
+
+// handleRubyHomeEvent processes a ruby_home_event fired from Home Assistant via the
+// domain-neutral write path (ROADMAP-0012). Like ada_event, the HA script wraps the
+// caller's payload under a "payload" key; the NATS subject is derived from the
+// payload "event" string.
+func (c *Client) handleRubyHomeEvent(ev *haEvent) error {
+	var wrapper struct {
+		Payload map[string]any `json:"payload"`
+	}
+	if err := json.Unmarshal(ev.Data, &wrapper); err != nil {
+		return fmt.Errorf("ha: unmarshal ruby_home_event wrapper: %w", err)
+	}
+	if wrapper.Payload == nil {
+		return fmt.Errorf("ha: ruby_home_event missing payload field")
+	}
+	return rubyhome.Publish(c.nc, wrapper.Payload, c.log)
 }
 
 // handleStateChanged processes a state_changed event from HA.
