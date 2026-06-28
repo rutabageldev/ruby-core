@@ -26,8 +26,39 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO ruby_core_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ruby_core_ro;
 ```
 
+> ⚠️ **Gotcha — run this with `psql -c`, not a heredoc.** `docker run` (without `-i`)
+> does **not** connect stdin to the container, so `docker run … psql … <<SQL` silently
+> discards the SQL: psql gets no input, runs nothing, and **exits 0** — looks like it
+> worked, but no role is created. Pass each statement with `-c` instead (or add `-i` if
+> you must use a heredoc). The ruby-core app user is not a superuser and cannot
+> `CREATE ROLE`; use the `postgres` superuser (its password is the
+> `POSTGRES_PASSWORD` env on the `foundation-postgres` container). Embed the role
+> password as a literal (hex from `openssl rand` is shell-safe) so it definitely
+> matches what you store in Vault:
+>
+> ```bash
+> RO_PW="$(openssl rand -hex 24)"
+> ADMIN_PW="$(docker inspect foundation-postgres \
+>   --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^POSTGRES_PASSWORD=' | cut -d= -f2-)"
+> docker run --rm --network postgres -e PGPASSWORD="$ADMIN_PW" postgres:16-alpine \
+>   psql -h foundation-postgres -p 5432 -U postgres -d ruby_core -v ON_ERROR_STOP=1 \
+>   -c "CREATE ROLE ruby_core_ro LOGIN PASSWORD '$RO_PW'" \
+>   -c "GRANT CONNECT ON DATABASE ruby_core TO ruby_core_ro" \
+>   -c "GRANT USAGE ON SCHEMA public TO ruby_core_ro" \
+>   -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ruby_core_ro" \
+>   -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ruby_core_ro"
+> # then store the same $RO_PW in Vault (next section), and verify:
+> docker run --rm --network postgres -e PGPASSWORD="$RO_PW" postgres:16-alpine \
+>   psql -h foundation-postgres -p 5432 -U ruby_core_ro -d ruby_core -tAc "SELECT count(*) FROM calendar_event"
+> ```
+
 (For the staging/dev databases, repeat the `GRANT CONNECT … <db>` + the schema grants
 while connected to that database.)
+
+> **Status:** prod is provisioned (role `ruby_core_ro` created, `secret/ruby-core/postgres_readonly`
+>
+> + `secret/ruby-core/api` populated, api healthy) as of 2026-06-28 / v0.26.0. staging + dev
+> are not yet provisioned.
 
 Store the DSN fields in Vault (the api reads `secret/data/ruby-core/postgres_readonly`):
 
@@ -72,5 +103,5 @@ After deploy: `curl -sf https://<api-host>/health` → 200, and `/v1/ping` with 
 
 ## Related
 
-- Traefik→api **mTLS** (#122) is defense-in-depth on top of this and is a separate
++ Traefik→api **mTLS** (#122) is defense-in-depth on top of this and is a separate
   follow-up — not required for the service to function.
