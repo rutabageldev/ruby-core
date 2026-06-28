@@ -9,11 +9,13 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	calendarv3 "google.golang.org/api/calendar/v3"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/calendar/expand"
 	"github.com/primaryrutabaga/ruby-core/pkg/calendar/store"
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processors/calendar/gcal"
@@ -128,6 +130,18 @@ func (s *fakeStore) MarkFullResync(_ context.Context, calID string) error {
 	s.fullResyncs++
 	s.sync = &store.SyncState{CalendarID: calID}
 	return nil
+}
+
+// The list methods are unused by the write-through/poller tests (reminder decision
+// logic is tested directly via evaluateReminders); return empty sets.
+func (s *fakeStore) ListSingleEventsInRange(_ context.Context, _ *store.ListSingleEventsInRangeParams) ([]*store.CalendarEvent, error) {
+	return nil, nil
+}
+func (s *fakeStore) ListRecurringMasters(_ context.Context) ([]*store.CalendarEvent, error) {
+	return nil, nil
+}
+func (s *fakeStore) ListOverrides(_ context.Context) ([]*store.CalendarEvent, error) {
+	return nil, nil
 }
 
 type fakeIDStore struct{ seen map[string]bool }
@@ -288,6 +302,48 @@ func TestSyncOnce_410TriggersFullResync(t *testing.T) {
 	}
 	if st.sync == nil || st.sync.SyncToken.String != "tok3" {
 		t.Errorf("fresh token not persisted after resync: %+v", st.sync)
+	}
+}
+
+func TestEvaluateReminders(t *testing.T) {
+	now := time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC)
+	mk := func(id string, off time.Duration) expand.Instance {
+		return expand.Instance{GoogleEventID: id, Start: now.Add(off)}
+	}
+	instances := []expand.Instance{
+		mk("past", -time.Hour),     // already started — not due, not next
+		mk("due", 5*time.Minute),   // within 10m lead — due + next
+		mk("soon", 30*time.Minute), // future, beyond lead — not due
+	}
+
+	d := evaluateReminders(instances, now, 10*time.Minute)
+	if !d.active {
+		t.Error("expected an active reminder")
+	}
+	if len(d.due) != 1 || d.due[0].GoogleEventID != "due" {
+		t.Errorf("due = %+v, want [due]", d.due)
+	}
+	if d.next == nil || d.next.GoogleEventID != "due" {
+		t.Errorf("next = %+v, want due", d.next)
+	}
+}
+
+func TestStatusState(t *testing.T) {
+	in := &expand.Instance{}
+	cases := []struct {
+		next   *expand.Instance
+		active bool
+		want   string
+	}{
+		{nil, false, "idle"},
+		{in, false, "upcoming"},
+		{in, true, "reminder"},
+		{nil, true, "reminder"},
+	}
+	for _, c := range cases {
+		if got := statusState(c.next, c.active); got != c.want {
+			t.Errorf("statusState(next=%v, active=%v) = %q, want %q", c.next != nil, c.active, got, c.want)
+		}
 	}
 }
 

@@ -16,6 +16,13 @@ local overlay, and serves all reads via `services/api`.
   persisting `nextSyncToken` in `sync_state`. A 410 (expired token) triggers one full resync.
   Echo reconciliation skips re-observed self-writes by etag. A future Google watch/push can
   replace the timer on the same `syncOnce` path.
+- **Reminders** (`reminders.go`) — ruby-core owns reminder policy and ignores Google's
+  per-event reminder overrides (ADR-0042). A ~60s ticker expands the upcoming window over the
+  mirror, fires each due occurrence once on NATS `calendar.reminder.due`
+  (`ha.events.calendar.reminder_due`, deduped by event id + occurrence start), and refreshes
+  the always-on `sensor.ruby_home_calendar_status` (state `reminder`/`upcoming`/`idle` + next
+  event + `active_reminder` flag) so HA automations work with no card open. The HA push is a
+  no-op where HA is not configured (non-prod). Lead time: `CALENDAR_REMINDER_LEAD` (default 10m).
 
 ## Gating
 
@@ -28,8 +35,9 @@ write events — the ADR-0033 analog for the shared external resource.
 
 | Var | Purpose |
 |---|---|
-| `CALENDAR_SYNC_ENABLED` | `true` to connect Google + run the poller (prod only). |
+| `CALENDAR_SYNC_ENABLED` | `true` to connect Google + run the poller + reminders (prod only). |
 | `VAULT_GOOGLE_PATH` | Vault path for OAuth creds (default `secret/data/ruby-core/google`). |
+| `CALENDAR_REMINDER_LEAD` | How far before start a reminder fires (Go duration; default `10m`). |
 
 Credentials (`client_id`, `client_secret`, `refresh_token`, `calendar_id`) are minted once
 via `cmd/google-auth` and stored in Vault — see `docs/runbooks/google-calendar-oauth.md`.
@@ -41,8 +49,9 @@ The engine's Vault token policy must grant read on the google path.
   token source.
 - `mapping.go` — Google event ↔ mirror row / payload conversions.
 - `pkg/calendar/expand` — timezone-aware recurrence expansion (shared with the read API).
-- Reminders (`sensor.ruby_home_calendar_status` + `calendar.reminder.due`) are not yet
-  implemented — see the slice's outstanding items.
+- `pkg/calendar/expand_range.go` — `ExpandRange`, the shared range→instances helper used by
+  both the read endpoint and reminders.
+- `hapush.go` — minimal self-contained HA REST client for the status sensor.
 
 ## Tests
 

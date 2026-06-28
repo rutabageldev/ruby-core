@@ -36,7 +36,8 @@ const (
 )
 
 // calStore is the subset of store.Queries the processor uses. Abstracting it lets
-// write-through and the poller be unit-tested with a fake (no DB container).
+// write-through, the poller, and reminders be unit-tested with a fake (no DB
+// container). It is a superset of calendar.RangeReader, so it can drive ExpandRange.
 type calStore interface {
 	UpsertEvent(ctx context.Context, arg *store.UpsertEventParams) error
 	GetEvent(ctx context.Context, googleEventID string) (*store.CalendarEvent, error)
@@ -44,6 +45,10 @@ type calStore interface {
 	GetSyncState(ctx context.Context, calendarID string) (*store.SyncState, error)
 	UpsertSyncToken(ctx context.Context, arg *store.UpsertSyncTokenParams) error
 	MarkFullResync(ctx context.Context, calendarID string) error
+
+	ListSingleEventsInRange(ctx context.Context, arg *store.ListSingleEventsInRangeParams) ([]*store.CalendarEvent, error)
+	ListRecurringMasters(ctx context.Context) ([]*store.CalendarEvent, error)
+	ListOverrides(ctx context.Context) ([]*store.CalendarEvent, error)
 }
 
 // Processor is the calendar StatefulProcessor.
@@ -56,6 +61,9 @@ type Processor struct {
 
 	gcal       gcal.Service // nil when sync is disabled
 	calendarID string
+
+	ha           *haPusher
+	reminderLead time.Duration
 
 	idStore     idempotency.Store
 	syncEnabled bool
@@ -110,10 +118,32 @@ func (p *Processor) Initialize(cfg processor.Config) error {
 	}
 	p.gcal = svc
 
-	p.wg.Go(func() { p.runPoller(ctx) })
+	p.reminderLead = reminderLeadFromEnv()
+	if cfg.HA != nil {
+		p.ha = newHAPusher(cfg.HA.URL, cfg.HA.Token)
+	} else {
+		p.ha = newHAPusher("", "") // HA disabled → sensor pushes are no-ops
+	}
 
-	p.log.Info("calendar: sync enabled", slog.String("calendar_id", p.calendarID))
+	p.wg.Go(func() { p.runPoller(ctx) })
+	p.wg.Go(func() { p.runReminders(ctx) })
+
+	p.log.Info("calendar: sync enabled",
+		slog.String("calendar_id", p.calendarID),
+		slog.Duration("reminder_lead", p.reminderLead),
+	)
 	return nil
+}
+
+// reminderLeadFromEnv reads CALENDAR_REMINDER_LEAD (a Go duration like "10m"),
+// defaulting to 10 minutes.
+func reminderLeadFromEnv() time.Duration {
+	if v := os.Getenv("CALENDAR_REMINDER_LEAD"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 10 * time.Minute
 }
 
 // Shutdown cancels the poller and releases resources.
