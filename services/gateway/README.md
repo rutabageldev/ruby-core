@@ -9,6 +9,25 @@ Also handles Ada baby tracking events via two paths:
 
 Both paths produce identical CloudEvents on `ha.events.ada.>`. See `services/gateway/ada/publish.go` for the event type → subject mapping.
 
+## `ruby_home_event` — domain-neutral write path (ROADMAP-0012)
+
+Alongside `ada_event`, the gateway subscribes to a domain-neutral `ruby_home_event` on the HA event bus. New home-automation write contracts (calendar, childcare, …) ride this single event type instead of getting a bespoke HA event type per domain. The NATS subject is derived from the payload `event` string; see `services/gateway/rubyhome/publish.go` and the shared subject constants in `pkg/schemas/homecal.go`.
+
+### Home Assistant producer contract
+
+Fire `ruby_home_event` with the caller's payload wrapped under a `payload` key (same convention as `ada_event`'s `script.fire_ada_event` intermediary), and an `event` field set to one of the route keys:
+
+| `event` | NATS subject | Consumer |
+|---|---|---|
+| `calendar.event.upsert` | `ha.events.calendar.event_upsert` | calendar processor (Slice C) |
+| `calendar.event.delete` | `ha.events.calendar.event_delete` | calendar processor (Slice C) |
+| `ruby_home.childcare.provider.upsert` | `ha.events.ruby_home.childcare.provider_upsert` | overlay (Slice D) |
+| `ruby_home.childcare.provider.delete` | `ha.events.ruby_home.childcare.provider_delete` | overlay (Slice D) |
+
+Example HA event data: `{"payload": {"event": "calendar.event.upsert", "summary": "Dentist", "start": {...}, "idempotency_key": "…"}}`. Full payload field contracts are in ROADMAP-0012.
+
+> The HA-side producer migration (firing `ruby_home_event`, and the eventual retirement of `ada_event` once all producers move over) is cross-repo work in the `homeassistant` repo and is **not** part of this repo. The gateway dual-subscribes so the cutover is non-breaking.
+
 External access is routed through Traefik; the HTTP port is never published directly to the host (ADR-0020).
 
 ## Configuration
