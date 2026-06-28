@@ -261,6 +261,10 @@ services:
       - VAULT_HA_PATH=secret/data/ruby-core/ha
       # Engine HA push gate (ADR-0033): prod is the sole projector to the shared HA.
       - HA_INGEST_ENABLED=true
+      # Calendar sync gate (ADR-0042/0033): only prod connects to the single shared
+      # Google calendar. Requires secret/data/ruby-core/google + engine Vault read access.
+      - CALENDAR_SYNC_ENABLED=true
+      - VAULT_GOOGLE_PATH=secret/data/ruby-core/google
       - TZ=America/New_York
 
   # ==========================================================================

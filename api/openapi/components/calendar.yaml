@@ -1,0 +1,60 @@
+CalendarInstance:
+  type: object
+  description: |
+    One concrete occurrence of a calendar event in the requested window. Recurring
+    series are expanded into instances server-side, timezone-aware. Times are RFC 3339
+    UTC instants; for all-day events `all_day` is true and `end` is EXCLUSIVE (a
+    one-day event on the 26th ends on the 27th — surfaced, not hidden; see ADR-0042).
+    `subjects` and `childcare` are resolved from the local overlay (populated in the
+    household-overlay slice).
+  properties:
+    google_event_id:
+      type: string
+      description: The Google event id of the master (or override child) this instance came from.
+    summary:
+      type: string
+      description: The event title.
+    start:
+      type: string
+      format: date-time
+      description: Instance start as an RFC 3339 UTC instant.
+    end:
+      type: string
+      format: date-time
+      description: Instance end as an RFC 3339 UTC instant (exclusive for all-day events).
+    all_day:
+      type: boolean
+      description: Whether this is an all-day event (date-only in Google).
+    status:
+      type: string
+      description: Google event status — confirmed, tentative, or cancelled.
+    location:
+      type: string
+      description: Free-text location, when set.
+    description:
+      type: string
+      description: Free-text description, when set.
+    subjects:
+      type: array
+      items:
+        type: string
+      description: Resolved subject person ids (the "FOR" lane) — local overlay, never written to Google.
+    childcare:
+      type: string
+      description: Resolved childcare provider id for this event; omitted when none — local overlay.
+  required:
+    - google_event_id
+    - start
+    - end
+    - all_day
+    - status
+  example:
+    google_event_id: "abc123"
+    summary: "Dentist"
+    start: "2026-06-26T13:00:00Z"
+    end: "2026-06-26T14:00:00Z"
+    all_day: false
+    status: "confirmed"
+    location: "123 Main St"
+    description: "Cleaning"
+    subjects: []

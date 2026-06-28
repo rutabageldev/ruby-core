@@ -22,6 +22,8 @@ type Service interface {
 	// full page-through; pageToken continues one. A 410 (expired sync token) is
 	// surfaced as ListResult.Expired rather than an error so the caller can resync.
 	List(ctx context.Context, calendarID, syncToken, pageToken string) (*ListResult, error)
+	// Get fetches a single event (used to resync a fresh etag after a 412 conflict).
+	Get(ctx context.Context, calendarID, eventID string) (*calendarv3.Event, error)
 	// Insert creates an event and returns it with Google's assigned id and etag.
 	Insert(ctx context.Context, calendarID string, ev *calendarv3.Event) (*calendarv3.Event, error)
 	// Update modifies an event with If-Match optimistic concurrency. A Google 412
@@ -81,6 +83,14 @@ func (a *apiService) List(ctx context.Context, calendarID, syncToken, pageToken 
 		NextPageToken: res.NextPageToken,
 		NextSyncToken: res.NextSyncToken,
 	}, nil
+}
+
+func (a *apiService) Get(ctx context.Context, calendarID, eventID string) (*calendarv3.Event, error) {
+	out, err := a.svc.Events.Get(calendarID, eventID).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("gcal: get: %w", err)
+	}
+	return out, nil
 }
 
 func (a *apiService) Insert(ctx context.Context, calendarID string, ev *calendarv3.Event) (*calendarv3.Event, error) {

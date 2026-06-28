@@ -1,0 +1,80 @@
+get:
+  operationId: listCalendarEvents
+  tags:
+    - calendar
+  summary: List calendar event instances in a date range
+  description: |
+    Returns a flat, sorted list of calendar event instances whose time overlaps the
+    requested `[start, end)` window. Single events are returned directly; recurring
+    series are expanded timezone-aware (EXDATEs and cancelled occurrences subtracted,
+    modified occurrences applied). The window is bounded — a request that would expand
+    an excessive range is rejected with a 400 Problem (ADR-0042).
+  parameters:
+    - name: start
+      in: query
+      required: true
+      description: Inclusive start of the window, as an RFC 3339 timestamp.
+      schema:
+        type: string
+        format: date-time
+      example: "2026-06-01T00:00:00Z"
+    - name: end
+      in: query
+      required: true
+      description: Exclusive end of the window, as an RFC 3339 timestamp. Must be after start and within the maximum window.
+      schema:
+        type: string
+        format: date-time
+      example: "2026-07-01T00:00:00Z"
+  responses:
+    "200":
+      description: The expanded, sorted instances in the window.
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: "../components/calendar.yaml#/CalendarInstance"
+          example:
+            - google_event_id: "abc123"
+              summary: "Dentist"
+              start: "2026-06-26T13:00:00Z"
+              end: "2026-06-26T14:00:00Z"
+              all_day: false
+              status: "confirmed"
+              location: "123 Main St"
+              description: "Cleaning"
+              subjects: []
+    "400":
+      description: Invalid range (end not after start) or the window exceeds the maximum.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "../components/problem.yaml#/Problem"
+          example:
+            type: about:blank
+            title: Bad Request
+            status: 400
+            detail: The requested date range exceeds the maximum allowed window.
+    "401":
+      description: Missing or invalid bearer token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "../components/problem.yaml#/Problem"
+          example:
+            type: about:blank
+            title: Unauthorized
+            status: 401
+            detail: A valid bearer token is required.
+    default:
+      description: Unexpected error, as an RFC 9457 Problem Details object.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "../components/problem.yaml#/Problem"
+          example:
+            type: about:blank
+            title: Internal Server Error
+            status: 500
+            detail: An unexpected error occurred.

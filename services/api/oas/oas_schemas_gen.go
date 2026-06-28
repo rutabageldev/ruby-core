@@ -4,6 +4,7 @@ package oas
 
 import (
 	"fmt"
+	"time"
 )
 
 func (s *ProblemStatusCode) Error() string {
@@ -34,6 +35,147 @@ func (s *BearerAuth) SetToken(val string) {
 func (s *BearerAuth) SetRoles(val []string) {
 	s.Roles = val
 }
+
+// One concrete occurrence of a calendar event in the requested window. Recurring series are expanded
+// into instances server-side, timezone-aware. Times are RFC 3339 UTC instants; for all-day events
+// `all_day` is true and `end` is EXCLUSIVE (a one-day event on the 26th ends on the 27th — surfaced,
+// not hidden; see ADR-0042). `subjects` and `childcare` are resolved from the local overlay (populated
+// in the household-overlay slice).
+// Ref: #/components/schemas/CalendarInstance
+type CalendarInstance struct {
+	// The Google event id of the master (or override child) this instance came from.
+	GoogleEventID string `json:"google_event_id"`
+	// The event title.
+	Summary OptString `json:"summary"`
+	// Instance start as an RFC 3339 UTC instant.
+	Start time.Time `json:"start"`
+	// Instance end as an RFC 3339 UTC instant (exclusive for all-day events).
+	End time.Time `json:"end"`
+	// Whether this is an all-day event (date-only in Google).
+	AllDay bool `json:"all_day"`
+	// Google event status — confirmed, tentative, or cancelled.
+	Status string `json:"status"`
+	// Free-text location, when set.
+	Location OptString `json:"location"`
+	// Free-text description, when set.
+	Description OptString `json:"description"`
+	// Resolved subject person ids (the "FOR" lane) — local overlay, never written to Google.
+	Subjects []string `json:"subjects"`
+	// Resolved childcare provider id for this event; omitted when none — local overlay.
+	Childcare OptString `json:"childcare"`
+}
+
+// GetGoogleEventID returns the value of GoogleEventID.
+func (s *CalendarInstance) GetGoogleEventID() string {
+	return s.GoogleEventID
+}
+
+// GetSummary returns the value of Summary.
+func (s *CalendarInstance) GetSummary() OptString {
+	return s.Summary
+}
+
+// GetStart returns the value of Start.
+func (s *CalendarInstance) GetStart() time.Time {
+	return s.Start
+}
+
+// GetEnd returns the value of End.
+func (s *CalendarInstance) GetEnd() time.Time {
+	return s.End
+}
+
+// GetAllDay returns the value of AllDay.
+func (s *CalendarInstance) GetAllDay() bool {
+	return s.AllDay
+}
+
+// GetStatus returns the value of Status.
+func (s *CalendarInstance) GetStatus() string {
+	return s.Status
+}
+
+// GetLocation returns the value of Location.
+func (s *CalendarInstance) GetLocation() OptString {
+	return s.Location
+}
+
+// GetDescription returns the value of Description.
+func (s *CalendarInstance) GetDescription() OptString {
+	return s.Description
+}
+
+// GetSubjects returns the value of Subjects.
+func (s *CalendarInstance) GetSubjects() []string {
+	return s.Subjects
+}
+
+// GetChildcare returns the value of Childcare.
+func (s *CalendarInstance) GetChildcare() OptString {
+	return s.Childcare
+}
+
+// SetGoogleEventID sets the value of GoogleEventID.
+func (s *CalendarInstance) SetGoogleEventID(val string) {
+	s.GoogleEventID = val
+}
+
+// SetSummary sets the value of Summary.
+func (s *CalendarInstance) SetSummary(val OptString) {
+	s.Summary = val
+}
+
+// SetStart sets the value of Start.
+func (s *CalendarInstance) SetStart(val time.Time) {
+	s.Start = val
+}
+
+// SetEnd sets the value of End.
+func (s *CalendarInstance) SetEnd(val time.Time) {
+	s.End = val
+}
+
+// SetAllDay sets the value of AllDay.
+func (s *CalendarInstance) SetAllDay(val bool) {
+	s.AllDay = val
+}
+
+// SetStatus sets the value of Status.
+func (s *CalendarInstance) SetStatus(val string) {
+	s.Status = val
+}
+
+// SetLocation sets the value of Location.
+func (s *CalendarInstance) SetLocation(val OptString) {
+	s.Location = val
+}
+
+// SetDescription sets the value of Description.
+func (s *CalendarInstance) SetDescription(val OptString) {
+	s.Description = val
+}
+
+// SetSubjects sets the value of Subjects.
+func (s *CalendarInstance) SetSubjects(val []string) {
+	s.Subjects = val
+}
+
+// SetChildcare sets the value of Childcare.
+func (s *CalendarInstance) SetChildcare(val OptString) {
+	s.Childcare = val
+}
+
+type ListCalendarEventsBadRequest Problem
+
+func (*ListCalendarEventsBadRequest) listCalendarEventsRes() {}
+
+type ListCalendarEventsOKApplicationJSON []CalendarInstance
+
+func (*ListCalendarEventsOKApplicationJSON) listCalendarEventsRes() {}
+
+type ListCalendarEventsUnauthorized Problem
+
+func (*ListCalendarEventsUnauthorized) listCalendarEventsRes() {}
 
 // NewOptString returns new OptString with value set to v.
 func NewOptString(v string) OptString {
