@@ -47,6 +47,11 @@ func (p *Processor) handleUpsert(ctx context.Context, evt *schemas.CloudEvent) e
 		return fmt.Errorf("calendar: mirror upsert: %w", err)
 	}
 
+	// Overlay associations ride inside the upsert payload (Slice D).
+	if err := p.reconcileAssociations(ctx, result.Id, &d); err != nil {
+		return fmt.Errorf("calendar: reconcile associations: %w", err)
+	}
+
 	p.log.Info("calendar: event written",
 		slog.String("google_event_id", result.Id),
 		slog.String("logged_by", d.LoggedBy),

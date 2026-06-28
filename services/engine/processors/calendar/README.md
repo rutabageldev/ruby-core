@@ -11,7 +11,11 @@ local overlay, and serves all reads via `services/api`.
   - create → dedupe on `idempotency_key`, Google Insert, mirror upsert (one op);
   - update → Google Update with `If-Match` etag; on a 412, resync the event and retry once
     (never clobber a concurrent edit);
-  - delete → series-level Google delete + mirror delete (overlay cascade lands in Slice D).
+  - delete → series-level Google delete + mirror delete; overlay rows cascade via the FK.
+- **Household overlay writes** (`overlay_write.go`, Slice D) — on `ha.events.ruby_home.childcare.*`,
+  upsert/archive childcare providers; and on `calendar.event.upsert`, reconcile the event's
+  `event_subject` / `event_childcare` associations from the payload's `subjects[]` / `childcare`.
+  Local-only; never written to Google.
 - **Sync poller** (`poller.go`) — incremental sync-token polling (~60s) into the mirror,
   persisting `nextSyncToken` in `sync_state`. A 410 (expired token) triggers one full resync.
   Echo reconciliation skips re-observed self-writes by etag. A future Google watch/push can

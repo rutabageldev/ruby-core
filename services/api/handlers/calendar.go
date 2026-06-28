@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
 	rubycal "github.com/primaryrutabaga/ruby-core/pkg/calendar"
 	"github.com/primaryrutabaga/ruby-core/pkg/calendar/expand"
@@ -20,16 +22,144 @@ func (s *Service) ListCalendarEvents(ctx context.Context, params oas.ListCalenda
 		return nil, badRequest(err.Error())
 	}
 
-	instances, rowsByID, err := rubycal.ExpandRange(ctx, store.New(s.pool), from, to)
+	q := store.New(s.pool)
+	instances, rowsByID, err := rubycal.ExpandRange(ctx, q, from, to)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve overlay associations by the series-level event id (the master for
+	// recurring instances; the event itself otherwise).
+	keys := associationKeys(instances, rowsByID)
+	subjectsByEvent, err := loadSubjects(ctx, q, keys)
+	if err != nil {
+		return nil, err
+	}
+	childcareByEvent, err := loadChildcare(ctx, q, keys)
+	if err != nil {
+		return nil, err
+	}
+	emailToPerson, err := loadEmailIndex(ctx, q)
 	if err != nil {
 		return nil, err
 	}
 
 	out := make(oas.ListCalendarEventsOKApplicationJSON, 0, len(instances))
 	for _, in := range instances {
-		out = append(out, toAPIInstance(in, rowsByID[in.GoogleEventID]))
+		row := rowsByID[in.GoogleEventID]
+		key := associationKey(in, row)
+		ci := toAPIInstance(in, row)
+
+		if subs := subjectsByEvent[key]; subs != nil {
+			ci.Subjects = subs
+		}
+		if pid, ok := childcareByEvent[key]; ok {
+			ci.Childcare = oas.NewOptString(pid)
+		}
+		ci.Attendees = resolveAttendees(row, emailToPerson)
+		out = append(out, ci)
 	}
 	return &out, nil
+}
+
+// associationKey is the event id the overlay associations are keyed on: the series
+// master for recurring/override instances, the event itself otherwise.
+func associationKey(in expand.Instance, row *store.CalendarEvent) string {
+	if row != nil && row.RecurringEventID.Valid && row.RecurringEventID.String != "" {
+		return row.RecurringEventID.String
+	}
+	return in.GoogleEventID
+}
+
+func associationKeys(instances []expand.Instance, rowsByID map[string]*store.CalendarEvent) []string {
+	set := make(map[string]struct{}, len(instances))
+	for _, in := range instances {
+		set[associationKey(in, rowsByID[in.GoogleEventID])] = struct{}{}
+	}
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func loadSubjects(ctx context.Context, q *store.Queries, keys []string) (map[string][]string, error) {
+	m := make(map[string][]string)
+	if len(keys) == 0 {
+		return m, nil
+	}
+	rows, err := q.ListSubjectsForEvents(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		m[r.GoogleEventID] = append(m[r.GoogleEventID], uuidStr(r.PersonID))
+	}
+	return m, nil
+}
+
+func loadChildcare(ctx context.Context, q *store.Queries, keys []string) (map[string]string, error) {
+	m := make(map[string]string)
+	if len(keys) == 0 {
+		return m, nil
+	}
+	rows, err := q.ListChildcareForEvents(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		m[r.GoogleEventID] = uuidStr(r.ProviderID)
+	}
+	return m, nil
+}
+
+func loadEmailIndex(ctx context.Context, q *store.Queries) (map[string]string, error) {
+	rows, err := q.ListActivePeople(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(rows))
+	for _, r := range rows {
+		if r.Email.Valid && r.Email.String != "" {
+			m[strings.ToLower(r.Email.String)] = uuidStr(r.ID)
+		}
+	}
+	return m, nil
+}
+
+// rawEvent is the slice of the stored Google payload we read for attendees.
+type rawEvent struct {
+	Attendees []struct {
+		Email          string `json:"email"`
+		ResponseStatus string `json:"responseStatus"`
+	} `json:"attendees"`
+}
+
+// resolveAttendees parses the stored Google payload and reconciles each attendee's
+// email to a directory person id where matched.
+func resolveAttendees(row *store.CalendarEvent, emailToPerson map[string]string) []oas.CalendarInstanceAttendeesItem {
+	out := []oas.CalendarInstanceAttendeesItem{}
+	if row == nil || len(row.Raw) == 0 {
+		return out
+	}
+	var re rawEvent
+	if err := json.Unmarshal(row.Raw, &re); err != nil {
+		return out
+	}
+	for _, a := range re.Attendees {
+		if a.Email == "" {
+			continue
+		}
+		item := oas.CalendarInstanceAttendeesItem{Email: a.Email}
+		if a.ResponseStatus != "" {
+			item.ResponseStatus = oas.NewOptString(a.ResponseStatus)
+		}
+		if pid, ok := emailToPerson[strings.ToLower(a.Email)]; ok {
+			item.PersonID = oas.NewOptString(pid)
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // toAPIInstance builds the API shape from an expanded instance plus its source row.

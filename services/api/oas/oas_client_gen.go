@@ -39,6 +39,29 @@ type Invoker interface {
 	//
 	// GET /calendar/events
 	ListCalendarEvents(ctx context.Context, params ListCalendarEventsParams) (ListCalendarEventsRes, error)
+	// ListChildcareProviderSuggestions invokes listChildcareProviderSuggestions operation.
+	//
+	// Returns non-archived providers ranked by per-occurrence recent usage: each provider's associated
+	// event series' past occurrences are expanded over a recency window, counted per occurrence, and
+	// recency-weighted (a weekly slot counts as many; a one-off counts as one). Nothing is stored — the
+	// ranking is computed from associations plus expansion, so it can't drift.
+	//
+	// GET /childcare/providers/suggestions
+	ListChildcareProviderSuggestions(ctx context.Context) (ListChildcareProviderSuggestionsRes, error)
+	// ListChildcareProviders invokes listChildcareProviders operation.
+	//
+	// Returns the active (non-archived) childcare provider roster. Archived providers are excluded but
+	// retained server-side so frequency history is preserved. Local overlay; never written to Google.
+	//
+	// GET /childcare/providers
+	ListChildcareProviders(ctx context.Context) (ListChildcareProvidersRes, error)
+	// ListDirectoryPeople invokes listDirectoryPeople operation.
+	//
+	// Returns the active people and groups in the household directory — the roster that feeds the "FOR"
+	// subject picker and childcare-provider linking. Local overlay; never reflects Google data.
+	//
+	// GET /directory/people
+	ListDirectoryPeople(ctx context.Context) (ListDirectoryPeopleRes, error)
 	// Ping invokes ping operation.
 	//
 	// Returns a small payload confirming the API is reachable and the caller's bearer token was accepted.
@@ -233,6 +256,350 @@ func (c *Client) sendListCalendarEvents(ctx context.Context, params ListCalendar
 
 	stage = "DecodeResponse"
 	result, err := decodeListCalendarEventsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ListChildcareProviderSuggestions invokes listChildcareProviderSuggestions operation.
+//
+// Returns non-archived providers ranked by per-occurrence recent usage: each provider's associated
+// event series' past occurrences are expanded over a recency window, counted per occurrence, and
+// recency-weighted (a weekly slot counts as many; a one-off counts as one). Nothing is stored — the
+// ranking is computed from associations plus expansion, so it can't drift.
+//
+// GET /childcare/providers/suggestions
+func (c *Client) ListChildcareProviderSuggestions(ctx context.Context) (ListChildcareProviderSuggestionsRes, error) {
+	res, err := c.sendListChildcareProviderSuggestions(ctx)
+	return res, err
+}
+
+func (c *Client) sendListChildcareProviderSuggestions(ctx context.Context) (res ListChildcareProviderSuggestionsRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listChildcareProviderSuggestions"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/childcare/providers/suggestions"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListChildcareProviderSuggestionsOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/childcare/providers/suggestions"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListChildcareProviderSuggestionsOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer func() {
+		// Drain the body to EOF before closing, so the underlying
+		// connection can be reused by the Transport regardless of the
+		// response status code. See https://github.com/ogen-go/ogen/issues/1670.
+		_, _ = io.Copy(io.Discard, body)
+		_ = body.Close()
+	}()
+
+	stage = "DecodeResponse"
+	result, err := decodeListChildcareProviderSuggestionsResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ListChildcareProviders invokes listChildcareProviders operation.
+//
+// Returns the active (non-archived) childcare provider roster. Archived providers are excluded but
+// retained server-side so frequency history is preserved. Local overlay; never written to Google.
+//
+// GET /childcare/providers
+func (c *Client) ListChildcareProviders(ctx context.Context) (ListChildcareProvidersRes, error) {
+	res, err := c.sendListChildcareProviders(ctx)
+	return res, err
+}
+
+func (c *Client) sendListChildcareProviders(ctx context.Context) (res ListChildcareProvidersRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listChildcareProviders"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/childcare/providers"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListChildcareProvidersOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/childcare/providers"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListChildcareProvidersOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer func() {
+		// Drain the body to EOF before closing, so the underlying
+		// connection can be reused by the Transport regardless of the
+		// response status code. See https://github.com/ogen-go/ogen/issues/1670.
+		_, _ = io.Copy(io.Discard, body)
+		_ = body.Close()
+	}()
+
+	stage = "DecodeResponse"
+	result, err := decodeListChildcareProvidersResponse(resp)
+	if err != nil {
+		return res, errors.Wrap(err, "decode response")
+	}
+
+	return result, nil
+}
+
+// ListDirectoryPeople invokes listDirectoryPeople operation.
+//
+// Returns the active people and groups in the household directory — the roster that feeds the "FOR"
+// subject picker and childcare-provider linking. Local overlay; never reflects Google data.
+//
+// GET /directory/people
+func (c *Client) ListDirectoryPeople(ctx context.Context) (ListDirectoryPeopleRes, error) {
+	res, err := c.sendListDirectoryPeople(ctx)
+	return res, err
+}
+
+func (c *Client) sendListDirectoryPeople(ctx context.Context) (res ListDirectoryPeopleRes, err error) {
+	otelAttrs := []attribute.KeyValue{
+		otelogen.OperationID("listDirectoryPeople"),
+		semconv.HTTPRequestMethodKey.String("GET"),
+		semconv.URLTemplateKey.String("/directory/people"),
+	}
+	otelAttrs = append(otelAttrs, c.cfg.Attributes...)
+
+	// Run stopwatch.
+	startTime := time.Now()
+	defer func() {
+		// Use floating point division here for higher precision (instead of Millisecond method).
+		elapsedDuration := time.Since(startTime)
+		c.duration.Record(ctx, float64(elapsedDuration)/float64(time.Millisecond), metric.WithAttributes(otelAttrs...))
+	}()
+
+	// Increment request counter.
+	c.requests.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+
+	// Start a span for this request.
+	ctx, span := c.cfg.Tracer.Start(ctx, ListDirectoryPeopleOperation,
+		trace.WithAttributes(otelAttrs...),
+		clientSpanKind,
+	)
+	// Track stage for error reporting.
+	var stage string
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, stage)
+			c.errors.Add(ctx, 1, metric.WithAttributes(otelAttrs...))
+		}
+		span.End()
+	}()
+
+	stage = "BuildURL"
+	u := uri.Clone(c.requestURL(ctx))
+	var pathParts [1]string
+	pathParts[0] = "/directory/people"
+	uri.AddPathParts(u, pathParts[:]...)
+
+	stage = "EncodeRequest"
+	r, err := ht.NewRequest(ctx, "GET", u)
+	if err != nil {
+		return res, errors.Wrap(err, "create request")
+	}
+
+	{
+		type bitset = [1]uint8
+		var satisfied bitset
+		{
+			stage = "Security:BearerAuth"
+			switch err := c.securityBearerAuth(ctx, ListDirectoryPeopleOperation, r); {
+			case err == nil: // if NO error
+				satisfied[0] |= 1 << 0
+			case errors.Is(err, ogenerrors.ErrSkipClientSecurity):
+				// Skip this security.
+			default:
+				return res, errors.Wrap(err, "security \"BearerAuth\"")
+			}
+		}
+
+		if ok := func() bool {
+		nextRequirement:
+			for _, requirement := range []bitset{
+				{0b00000001},
+			} {
+				for i, mask := range requirement {
+					if satisfied[i]&mask != mask {
+						continue nextRequirement
+					}
+				}
+				return true
+			}
+			return false
+		}(); !ok {
+			return res, ogenerrors.ErrSecurityRequirementIsNotSatisfied
+		}
+	}
+
+	stage = "SendRequest"
+	resp, err := c.cfg.Client.Do(r)
+	if err != nil {
+		return res, errors.Wrap(err, "do request")
+	}
+	body := resp.Body
+	defer func() {
+		// Drain the body to EOF before closing, so the underlying
+		// connection can be reused by the Transport regardless of the
+		// response status code. See https://github.com/ogen-go/ogen/issues/1670.
+		_, _ = io.Copy(io.Discard, body)
+		_ = body.Close()
+	}()
+
+	stage = "DecodeResponse"
+	result, err := decodeListDirectoryPeopleResponse(resp)
 	if err != nil {
 		return res, errors.Wrap(err, "decode response")
 	}

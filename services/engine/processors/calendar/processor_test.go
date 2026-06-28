@@ -87,10 +87,44 @@ type fakeStore struct {
 	sync        *store.SyncState
 	upserts     int
 	fullResyncs int
+
+	providers []*store.UpsertProviderParams
+	archived  []pgtype.UUID
+	subjects  map[string][]pgtype.UUID
+	childcare map[string]pgtype.UUID
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{events: map[string]*store.CalendarEvent{}}
+	return &fakeStore{
+		events:    map[string]*store.CalendarEvent{},
+		subjects:  map[string][]pgtype.UUID{},
+		childcare: map[string]pgtype.UUID{},
+	}
+}
+
+func (s *fakeStore) UpsertProvider(_ context.Context, arg *store.UpsertProviderParams) error {
+	s.providers = append(s.providers, arg)
+	return nil
+}
+func (s *fakeStore) ArchiveProvider(_ context.Context, id pgtype.UUID) error {
+	s.archived = append(s.archived, id)
+	return nil
+}
+func (s *fakeStore) DeleteEventSubjects(_ context.Context, eid string) error {
+	delete(s.subjects, eid)
+	return nil
+}
+func (s *fakeStore) InsertEventSubject(_ context.Context, arg *store.InsertEventSubjectParams) error {
+	s.subjects[arg.GoogleEventID] = append(s.subjects[arg.GoogleEventID], arg.PersonID)
+	return nil
+}
+func (s *fakeStore) DeleteEventChildcare(_ context.Context, eid string) error {
+	delete(s.childcare, eid)
+	return nil
+}
+func (s *fakeStore) InsertEventChildcare(_ context.Context, arg *store.InsertEventChildcareParams) error {
+	s.childcare[arg.GoogleEventID] = arg.ProviderID
+	return nil
 }
 
 func (s *fakeStore) UpsertEvent(_ context.Context, arg *store.UpsertEventParams) error {
@@ -302,6 +336,46 @@ func TestSyncOnce_410TriggersFullResync(t *testing.T) {
 	}
 	if st.sync == nil || st.sync.SyncToken.String != "tok3" {
 		t.Errorf("fresh token not persisted after resync: %+v", st.sync)
+	}
+}
+
+func ptr(s string) *string { return &s }
+
+func TestHandleProviderUpsert_GeneratesIDWhenAbsent(t *testing.T) {
+	p, _, st := newTestProcessor()
+	evt := cloudEvent(t, schemas.ChildcareProviderUpsertData{DisplayName: "Maya"})
+	if err := p.handleProviderUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("provider upsert: %v", err)
+	}
+	if len(st.providers) != 1 {
+		t.Fatalf("providers recorded = %d, want 1", len(st.providers))
+	}
+	if !st.providers[0].ID.Valid {
+		t.Error("expected a generated provider id")
+	}
+	if st.providers[0].DisplayName != "Maya" {
+		t.Errorf("display_name = %q, want Maya", st.providers[0].DisplayName)
+	}
+}
+
+func TestHandleUpsert_ReconcilesAssociations(t *testing.T) {
+	p, _, st := newTestProcessor()
+	start, end := timedEvent(t)
+	evt := cloudEvent(t, schemas.CalendarUpsertData{
+		Summary: "Soccer", Start: start, End: end,
+		Subjects:       []string{"11111111-1111-4111-8111-111111111111"},
+		Childcare:      ptr("22222222-2222-4222-8222-222222222222"),
+		IdempotencyKey: "k-assoc",
+	})
+	if err := p.handleUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("upsert with associations: %v", err)
+	}
+	// fakeGCal assigns the created event id "g1".
+	if got := len(st.subjects["g1"]); got != 1 {
+		t.Errorf("subjects for g1 = %d, want 1", got)
+	}
+	if !st.childcare["g1"].Valid {
+		t.Error("expected a childcare association for g1")
 	}
 }
 

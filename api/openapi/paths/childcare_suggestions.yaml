@@ -1,0 +1,46 @@
+get:
+  operationId: listChildcareProviderSuggestions
+  tags:
+    - childcare
+  summary: List childcare providers ranked by recent usage
+  description: |
+    Returns non-archived providers ranked by per-occurrence recent usage: each
+    provider's associated event series' past occurrences are expanded over a recency
+    window, counted per occurrence, and recency-weighted (a weekly slot counts as
+    many; a one-off counts as one). Nothing is stored — the ranking is computed from
+    associations plus expansion, so it can't drift.
+  responses:
+    "200":
+      description: Providers ranked by descending score.
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: "../components/childcare.yaml#/ProviderSuggestion"
+          example:
+            - id: "22222222-2222-4222-8222-222222222222"
+              display_name: "Sue"
+              score: 4.5
+    "401":
+      description: Missing or invalid bearer token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "../components/problem.yaml#/Problem"
+          example:
+            type: about:blank
+            title: Unauthorized
+            status: 401
+            detail: A valid bearer token is required.
+    default:
+      description: Unexpected error, as an RFC 9457 Problem Details object.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "../components/problem.yaml#/Problem"
+          example:
+            type: about:blank
+            title: Internal Server Error
+            status: 500
+            detail: An unexpected error occurred.

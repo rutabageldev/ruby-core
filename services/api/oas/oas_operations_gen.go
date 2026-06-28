@@ -6,6 +6,9 @@ package oas
 type OperationName = string
 
 const (
-	ListCalendarEventsOperation OperationName = "ListCalendarEvents"
-	PingOperation               OperationName = "Ping"
+	ListCalendarEventsOperation               OperationName = "ListCalendarEvents"
+	ListChildcareProviderSuggestionsOperation OperationName = "ListChildcareProviderSuggestions"
+	ListChildcareProvidersOperation           OperationName = "ListChildcareProviders"
+	ListDirectoryPeopleOperation              OperationName = "ListDirectoryPeople"
+	PingOperation                             OperationName = "Ping"
 )

@@ -188,12 +188,11 @@ services:
   #   - API bearer token at secret/ruby-core/api (field: token)
   #   - the ruby-api-auth Traefik middleware in Traefik's dynamic config
   api:
-    # Opt-in until host-side prerequisites exist (read-only Postgres role at
-    # secret/ruby-core/postgres_readonly, the api bearer at secret/ruby-core/api,
-    # and the ruby-api-auth Traefik middleware). Without this profile the deploy
-    # skips api (no pull, no start); enable with COMPOSE_PROFILES=api once
-    # provisioned (drift #123).
-    profiles: [api]
+    # Active read service (calendar + household-overlay endpoints). REQUIRES the
+    # host-side prerequisites in docs/runbooks/api-deploy-provisioning.md before
+    # this release deploys, or the container crash-loops: a read-only Postgres role
+    # at secret/ruby-core/postgres_readonly, the api bearer at secret/ruby-core/api,
+    # and the ruby-api-auth Traefik middleware.
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-api:${VERSION:?VERSION env var required}
     container_name: ruby-core-prod-api
     restart: unless-stopped

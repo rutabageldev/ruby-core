@@ -1,0 +1,40 @@
+Person:
+  type: object
+  description: A person or group in the household directory — feeds the "FOR" subject picker and provider linking. Local overlay, never written to Google.
+  properties:
+    id:
+      type: string
+      description: The person's stable id (UUID).
+    display_name:
+      type: string
+      description: Human-readable name.
+    kind:
+      type: string
+      description: Either `person` or `group` (a group like "Household" has no membership in MVP).
+    ha_person_entity_id:
+      type: string
+      description: The Home Assistant person entity id this maps to, when present.
+    email:
+      type: string
+      description: Email used to reconcile calendar attendees to this person, when present.
+    family:
+      type: string
+      description: Family grouping used to colour-by-family in clients.
+    color:
+      type: string
+      description: Display colour, when set.
+    active:
+      type: boolean
+      description: Whether the person is active.
+  required:
+    - id
+    - display_name
+    - kind
+    - active
+  example:
+    id: "11111111-1111-4111-8111-111111111111"
+    display_name: "Katie"
+    kind: "person"
+    email: "michael.katie.rubanka@gmail.com"
+    family: "Rubanka"
+    active: true

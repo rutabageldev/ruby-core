@@ -5,6 +5,18 @@ type ListCalendarEventsRes interface {
 	listCalendarEventsRes()
 }
 
+type ListChildcareProviderSuggestionsRes interface {
+	listChildcareProviderSuggestionsRes()
+}
+
+type ListChildcareProvidersRes interface {
+	listChildcareProvidersRes()
+}
+
+type ListDirectoryPeopleRes interface {
+	listDirectoryPeopleRes()
+}
+
 type PingRes interface {
 	pingRes()
 }
