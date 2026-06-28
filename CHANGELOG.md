@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.25.0](https://github.com/rutabageldev/ruby-core/compare/v0.24.2...v0.25.0) (2026-06-28)
+
+
+### Features
+
+* **api:** scaffold spec-first HTTP read API platform (Slice A) ([7600081](https://github.com/rutabageldev/ruby-core/commit/76000813bcdc41a4c9033248c696a629cc9a2d1b))
+* **api:** spec-first HTTP read API platform (Slice A, ROADMAP-0012.1) ([4ff1b26](https://github.com/rutabageldev/ruby-core/commit/4ff1b2636a07cf4fb7937473eda1fc7b1252dedd))
+* **calendar:** calendar core — mirror, bidirectional sync, reminders, read endpoint (Slice C, ROADMAP-0012.3) ([8eccac1](https://github.com/rutabageldev/ruby-core/commit/8eccac1de4614ec5f544ae2d966030b774e05200))
+* **calendar:** reminders — NATS due signal + HA status sensor (Slice C) ([0455fcd](https://github.com/rutabageldev/ruby-core/commit/0455fcd0305bef5cf63d314c4f9556f305182e03))
+* **calendar:** store, tz-aware expansion, Google client, auth helper (Slice C foundation) ([04f0644](https://github.com/rutabageldev/ruby-core/commit/04f0644a72bd32757ba7e62f05e9701ebd296d1f))
+* **calendar:** write-through processor, sync poller, read endpoint (Slice C core) ([3955a41](https://github.com/rutabageldev/ruby-core/commit/3955a41f09ddb2f1e878d5391739d8d334267a59))
+* **gateway:** domain-neutral ruby_home_event write path (Slice B, ROADMAP-0012.2) ([d3a81f2](https://github.com/rutabageldev/ruby-core/commit/d3a81f2bdafaec28968b04d9d911f7a54c42e302))
+* **gateway:** dual-subscribe ruby_home_event write path (Slice B) ([76652e5](https://github.com/rutabageldev/ruby-core/commit/76652e56bf56b035769fa8999e157fa91f53d332))
+
+
+### Bug Fixes
+
+* **build:** restore go.mod directive to 1.25.0 (CI toolchain match) ([e3bb3dd](https://github.com/rutabageldev/ruby-core/commit/e3bb3ddec61dad931712e662483290c8ebe6a6fc))
+
 ## [0.24.2](https://github.com/rutabageldev/ruby-core/compare/v0.24.1...v0.24.2) (2026-06-27)
 
 
