@@ -216,11 +216,10 @@ services:
   # publicly routed). Pre-conditions: secret/ruby-core/staging/postgres_readonly
   # and secret/ruby-core/staging/api (field: token).
   api:
-    # Opt-in until host-side prerequisites exist (read-only Postgres role at
-    # secret/ruby-core/staging/postgres_readonly + the staging api bearer). Without
-    # this profile the deploy skips api (no pull, no start) so releases stay green;
-    # enable with COMPOSE_PROFILES=api once provisioned (drift #123).
-    profiles: [api]
+    # Active read service. REQUIRES host-side prerequisites before this release
+    # deploys (docs/runbooks/api-deploy-provisioning.md): a read-only Postgres role
+    # at secret/ruby-core/staging/postgres_readonly and the staging api bearer at
+    # secret/ruby-core/staging/api.
     image: ghcr.io/${GITHUB_REPOSITORY_OWNER}/ruby-core-api:${VERSION}
     container_name: ruby-core-staging-api
     restart: unless-stopped

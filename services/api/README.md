@@ -12,7 +12,10 @@ See ADR-0040 (service + auth) and ADR-0041 (OpenAPI lifecycle & codegen governan
 |---|---|---|
 | `GET /health` | none | Liveness for Traefik + Uptime Kuma. Outside the generated/versioned surface. |
 | `GET /v1/ping` | bearer | Confirms reachability + accepted token. Placeholder. |
-| `GET /v1/calendar/events?start=&end=` | bearer | Flat, sorted, tz-aware calendar instances in the range (recurring expanded; max-window guarded). |
+| `GET /v1/calendar/events?start=&end=` | bearer | Flat, sorted, tz-aware calendar instances in the range (recurring expanded; max-window guarded; resolved subjects/childcare/attendees). |
+| `GET /v1/directory/people` | bearer | Active household directory (people + groups). |
+| `GET /v1/childcare/providers` | bearer | Active (non-archived) childcare provider roster. |
+| `GET /v1/childcare/providers/suggestions` | bearer | Providers ranked by recency-weighted per-occurrence usage. |
 | `GET /openapi.yaml` | bearer | The bundled OpenAPI document (embedded at build time). |
 | `GET /docs` | bearer | Scalar API reference rendering `/openapi.yaml`. |
 
