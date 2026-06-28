@@ -7,11 +7,17 @@ local overlay, and serves all reads via `services/api`.
 ## Responsibilities
 
 - **Write consumer** — the single ingress for calendar writes, on `ha.events.calendar.event_upsert`
-  and `ha.events.calendar.event_delete` (routed in by the gateway, Slice B). Write-through:
-  - create → dedupe on `idempotency_key`, Google Insert, mirror upsert (one op);
+  and `ha.events.calendar.event_delete` (routed in by the gateway, Slice B). Idempotency lives
+  at the sink, not in the KV dedup store, because at-least-once redelivery can slip past it
+  (ADR-0025/ADR-0042). Write-through:
+  - create → Google Insert with a **deterministic event id** derived from `idempotency_key`
+    (fallback: CloudEvent id), then mirror upsert. A redelivered create hits the same id →
+    Google 409 → fetch the existing event and converge the mirror (never a second insert);
   - update → Google Update with `If-Match` etag; on a 412, resync the event and retry once
     (never clobber a concurrent edit);
-  - delete → series-level Google delete + mirror delete; overlay rows cascade via the FK.
+  - delete → **ensure-absent**: skip when the mirror row is already gone or a cancelled
+    tombstone (the delete already applied); otherwise series-level Google delete + mirror
+    delete, with a 410/404 backstop for the crash window. Overlay rows cascade via the FK.
 - **Household overlay writes** (`overlay_write.go`, Slice D) — on `ha.events.ruby_home.childcare.*`,
   upsert/archive childcare providers; and on `calendar.event.upsert`, reconcile the event's
   `event_subject` / `event_childcare` associations from the payload's `subjects[]` / `childcare`.
