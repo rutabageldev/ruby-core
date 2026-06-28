@@ -1,6 +1,6 @@
 # PLAN-0033 - Household Overlay (people, childcare, subjects, suggestions)
 
-* **Status:** Draft
+* **Status:** Complete
 * **Date:** 2026-06-27
 * **Project:** ruby-core
 * **Roadmap Item:** docs/roadmap/ROADMAP-0012-home-calendar.md (effort 0012.4)
@@ -122,3 +122,30 @@ unaffected by rolling back this slice.
 * **Recency window + weighting for suggestions:** what lookback window and decay shape rank providers
   (e.g. 90 days, linear vs exponential recency weight)? Default to a documented fixed window +
   simple recency weight in Step 4 unless specified.
+
+---
+
+## Completion Notes
+
+Delivered on branch `feat/household-overlay` (commits: overlay core + deploy activation). Open
+questions resolved and deviations:
+
+* **citext → text + lower() index.** Avoided the `CREATE EXTENSION citext` privilege dependency
+  entirely: `email text` with a partial unique index on `lower(email)`, and case-folded lookups.
+* **Suggestions window/weight.** `pkg/calendar.DefaultSuggestionWindow` = 90 days, linear recency
+  weight (1.0 at now → 0 at the window edge); per-occurrence counting via expansion, nothing stored.
+* **Cascade via FK.** Overlay rows `ON DELETE CASCADE` to `calendar_event`, so a true event delete
+  cleans up associations automatically — no app-side cascade code.
+* **Association resolution is series-level**, keyed on the master event id (recurring/override
+  instances resolve to the master); per-instance overrides are out of scope (MVP).
+* **Attendee reconciliation matches the primary email only** (Google `attendees[].email`), parsed
+  from the stored `raw` payload. Aliases / secondary emails are not matched — a known limitation.
+* **`relationship` is unconstrained free text** (no CHECK) — the brief said the values will grow and
+  none are defined yet; add a CHECK once a vocabulary is settled.
+* **api un-gated for deploy.** Removed the `profiles: [api]` gate added in #130; the Slice D release
+  deploys api. Host-side provisioning is a hard prerequisite — see
+  `docs/runbooks/api-deploy-provisioning.md`.
+* **No directory-person write event.** The brief defines no person write contract, so people are
+  managed out-of-band / seeded; the read endpoint + `UpsertPerson` (for seeding) are provided.
+* **No Postgres integration test** (drift #127) — overlay logic is unit-tested with fakes; real SQL
+  (the CASCADE, the unique indexes, the joins) runs only in the live engine/api.
