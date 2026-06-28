@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.25.0](https://github.com/rutabageldev/ruby-core/compare/v0.24.2...v0.25.0) (2026-06-28)
+
+
+### Features
+
+* **api:** scaffold spec-first HTTP read API platform (Slice A) ([7600081](https://github.com/rutabageldev/ruby-core/commit/76000813bcdc41a4c9033248c696a629cc9a2d1b))
+* **api:** spec-first HTTP read API platform (Slice A, ROADMAP-0012.1) ([4ff1b26](https://github.com/rutabageldev/ruby-core/commit/4ff1b2636a07cf4fb7937473eda1fc7b1252dedd))
+* **gateway:** domain-neutral ruby_home_event write path (Slice B, ROADMAP-0012.2) ([d3a81f2](https://github.com/rutabageldev/ruby-core/commit/d3a81f2bdafaec28968b04d9d911f7a54c42e302))
+* **gateway:** dual-subscribe ruby_home_event write path (Slice B) ([76652e5](https://github.com/rutabageldev/ruby-core/commit/76652e56bf56b035769fa8999e157fa91f53d332))
+
 ## [0.24.2](https://github.com/rutabageldev/ruby-core/compare/v0.24.1...v0.24.2) (2026-06-27)
 
 
