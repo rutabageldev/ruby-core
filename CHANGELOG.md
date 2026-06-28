@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.1](https://github.com/rutabageldev/ruby-core/compare/v0.25.0...v0.25.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **deploy:** build api image in release and gate it behind a compose profile ([94abe89](https://github.com/rutabageldev/ruby-core/commit/94abe890dceca4d3e62d03eae4c9db44dd1befb7))
+* **deploy:** build api image in release and gate it behind a compose profile ([960b781](https://github.com/rutabageldev/ruby-core/commit/960b78177b31f5ab3d3f05c0ff371bc4690d2f04))
+
 ## [0.25.0](https://github.com/rutabageldev/ruby-core/compare/v0.24.2...v0.25.0) (2026-06-28)
 
 
