@@ -209,6 +209,38 @@ services:
       - TZ=America/New_York
 
   # ==========================================================================
+  # API Service (read plane — profile: services)
+  # ==========================================================================
+  # Read-only Postgres (SELECT-only role); no NATS. Dev publishes the port for
+  # local testing; prod/staging never do (ADR-0020).
+  # Pre-conditions: secret/ruby-core/dev/postgres_readonly and
+  # secret/ruby-core/dev/api (field: token) must exist in Vault.
+  api:
+    profiles: [services]
+    build:
+      context: ../..
+      dockerfile: services/api/Dockerfile
+    container_name: ruby-core-dev-api
+    restart: unless-stopped
+    networks:
+      - default
+      - vault-ruby-core-dev
+      - postgres
+    ports:
+      - "127.0.0.1:8090:8080"
+    volumes:
+      - /opt/foundation/vault/tls/vault-ca.crt:/vault/tls/vault-ca.crt:ro
+    environment:
+      - ENVIRONMENT=development
+      - VAULT_ADDR=https://vault:8200
+      - VAULT_CACERT=/vault/tls/vault-ca.crt
+      - VAULT_TOKEN=${VAULT_TOKEN:-root}
+      - HTTP_ADDR=:8080
+      - VAULT_PG_PATH=secret/data/ruby-core/dev/postgres_readonly
+      - VAULT_API_TOKEN_PATH=secret/data/ruby-core/dev/api
+      - TZ=America/New_York
+
+  # ==========================================================================
   # Notifier Service (profile: services)
   # ==========================================================================
   # ADR-0020: Dispatches push notifications via HA mobile_app REST API.

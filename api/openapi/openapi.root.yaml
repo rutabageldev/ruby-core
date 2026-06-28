@@ -1,0 +1,37 @@
+openapi: 3.0.3
+info:
+  title: ruby-core API
+  version: 0.1.0
+  description: |
+    ruby-core's synchronous HTTP read plane — the spec-first, self-documenting read
+    API that every domain inherits (ROADMAP-0012). Authored as per-domain fragments
+    and bundled into a single served document; the bundle is the source of truth for
+    the generated Go server/client and the Python client (ADR-0041).
+
+    Authentication is defense-in-depth (ADR-0040): Traefik edge auth + mTLS is the
+    primary gate; the `bearerAuth` scheme below is an additional in-app layer. All
+    errors are RFC 9457 Problem Details.
+  contact:
+    name: ruby-core
+servers:
+  - url: /v1
+    description: Version 1. The API is versioned by URL path; breaking changes require a new path version.
+security:
+  - bearerAuth: []
+tags:
+  - name: meta
+    description: Service metadata and liveness of the API surface itself.
+paths:
+  /ping:
+    $ref: "./paths/ping.yaml"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Vault-issued service bearer token, enforced in-app as defense-in-depth behind
+        the primary Traefik edge gate and mTLS (ADR-0040). LAN-only, service-to-service.
+  schemas:
+    Problem:
+      $ref: "./components/problem.yaml#/Problem"

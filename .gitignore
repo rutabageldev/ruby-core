@@ -11,6 +11,9 @@ dist/
 /notifier
 /presence
 
+# openapi tooling (node)
+node_modules/
+
 # editor
 .vscode/
 .idea/

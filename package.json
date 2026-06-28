@@ -1,0 +1,9 @@
+{
+  "name": "ruby-core-openapi-tooling",
+  "private": true,
+  "description": "OpenAPI spec tooling for ruby-core (Redocly bundle + Spectral lint). Build-time only; not a runtime package. See docs/adr/0041-openapi-lifecycle-and-codegen-governance.md.",
+  "devDependencies": {
+    "@redocly/cli": "1.34.5",
+    "@stoplight/spectral-cli": "6.15.0"
+  }
+}

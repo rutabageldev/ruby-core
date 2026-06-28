@@ -8,7 +8,7 @@
 #
 # Stage layout:
 #   changes (always)
-#   Stage 1 (parallel): lint | security | unit-tests
+#   Stage 1 (parallel): lint | security | unit-tests | openapi-* (codegen/lint/breaking)
 #   Stage 2 (parallel, needs: unit-tests): integration-tests | docker-build
 
 name: CI
@@ -32,6 +32,7 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
       deploy: ${{ steps.filter.outputs.deploy }}
+      openapi: ${{ steps.filter.outputs.openapi }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
@@ -48,6 +49,12 @@ jobs:
               - 'deploy/**'
               - 'scripts/**'
               - 'Makefile'
+            openapi:
+              - 'api/**'
+              - 'services/api/**'
+              - 'clients/**'
+              - 'package.json'
+              - 'package-lock.json'
 
   # ==========================================================================
   # Stage 1a: Static Analysis & Linting (ADR-0011, ADR-0013)
@@ -132,6 +139,81 @@ jobs:
           retention-days: 7
 
   # ==========================================================================
+  # Stage 1d: OpenAPI Spec Governance (ADR-0041)
+  # Spec-first gates: generated artifacts must match the spec, every operation
+  # must be documented, and breaking changes are blocked. Node + pipx are used
+  # from the ubuntu-latest image (tool versions pinned per-invocation); ogen and
+  # oasdiff run via `go run` at pinned versions.
+  # ==========================================================================
+  openapi-codegen:
+    name: OpenAPI Codegen Drift
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.openapi == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.25.6'
+          cache: true
+
+      - name: Install openapi-python-client
+        run: pipx install openapi-python-client==0.29.0
+
+      - name: Regenerate OpenAPI artifacts (bundle, ogen, Python client)
+        run: make openapi-gen
+
+      - name: Fail on drift
+        run: |
+          git diff --exit-code -- api/openapi.gen.yaml services/api/oas clients/python \
+            || { echo "::error::Generated OpenAPI artifacts are out of date. Run 'make openapi-gen' and commit."; exit 1; }
+
+  openapi-lint:
+    name: OpenAPI Lint (Spectral)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.openapi == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Lint bundled spec
+        run: npx --yes @stoplight/spectral-cli@6.15.0 lint api/openapi.gen.yaml --ruleset api/.spectral.yaml
+
+  openapi-breaking:
+    name: OpenAPI Breaking Changes (oasdiff)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.openapi == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.25.6'
+          cache: true
+
+      - name: Detect breaking changes vs base
+        run: |
+          base=$(mktemp)
+          if git show origin/${{ github.base_ref }}:api/openapi.gen.yaml > "$base" 2>/dev/null && [ -s "$base" ]; then
+            go run github.com/oasdiff/oasdiff@v1.20.1 breaking "$base" api/openapi.gen.yaml
+          else
+            echo "No base spec on origin/${{ github.base_ref }} yet — skipping breaking-change check."
+          fi
+          rm -f "$base"
+
+  # ==========================================================================
   # Stage 2a: Integration Tests (ADR-0012, ADR-0013)
   # Skipped on draft PRs.
   # ==========================================================================
@@ -171,7 +253,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [gateway, engine, notifier, presence, audit-sink]
+        service: [gateway, engine, notifier, presence, audit-sink, api]
 
     steps:
       - name: Checkout code

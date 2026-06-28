@@ -1,0 +1,123 @@
+openapi: 3.0.3
+info:
+  title: ruby-core API
+  version: 0.1.0
+  description: |
+    ruby-core's synchronous HTTP read plane — the spec-first, self-documenting read
+    API that every domain inherits (ROADMAP-0012). Authored as per-domain fragments
+    and bundled into a single served document; the bundle is the source of truth for
+    the generated Go server/client and the Python client (ADR-0041).
+
+    Authentication is defense-in-depth (ADR-0040): Traefik edge auth + mTLS is the
+    primary gate; the `bearerAuth` scheme below is an additional in-app layer. All
+    errors are RFC 9457 Problem Details.
+  contact:
+    name: ruby-core
+servers:
+  - url: /v1
+    description: Version 1. The API is versioned by URL path; breaking changes require a new path version.
+security:
+  - bearerAuth: []
+tags:
+  - name: meta
+    description: Service metadata and liveness of the API surface itself.
+paths:
+  /ping:
+    get:
+      operationId: ping
+      tags:
+        - meta
+      summary: Liveness of the authenticated API surface
+      description: |
+        Returns a small payload confirming the API is reachable and the caller's bearer
+        token was accepted. This is the placeholder endpoint that establishes the read
+        platform; domain endpoints (calendar, directory, childcare) are added against it
+        in later slices. Distinct from the unauthenticated `/health` probe, which lives
+        outside the versioned, generated surface for Traefik and Uptime Kuma.
+      responses:
+        '200':
+          description: The API is reachable and the bearer token was accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    description: Always `ok` when the surface is healthy.
+                  service:
+                    type: string
+                    description: The service name reporting liveness.
+                required:
+                  - status
+                  - service
+              example:
+                status: ok
+                service: api
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Unauthorized
+                status: 401
+                detail: A valid bearer token is required.
+        default:
+          description: Unexpected error, as an RFC 9457 Problem Details object.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Internal Server Error
+                status: 500
+                detail: An unexpected error occurred.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Vault-issued service bearer token, enforced in-app as defense-in-depth behind
+        the primary Traefik edge gate and mTLS (ADR-0040). LAN-only, service-to-service.
+  schemas:
+    Problem:
+      type: object
+      description: |
+        RFC 9457 Problem Details. The single error shape returned by every operation in
+        this API (ADR-0041). Domain-specific context is carried in extension members rather
+        than by string-munging `detail`.
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: A URI reference identifying the problem type. Defaults to `about:blank` when no specific type applies.
+        title:
+          type: string
+          description: A short, human-readable, stable summary of the problem type.
+        status:
+          type: integer
+          format: int32
+          description: The HTTP status code, duplicated here for clients that read the body.
+          minimum: 100
+          maximum: 599
+        detail:
+          type: string
+          description: A human-readable explanation specific to this occurrence of the problem.
+        instance:
+          type: string
+          format: uri-reference
+          description: A URI reference identifying the specific occurrence (typically the request path).
+      required:
+        - title
+        - status
+      example:
+        type: about:blank
+        title: Bad Request
+        status: 400
+        detail: The requested date range exceeds the maximum allowed window.
+        instance: /v1/calendar/events
