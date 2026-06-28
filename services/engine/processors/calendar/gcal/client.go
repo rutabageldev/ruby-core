@@ -120,10 +120,24 @@ func (a *apiService) Insert(ctx context.Context, calendarID string, ev *calendar
 	return out, nil
 }
 
+// quoteEtag wraps a bare etag in the double-quotes an HTTP If-Match entity-tag requires.
+// The mirror stores etags trimmed of Google's surrounding quotes (see trimEtag in the
+// calendar package), but If-Match comparison needs the quoted form — a bare value always
+// yields 412. Idempotent: an already-quoted value is returned unchanged.
+func quoteEtag(etag string) string {
+	if len(etag) >= 2 && etag[0] == '"' && etag[len(etag)-1] == '"' {
+		return etag
+	}
+	return `"` + etag + `"`
+}
+
 func (a *apiService) Update(ctx context.Context, calendarID, eventID, etag string, ev *calendarv3.Event) (*calendarv3.Event, error) {
 	call := a.svc.Events.Update(calendarID, eventID, ev)
 	if etag != "" {
-		call.Header().Set("If-Match", etag)
+		// If-Match requires the quoted entity-tag form. The mirror stores etags
+		// trimmed (trimEtag), so a bare value never matches → Google 412. Re-add the
+		// quotes here.
+		call.Header().Set("If-Match", quoteEtag(etag))
 	}
 	out, err := call.Context(ctx).Do()
 	if err != nil {
