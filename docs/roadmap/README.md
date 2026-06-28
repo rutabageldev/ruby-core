@@ -12,3 +12,6 @@
 | [0007](archived/ROADMAP-0007-devex-ci-polish.md) | Developer Experience & CI Polish | Complete |
 | [0008](archived/ROADMAP-0008-staging-deploy-validation.md) | Staging Environment & Deploy Validation | Complete |
 | [0009](ROADMAP-0009-full-stack-observability.md) | Full-Stack Observability | Planned — blocked on Foundation Phase 6 |
+| [0010](ROADMAP-0010-ada-hardening-test-data-lifecycle.md) | Ada Hardening & Test-Data Lifecycle | Complete |
+| [0011](ROADMAP-0011-ada-medications-emergency.md) | Ada Medications & Emergency (server-side) | Complete |
+| [0012](ROADMAP-0012-home-calendar.md) | Home Calendar + API Foundation | Planned |
