@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.2](https://github.com/rutabageldev/ruby-core/compare/v0.26.1...v0.26.2) (2026-06-28)
+
+
+### Bug Fixes
+
+* **calendar:** quote etag in If-Match header ([#140](https://github.com/rutabageldev/ruby-core/issues/140)) ([44f643d](https://github.com/rutabageldev/ruby-core/commit/44f643d075c2610275baca417489efe5dadea02e))
+* **calendar:** quote etag in If-Match header so modify stops 412'ing ([#140](https://github.com/rutabageldev/ruby-core/issues/140)) ([933c8cf](https://github.com/rutabageldev/ruby-core/commit/933c8cf1544f76116d2d0fb3c5c493933c6141eb))
+
 ## [0.26.1](https://github.com/rutabageldev/ruby-core/compare/v0.26.0...v0.26.1) (2026-06-28)
 
 
