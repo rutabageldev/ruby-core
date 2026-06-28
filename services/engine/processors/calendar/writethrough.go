@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	calendarv3 "google.golang.org/api/calendar/v3"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
@@ -28,7 +29,7 @@ func (p *Processor) handleUpsert(ctx context.Context, evt *schemas.CloudEvent) e
 	var result *calendarv3.Event
 	var err error
 	if d.GoogleEventID == "" {
-		result, err = p.create(ctx, &d, gev)
+		result, err = p.create(ctx, evt.ID, &d, gev)
 	} else {
 		result, err = p.update(ctx, &d, gev)
 	}
@@ -59,26 +60,38 @@ func (p *Processor) handleUpsert(ctx context.Context, evt *schemas.CloudEvent) e
 	return nil
 }
 
-func (p *Processor) create(ctx context.Context, d *schemas.CalendarUpsertData, gev *calendarv3.Event) (*calendarv3.Event, error) {
-	if d.IdempotencyKey != "" {
-		seen, err := p.idStore.Seen(d.IdempotencyKey)
-		if err != nil {
-			return nil, fmt.Errorf("calendar: idempotency check: %w", err)
-		}
-		if seen {
-			p.log.Info("calendar: duplicate create ignored", slog.String("idempotency_key", d.IdempotencyKey))
-			return nil, nil
-		}
+// create writes a new event through to Google. Idempotency is enforced AT GOOGLE: the
+// event id is derived deterministically from the idempotency_key (or the CloudEvent id
+// as fallback), so a redelivered create hits the same id and Google returns 409. We
+// then fetch the existing event and converge the mirror — never a second insert
+// (ADR-0042). This is robust to the redelivery/concurrency window that an application
+// dedup store cannot close (ADR-0025).
+func (p *Processor) create(ctx context.Context, eventID string, d *schemas.CalendarUpsertData, gev *calendarv3.Event) (*calendarv3.Event, error) {
+	seed := d.IdempotencyKey
+	if seed == "" {
+		seed = eventID
+	}
+	if seed != "" {
+		gev.Id = deterministicEventID(seed)
+	} else {
+		// No stable seed: fall back to a Google-assigned id. A redelivery here can
+		// double-insert — the gateway MUST populate idempotency_key (ADR-0042).
+		p.log.Warn("calendar: create without idempotency_key or event id — id is non-deterministic, redelivery may duplicate")
 	}
 
 	out, err := p.gcal.Insert(ctx, p.calendarID, gev)
+	if errors.Is(err, gcal.ErrDuplicate) {
+		// Redelivered create: the event already exists under the deterministic id.
+		// Fetch it so the caller converges the mirror + associations (no second event).
+		p.log.Info("calendar: duplicate create — converging mirror from existing event", slog.String("google_event_id", gev.Id))
+		existing, gerr := p.gcal.Get(ctx, p.calendarID, gev.Id)
+		if gerr != nil {
+			return nil, fmt.Errorf("calendar: get after 409: %w", gerr)
+		}
+		return existing, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("calendar: google insert: %w", err)
-	}
-	if d.IdempotencyKey != "" {
-		if err := p.idStore.Mark(d.IdempotencyKey); err != nil {
-			p.log.Warn("calendar: idempotency mark failed", slog.String("error", err.Error()))
-		}
 	}
 	return out, nil
 }
@@ -105,7 +118,15 @@ func (p *Processor) update(ctx context.Context, d *schemas.CalendarUpsertData, g
 }
 
 // handleDelete applies a calendar.event.delete (series-level for MVP): delete in
-// Google, then remove the mirror row. Overlay cascade is wired in Slice D.
+// Google, then remove the mirror row. Overlay rows cascade via the FK.
+//
+// Idempotency is real, not error-swallowing (ADR-0042): the local mirror is the source
+// of truth for "already deleted". A redelivered delete whose mirror row is gone (the
+// hard DELETE is the last successful step) or marked cancelled (the poller may re-mirror
+// a tombstone) is skipped before any Google call — so the 410 never arises. The 410/404
+// backstop only covers the crash window where Google was deleted but the mirror row
+// survived; there, "event absent" is the satisfied postcondition, and we finish the
+// mirror cleanup.
 func (p *Processor) handleDelete(ctx context.Context, evt *schemas.CloudEvent) error {
 	var d schemas.CalendarDeleteData
 	if err := decodeData(evt.Data, &d); err != nil {
@@ -117,9 +138,23 @@ func (p *Processor) handleDelete(ctx context.Context, evt *schemas.CloudEvent) e
 		return nil
 	}
 
-	if err := p.gcal.Delete(ctx, p.calendarID, d.GoogleEventID); err != nil {
+	// Primary idempotency: if the mirror no longer holds the event (or holds a
+	// cancelled tombstone), the delete already completed — do not reprocess.
+	existing, err := p.q.GetEvent(ctx, d.GoogleEventID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && existing.Status == "cancelled") {
+		p.log.Info("calendar: delete already applied, skipping",
+			slog.String("google_event_id", d.GoogleEventID))
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("calendar: mirror lookup: %w", err)
+	}
+
+	if err := p.gcal.Delete(ctx, p.calendarID, d.GoogleEventID); err != nil && !errors.Is(err, gcal.ErrAlreadyGone) {
 		return fmt.Errorf("calendar: google delete: %w", err)
 	}
+	// On ErrAlreadyGone the event is already absent at Google (crash-window backstop);
+	// fall through to finish the mirror cleanup so the postcondition holds.
 	if err := p.q.DeleteEvent(ctx, d.GoogleEventID); err != nil {
 		return fmt.Errorf("calendar: mirror delete: %w", err)
 	}

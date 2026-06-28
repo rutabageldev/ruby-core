@@ -24,12 +24,17 @@ type Service interface {
 	List(ctx context.Context, calendarID, syncToken, pageToken string) (*ListResult, error)
 	// Get fetches a single event (used to resync a fresh etag after a 412 conflict).
 	Get(ctx context.Context, calendarID, eventID string) (*calendarv3.Event, error)
-	// Insert creates an event and returns it with Google's assigned id and etag.
+	// Insert creates an event. When ev.Id is set (a deterministic, client-assigned
+	// id derived from the idempotency_key), a redelivered create hits the same id and
+	// Google returns 409 — surfaced as ErrDuplicate so the caller can converge the
+	// mirror from the existing event instead of double-inserting (ADR-0042).
 	Insert(ctx context.Context, calendarID string, ev *calendarv3.Event) (*calendarv3.Event, error)
 	// Update modifies an event with If-Match optimistic concurrency. A Google 412
 	// (etag mismatch) is surfaced as ErrConflict.
 	Update(ctx context.Context, calendarID, eventID, etag string, ev *calendarv3.Event) (*calendarv3.Event, error)
-	// Delete removes an event (series-level for MVP).
+	// Delete removes an event (series-level for MVP). A Google 410/404 (already gone)
+	// is surfaced as ErrAlreadyGone so the caller can treat the absent postcondition
+	// as satisfied rather than failing.
 	Delete(ctx context.Context, calendarID, eventID string) error
 }
 
@@ -43,6 +48,16 @@ type ListResult struct {
 
 // ErrConflict is returned by Update when Google rejects the If-Match etag (HTTP 412).
 var ErrConflict = errors.New("gcal: etag conflict (412)")
+
+// ErrDuplicate is returned by Insert when a client-assigned event id already exists
+// (HTTP 409) — i.e. a redelivered create. The caller fetches the existing event and
+// converges the mirror rather than creating a second event.
+var ErrDuplicate = errors.New("gcal: duplicate event id (409)")
+
+// ErrAlreadyGone is returned by Delete when the event is already absent (HTTP 410 or
+// 404) — a redelivered or externally-applied delete. The "event absent" postcondition
+// is already satisfied.
+var ErrAlreadyGone = errors.New("gcal: event already absent (404/410)")
 
 type apiService struct {
 	svc *calendarv3.Service
@@ -96,6 +111,10 @@ func (a *apiService) Get(ctx context.Context, calendarID, eventID string) (*cale
 func (a *apiService) Insert(ctx context.Context, calendarID string, ev *calendarv3.Event) (*calendarv3.Event, error) {
 	out, err := a.svc.Events.Insert(calendarID, ev).Context(ctx).Do()
 	if err != nil {
+		var gerr *googleapi.Error
+		if errors.As(err, &gerr) && gerr.Code == 409 {
+			return nil, ErrDuplicate
+		}
 		return nil, fmt.Errorf("gcal: insert: %w", err)
 	}
 	return out, nil
@@ -119,6 +138,10 @@ func (a *apiService) Update(ctx context.Context, calendarID, eventID, etag strin
 
 func (a *apiService) Delete(ctx context.Context, calendarID, eventID string) error {
 	if err := a.svc.Events.Delete(calendarID, eventID).Context(ctx).Do(); err != nil {
+		var gerr *googleapi.Error
+		if errors.As(err, &gerr) && (gerr.Code == 410 || gerr.Code == 404) {
+			return ErrAlreadyGone
+		}
 		return fmt.Errorf("gcal: delete: %w", err)
 	}
 	return nil

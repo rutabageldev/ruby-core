@@ -45,10 +45,18 @@ func (f *fakeGCal) Get(_ context.Context, _, id string) (*calendarv3.Event, erro
 }
 
 func (f *fakeGCal) Insert(_ context.Context, _ string, ev *calendarv3.Event) (*calendarv3.Event, error) {
+	id := ev.Id // client-assigned (deterministic) id, when set
+	if id == "" {
+		f.nextID++
+		id = fmt.Sprintf("g%d", f.nextID)
+	}
+	if _, exists := f.events[id]; exists {
+		// Google rejects a duplicate client-assigned id with 409 (a redelivered create).
+		return nil, gcal.ErrDuplicate
+	}
 	f.inserts++
-	f.nextID++
 	out := *ev
-	out.Id = fmt.Sprintf("g%d", f.nextID)
+	out.Id = id
 	out.Etag = `"etag-` + out.Id + `"`
 	f.events[out.Id] = &out
 	return &out, nil
@@ -69,6 +77,9 @@ func (f *fakeGCal) Update(_ context.Context, _, id, _ string, ev *calendarv3.Eve
 
 func (f *fakeGCal) Delete(_ context.Context, _, id string) error {
 	f.deletes++
+	if _, ok := f.events[id]; !ok {
+		return gcal.ErrAlreadyGone
+	}
 	delete(f.events, id)
 	return nil
 }
@@ -219,7 +230,10 @@ func cloudEvent(t *testing.T, payload any) *schemas.CloudEvent {
 
 // --- tests ---
 
-func TestHandleUpsert_CreateDedupesOnIdempotencyKey(t *testing.T) {
+// A redelivered create derives the same deterministic Google id, so the second Insert
+// returns 409; the processor converges the mirror from the existing event instead of
+// double-inserting (ADR-0042). Idempotency holds at Google, not via the KV dedup store.
+func TestHandleUpsert_CreateIsIdempotentAtGoogle(t *testing.T) {
 	p, g, st := newTestProcessor()
 	start, end := timedEvent(t)
 	evt := cloudEvent(t, schemas.CalendarUpsertData{
@@ -236,13 +250,61 @@ func TestHandleUpsert_CreateDedupesOnIdempotencyKey(t *testing.T) {
 	if len(st.events) != 1 {
 		t.Fatalf("mirror has %d events, want 1", len(st.events))
 	}
+	wantID := deterministicEventID("k1")
+	if _, ok := g.events[wantID]; !ok {
+		t.Fatalf("event not stored under deterministic id %q; have %v", wantID, keys(g.events))
+	}
 
-	// Redelivered create with the same idempotency key: no second Google insert.
+	// Redelivered create: same deterministic id → 409 → Get + converge, no second insert.
 	if err := p.handleUpsert(context.Background(), evt); err != nil {
 		t.Fatalf("duplicate create: %v", err)
 	}
 	if g.inserts != 1 {
 		t.Errorf("duplicate create caused %d inserts, want 1", g.inserts)
+	}
+	if g.gets != 1 {
+		t.Errorf("duplicate create should Get the existing event once, got %d", g.gets)
+	}
+	if len(st.events) != 1 {
+		t.Errorf("mirror has %d events after redelivery, want 1", len(st.events))
+	}
+}
+
+// deriving the id from the seed must be stable and satisfy Google's id rules.
+func TestDeterministicEventID(t *testing.T) {
+	a := deterministicEventID("k1")
+	b := deterministicEventID("k1")
+	if a != b {
+		t.Fatalf("not stable: %q vs %q", a, b)
+	}
+	if deterministicEventID("k2") == a {
+		t.Error("different seeds produced the same id")
+	}
+	if len(a) != 32 {
+		t.Errorf("len = %d, want 32", len(a))
+	}
+	for _, r := range a {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'v')) {
+			t.Errorf("id %q contains out-of-range char %q (want base32hex a-v/0-9)", a, r)
+		}
+	}
+}
+
+// With no idempotency_key and no CloudEvent id, the create falls back to a
+// Google-assigned id (and warns); it must still succeed without panicking.
+func TestHandleUpsert_CreateEmptySeedFallsBack(t *testing.T) {
+	p, g, st := newTestProcessor()
+	start, end := timedEvent(t)
+	evt := cloudEvent(t, schemas.CalendarUpsertData{Summary: "No key", Start: start, End: end})
+	// evt.ID is empty (cloudEvent sets only Data).
+	if err := p.handleUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("create with empty seed: %v", err)
+	}
+	if g.inserts != 1 {
+		t.Errorf("inserts = %d, want 1", g.inserts)
+	}
+	if _, ok := st.events["g1"]; !ok {
+		t.Error("expected a Google-assigned id (g1) in the mirror")
 	}
 }
 
@@ -286,6 +348,52 @@ func TestHandleDelete_RemovesGoogleAndMirror(t *testing.T) {
 	}
 	if _, ok := st.events["g1"]; ok {
 		t.Error("mirror row should have been deleted")
+	}
+}
+
+// A redelivered delete whose mirror row is already gone is a no-op: the delete already
+// completed, so we never call Google (and the 410 never arises).
+func TestHandleDelete_SkipsWhenMirrorAbsent(t *testing.T) {
+	p, g, _ := newTestProcessor()
+	evt := cloudEvent(t, schemas.CalendarDeleteData{GoogleEventID: "gone"})
+	if err := p.handleDelete(context.Background(), evt); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if g.deletes != 0 {
+		t.Errorf("google deletes = %d, want 0 (mirror absent → skip)", g.deletes)
+	}
+}
+
+// A cancelled mirror tombstone (the poller may re-mirror one) also means the delete
+// already applied — skip Google.
+func TestHandleDelete_SkipsWhenMirrorCancelled(t *testing.T) {
+	p, g, st := newTestProcessor()
+	st.events["g1"] = &store.CalendarEvent{GoogleEventID: "g1", Status: "cancelled"}
+	evt := cloudEvent(t, schemas.CalendarDeleteData{GoogleEventID: "g1"})
+	if err := p.handleDelete(context.Background(), evt); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if g.deletes != 0 {
+		t.Errorf("google deletes = %d, want 0 (cancelled tombstone → skip)", g.deletes)
+	}
+}
+
+// Crash-window backstop: the mirror row is present but Google already deleted the event
+// (original delete succeeded, then crashed before the mirror delete). The 410 is the
+// satisfied postcondition; finish the mirror cleanup and ack, no error.
+func TestHandleDelete_BackstopsOn410(t *testing.T) {
+	p, g, st := newTestProcessor()
+	st.events["g1"] = &store.CalendarEvent{GoogleEventID: "g1"} // present in mirror
+	// g.events has no "g1" → fakeGCal.Delete returns ErrAlreadyGone.
+	evt := cloudEvent(t, schemas.CalendarDeleteData{GoogleEventID: "g1"})
+	if err := p.handleDelete(context.Background(), evt); err != nil {
+		t.Fatalf("delete with 410 backstop: %v", err)
+	}
+	if g.deletes != 1 {
+		t.Errorf("google deletes = %d, want 1 (attempted)", g.deletes)
+	}
+	if _, ok := st.events["g1"]; ok {
+		t.Error("mirror row should have been cleaned up after 410 backstop")
 	}
 }
 
@@ -370,12 +478,13 @@ func TestHandleUpsert_ReconcilesAssociations(t *testing.T) {
 	if err := p.handleUpsert(context.Background(), evt); err != nil {
 		t.Fatalf("upsert with associations: %v", err)
 	}
-	// fakeGCal assigns the created event id "g1".
-	if got := len(st.subjects["g1"]); got != 1 {
-		t.Errorf("subjects for g1 = %d, want 1", got)
+	// The created event id is derived deterministically from the idempotency_key.
+	id := deterministicEventID("k-assoc")
+	if got := len(st.subjects[id]); got != 1 {
+		t.Errorf("subjects for %s = %d, want 1", id, got)
 	}
-	if !st.childcare["g1"].Valid {
-		t.Error("expected a childcare association for g1")
+	if !st.childcare[id].Valid {
+		t.Errorf("expected a childcare association for %s", id)
 	}
 }
 
@@ -419,6 +528,14 @@ func TestStatusState(t *testing.T) {
 			t.Errorf("statusState(next=%v, active=%v) = %q, want %q", c.next != nil, c.active, got, c.want)
 		}
 	}
+}
+
+func keys(m map[string]*calendarv3.Event) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 func googleTimed(id, etag string) *calendarv3.Event {
