@@ -39,6 +39,7 @@ jobs:
           - audit-sink
           - notifier
           - presence
+          - api
 
     steps:
       - name: Checkout code
