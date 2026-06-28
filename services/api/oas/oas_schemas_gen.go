@@ -63,6 +63,9 @@ type CalendarInstance struct {
 	Subjects []string `json:"subjects"`
 	// Resolved childcare provider id for this event; omitted when none — local overlay.
 	Childcare OptString `json:"childcare"`
+	// Google attendees, each reconciled to a directory person id by email where matched, with Google RSVP
+	// status.
+	Attendees []CalendarInstanceAttendeesItem `json:"attendees"`
 }
 
 // GetGoogleEventID returns the value of GoogleEventID.
@@ -115,6 +118,11 @@ func (s *CalendarInstance) GetChildcare() OptString {
 	return s.Childcare
 }
 
+// GetAttendees returns the value of Attendees.
+func (s *CalendarInstance) GetAttendees() []CalendarInstanceAttendeesItem {
+	return s.Attendees
+}
+
 // SetGoogleEventID sets the value of GoogleEventID.
 func (s *CalendarInstance) SetGoogleEventID(val string) {
 	s.GoogleEventID = val
@@ -165,6 +173,50 @@ func (s *CalendarInstance) SetChildcare(val OptString) {
 	s.Childcare = val
 }
 
+// SetAttendees sets the value of Attendees.
+func (s *CalendarInstance) SetAttendees(val []CalendarInstanceAttendeesItem) {
+	s.Attendees = val
+}
+
+type CalendarInstanceAttendeesItem struct {
+	// The attendee's email address (from Google).
+	Email string `json:"email"`
+	// The matched directory person id, when the email reconciles to a known person.
+	PersonID OptString `json:"person_id"`
+	// Google RSVP status — needsAction, declined, tentative, or accepted.
+	ResponseStatus OptString `json:"response_status"`
+}
+
+// GetEmail returns the value of Email.
+func (s *CalendarInstanceAttendeesItem) GetEmail() string {
+	return s.Email
+}
+
+// GetPersonID returns the value of PersonID.
+func (s *CalendarInstanceAttendeesItem) GetPersonID() OptString {
+	return s.PersonID
+}
+
+// GetResponseStatus returns the value of ResponseStatus.
+func (s *CalendarInstanceAttendeesItem) GetResponseStatus() OptString {
+	return s.ResponseStatus
+}
+
+// SetEmail sets the value of Email.
+func (s *CalendarInstanceAttendeesItem) SetEmail(val string) {
+	s.Email = val
+}
+
+// SetPersonID sets the value of PersonID.
+func (s *CalendarInstanceAttendeesItem) SetPersonID(val OptString) {
+	s.PersonID = val
+}
+
+// SetResponseStatus sets the value of ResponseStatus.
+func (s *CalendarInstanceAttendeesItem) SetResponseStatus(val OptString) {
+	s.ResponseStatus = val
+}
+
 type ListCalendarEventsBadRequest Problem
 
 func (*ListCalendarEventsBadRequest) listCalendarEventsRes() {}
@@ -176,6 +228,18 @@ func (*ListCalendarEventsOKApplicationJSON) listCalendarEventsRes() {}
 type ListCalendarEventsUnauthorized Problem
 
 func (*ListCalendarEventsUnauthorized) listCalendarEventsRes() {}
+
+type ListChildcareProviderSuggestionsOKApplicationJSON []ProviderSuggestion
+
+func (*ListChildcareProviderSuggestionsOKApplicationJSON) listChildcareProviderSuggestionsRes() {}
+
+type ListChildcareProvidersOKApplicationJSON []Provider
+
+func (*ListChildcareProvidersOKApplicationJSON) listChildcareProvidersRes() {}
+
+type ListDirectoryPeopleOKApplicationJSON []Person
+
+func (*ListDirectoryPeopleOKApplicationJSON) listDirectoryPeopleRes() {}
 
 // NewOptString returns new OptString with value set to v.
 func NewOptString(v string) OptString {
@@ -221,6 +285,108 @@ func (o OptString) Or(d string) string {
 		return v
 	}
 	return d
+}
+
+// A person or group in the household directory — feeds the "FOR" subject picker and provider
+// linking. Local overlay, never written to Google.
+// Ref: #/components/schemas/Person
+type Person struct {
+	// The person's stable id (UUID).
+	ID string `json:"id"`
+	// Human-readable name.
+	DisplayName string `json:"display_name"`
+	// Either `person` or `group` (a group like "Household" has no membership in MVP).
+	Kind string `json:"kind"`
+	// The Home Assistant person entity id this maps to, when present.
+	HaPersonEntityID OptString `json:"ha_person_entity_id"`
+	// Email used to reconcile calendar attendees to this person, when present.
+	Email OptString `json:"email"`
+	// Family grouping used to colour-by-family in clients.
+	Family OptString `json:"family"`
+	// Display colour, when set.
+	Color OptString `json:"color"`
+	// Whether the person is active.
+	Active bool `json:"active"`
+}
+
+// GetID returns the value of ID.
+func (s *Person) GetID() string {
+	return s.ID
+}
+
+// GetDisplayName returns the value of DisplayName.
+func (s *Person) GetDisplayName() string {
+	return s.DisplayName
+}
+
+// GetKind returns the value of Kind.
+func (s *Person) GetKind() string {
+	return s.Kind
+}
+
+// GetHaPersonEntityID returns the value of HaPersonEntityID.
+func (s *Person) GetHaPersonEntityID() OptString {
+	return s.HaPersonEntityID
+}
+
+// GetEmail returns the value of Email.
+func (s *Person) GetEmail() OptString {
+	return s.Email
+}
+
+// GetFamily returns the value of Family.
+func (s *Person) GetFamily() OptString {
+	return s.Family
+}
+
+// GetColor returns the value of Color.
+func (s *Person) GetColor() OptString {
+	return s.Color
+}
+
+// GetActive returns the value of Active.
+func (s *Person) GetActive() bool {
+	return s.Active
+}
+
+// SetID sets the value of ID.
+func (s *Person) SetID(val string) {
+	s.ID = val
+}
+
+// SetDisplayName sets the value of DisplayName.
+func (s *Person) SetDisplayName(val string) {
+	s.DisplayName = val
+}
+
+// SetKind sets the value of Kind.
+func (s *Person) SetKind(val string) {
+	s.Kind = val
+}
+
+// SetHaPersonEntityID sets the value of HaPersonEntityID.
+func (s *Person) SetHaPersonEntityID(val OptString) {
+	s.HaPersonEntityID = val
+}
+
+// SetEmail sets the value of Email.
+func (s *Person) SetEmail(val OptString) {
+	s.Email = val
+}
+
+// SetFamily sets the value of Family.
+func (s *Person) SetFamily(val OptString) {
+	s.Family = val
+}
+
+// SetColor sets the value of Color.
+func (s *Person) SetColor(val OptString) {
+	s.Color = val
+}
+
+// SetActive sets the value of Active.
+func (s *Person) SetActive(val bool) {
+	s.Active = val
 }
 
 type PingOK struct {
@@ -319,7 +485,10 @@ func (s *Problem) SetInstance(val OptString) {
 	s.Instance = val
 }
 
-func (*Problem) pingRes() {}
+func (*Problem) listChildcareProviderSuggestionsRes() {}
+func (*Problem) listChildcareProvidersRes()           {}
+func (*Problem) listDirectoryPeopleRes()              {}
+func (*Problem) pingRes()                             {}
 
 // ProblemStatusCode wraps Problem with StatusCode.
 type ProblemStatusCode struct {
@@ -345,4 +514,112 @@ func (s *ProblemStatusCode) SetStatusCode(val int) {
 // SetResponse sets the value of Response.
 func (s *ProblemStatusCode) SetResponse(val Problem) {
 	s.Response = val
+}
+
+// A childcare provider — may be a household person (e.g. a grandparent) or standalone (e.g. a
+// daycare). Local overlay.
+// Ref: #/components/schemas/Provider
+type Provider struct {
+	// The provider's stable id (UUID).
+	ID string `json:"id"`
+	// Human-readable name.
+	DisplayName string `json:"display_name"`
+	// The linked directory person id, when the provider is also a household person.
+	PersonID OptString `json:"person_id"`
+	// Free-text relationship to the household, when set.
+	Relationship OptString `json:"relationship"`
+	// Whether the provider has been archived (soft-deleted; frequency history is preserved).
+	Archived bool `json:"archived"`
+}
+
+// GetID returns the value of ID.
+func (s *Provider) GetID() string {
+	return s.ID
+}
+
+// GetDisplayName returns the value of DisplayName.
+func (s *Provider) GetDisplayName() string {
+	return s.DisplayName
+}
+
+// GetPersonID returns the value of PersonID.
+func (s *Provider) GetPersonID() OptString {
+	return s.PersonID
+}
+
+// GetRelationship returns the value of Relationship.
+func (s *Provider) GetRelationship() OptString {
+	return s.Relationship
+}
+
+// GetArchived returns the value of Archived.
+func (s *Provider) GetArchived() bool {
+	return s.Archived
+}
+
+// SetID sets the value of ID.
+func (s *Provider) SetID(val string) {
+	s.ID = val
+}
+
+// SetDisplayName sets the value of DisplayName.
+func (s *Provider) SetDisplayName(val string) {
+	s.DisplayName = val
+}
+
+// SetPersonID sets the value of PersonID.
+func (s *Provider) SetPersonID(val OptString) {
+	s.PersonID = val
+}
+
+// SetRelationship sets the value of Relationship.
+func (s *Provider) SetRelationship(val OptString) {
+	s.Relationship = val
+}
+
+// SetArchived sets the value of Archived.
+func (s *Provider) SetArchived(val bool) {
+	s.Archived = val
+}
+
+// A non-archived provider ranked by recent per-occurrence usage (higher score = more
+// recently/frequently used).
+// Ref: #/components/schemas/ProviderSuggestion
+type ProviderSuggestion struct {
+	// The provider's id (UUID).
+	ID string `json:"id"`
+	// Human-readable name.
+	DisplayName string `json:"display_name"`
+	// Recency-weighted per-occurrence usage score over the recency window.
+	Score float64 `json:"score"`
+}
+
+// GetID returns the value of ID.
+func (s *ProviderSuggestion) GetID() string {
+	return s.ID
+}
+
+// GetDisplayName returns the value of DisplayName.
+func (s *ProviderSuggestion) GetDisplayName() string {
+	return s.DisplayName
+}
+
+// GetScore returns the value of Score.
+func (s *ProviderSuggestion) GetScore() float64 {
+	return s.Score
+}
+
+// SetID sets the value of ID.
+func (s *ProviderSuggestion) SetID(val string) {
+	s.ID = val
+}
+
+// SetDisplayName sets the value of DisplayName.
+func (s *ProviderSuggestion) SetDisplayName(val string) {
+	s.DisplayName = val
+}
+
+// SetScore sets the value of Score.
+func (s *ProviderSuggestion) SetScore(val float64) {
+	s.Score = val
 }

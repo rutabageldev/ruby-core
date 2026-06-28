@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
@@ -49,6 +50,14 @@ type calStore interface {
 	ListSingleEventsInRange(ctx context.Context, arg *store.ListSingleEventsInRangeParams) ([]*store.CalendarEvent, error)
 	ListRecurringMasters(ctx context.Context) ([]*store.CalendarEvent, error)
 	ListOverrides(ctx context.Context) ([]*store.CalendarEvent, error)
+
+	// Overlay writes (Slice D).
+	UpsertProvider(ctx context.Context, arg *store.UpsertProviderParams) error
+	ArchiveProvider(ctx context.Context, id pgtype.UUID) error
+	DeleteEventSubjects(ctx context.Context, googleEventID string) error
+	InsertEventSubject(ctx context.Context, arg *store.InsertEventSubjectParams) error
+	DeleteEventChildcare(ctx context.Context, googleEventID string) error
+	InsertEventChildcare(ctx context.Context, arg *store.InsertEventChildcareParams) error
 }
 
 // Processor is the calendar StatefulProcessor.
@@ -78,9 +87,15 @@ func New(log *slog.Logger) *Processor { return &Processor{log: log} }
 // RequiresStorage signals the engine to boot Postgres and run migrations.
 func (p *Processor) RequiresStorage() bool { return true }
 
-// Subscriptions are the calendar write subjects routed in via the gateway (Slice B).
+// Subscriptions are the calendar + overlay write subjects routed in via the gateway
+// (Slices B/D).
 func (p *Processor) Subscriptions() []string {
-	return []string{schemas.HomeEventCalendarUpsert, schemas.HomeEventCalendarDelete}
+	return []string{
+		schemas.HomeEventCalendarUpsert,
+		schemas.HomeEventCalendarDelete,
+		schemas.HomeEventChildcareProviderUpsert,
+		schemas.HomeEventChildcareProviderDelete,
+	}
 }
 
 // Initialize wires storage + NATS, and — when sync is enabled — connects Google
@@ -176,6 +191,10 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return p.handleUpsert(ctx, &evt)
 	case schemas.HomeEventCalendarDelete:
 		return p.handleDelete(ctx, &evt)
+	case schemas.HomeEventChildcareProviderUpsert:
+		return p.handleProviderUpsert(ctx, &evt)
+	case schemas.HomeEventChildcareProviderDelete:
+		return p.handleProviderDelete(ctx, &evt)
 	default:
 		return nil
 	}

@@ -14,7 +14,16 @@ var (
 	rn1AllowedHeaders = map[string]string{
 		"GET": "Authorization",
 	}
+	rn4AllowedHeaders = map[string]string{
+		"GET": "Authorization",
+	}
 	rn3AllowedHeaders = map[string]string{
+		"GET": "Authorization",
+	}
+	rn6AllowedHeaders = map[string]string{
+		"GET": "Authorization",
+	}
+	rn7AllowedHeaders = map[string]string{
 		"GET": "Authorization",
 	}
 )
@@ -69,9 +78,99 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			switch elem[0] {
-			case 'c': // Prefix: "calendar/events"
+			case 'c': // Prefix: "c"
 
-				if l := len("calendar/events"); len(elem) >= l && elem[0:l] == "calendar/events" {
+				if l := len("c"); len(elem) >= l && elem[0:l] == "c" {
+					elem = elem[l:]
+				} else {
+					break
+				}
+
+				if len(elem) == 0 {
+					break
+				}
+				switch elem[0] {
+				case 'a': // Prefix: "alendar/events"
+
+					if l := len("alendar/events"); len(elem) >= l && elem[0:l] == "alendar/events" {
+						elem = elem[l:]
+					} else {
+						break
+					}
+
+					if len(elem) == 0 {
+						// Leaf node.
+						switch r.Method {
+						case "GET":
+							s.handleListCalendarEventsRequest([0]string{}, elemIsEscaped, w, r)
+						default:
+							s.notAllowed(w, r, notAllowedParams{
+								allowedMethods: "GET",
+								allowedHeaders: rn1AllowedHeaders,
+								acceptPost:     "",
+								acceptPatch:    "",
+							})
+						}
+
+						return
+					}
+
+				case 'h': // Prefix: "hildcare/providers"
+
+					if l := len("hildcare/providers"); len(elem) >= l && elem[0:l] == "hildcare/providers" {
+						elem = elem[l:]
+					} else {
+						break
+					}
+
+					if len(elem) == 0 {
+						switch r.Method {
+						case "GET":
+							s.handleListChildcareProvidersRequest([0]string{}, elemIsEscaped, w, r)
+						default:
+							s.notAllowed(w, r, notAllowedParams{
+								allowedMethods: "GET",
+								allowedHeaders: rn4AllowedHeaders,
+								acceptPost:     "",
+								acceptPatch:    "",
+							})
+						}
+
+						return
+					}
+					switch elem[0] {
+					case '/': // Prefix: "/suggestions"
+
+						if l := len("/suggestions"); len(elem) >= l && elem[0:l] == "/suggestions" {
+							elem = elem[l:]
+						} else {
+							break
+						}
+
+						if len(elem) == 0 {
+							// Leaf node.
+							switch r.Method {
+							case "GET":
+								s.handleListChildcareProviderSuggestionsRequest([0]string{}, elemIsEscaped, w, r)
+							default:
+								s.notAllowed(w, r, notAllowedParams{
+									allowedMethods: "GET",
+									allowedHeaders: rn3AllowedHeaders,
+									acceptPost:     "",
+									acceptPatch:    "",
+								})
+							}
+
+							return
+						}
+
+					}
+
+				}
+
+			case 'd': // Prefix: "directory/people"
+
+				if l := len("directory/people"); len(elem) >= l && elem[0:l] == "directory/people" {
 					elem = elem[l:]
 				} else {
 					break
@@ -81,11 +180,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					// Leaf node.
 					switch r.Method {
 					case "GET":
-						s.handleListCalendarEventsRequest([0]string{}, elemIsEscaped, w, r)
+						s.handleListDirectoryPeopleRequest([0]string{}, elemIsEscaped, w, r)
 					default:
 						s.notAllowed(w, r, notAllowedParams{
 							allowedMethods: "GET",
-							allowedHeaders: rn1AllowedHeaders,
+							allowedHeaders: rn6AllowedHeaders,
 							acceptPost:     "",
 							acceptPatch:    "",
 						})
@@ -110,7 +209,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					default:
 						s.notAllowed(w, r, notAllowedParams{
 							allowedMethods: "GET",
-							allowedHeaders: rn3AllowedHeaders,
+							allowedHeaders: rn7AllowedHeaders,
 							acceptPost:     "",
 							acceptPatch:    "",
 						})
@@ -219,9 +318,99 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 				break
 			}
 			switch elem[0] {
-			case 'c': // Prefix: "calendar/events"
+			case 'c': // Prefix: "c"
 
-				if l := len("calendar/events"); len(elem) >= l && elem[0:l] == "calendar/events" {
+				if l := len("c"); len(elem) >= l && elem[0:l] == "c" {
+					elem = elem[l:]
+				} else {
+					break
+				}
+
+				if len(elem) == 0 {
+					break
+				}
+				switch elem[0] {
+				case 'a': // Prefix: "alendar/events"
+
+					if l := len("alendar/events"); len(elem) >= l && elem[0:l] == "alendar/events" {
+						elem = elem[l:]
+					} else {
+						break
+					}
+
+					if len(elem) == 0 {
+						// Leaf node.
+						switch method {
+						case "GET":
+							r.name = ListCalendarEventsOperation
+							r.summary = "List calendar event instances in a date range"
+							r.operationID = "listCalendarEvents"
+							r.operationGroup = ""
+							r.pathPattern = "/calendar/events"
+							r.args = args
+							r.count = 0
+							return r, true
+						default:
+							return
+						}
+					}
+
+				case 'h': // Prefix: "hildcare/providers"
+
+					if l := len("hildcare/providers"); len(elem) >= l && elem[0:l] == "hildcare/providers" {
+						elem = elem[l:]
+					} else {
+						break
+					}
+
+					if len(elem) == 0 {
+						switch method {
+						case "GET":
+							r.name = ListChildcareProvidersOperation
+							r.summary = "List childcare providers"
+							r.operationID = "listChildcareProviders"
+							r.operationGroup = ""
+							r.pathPattern = "/childcare/providers"
+							r.args = args
+							r.count = 0
+							return r, true
+						default:
+							return
+						}
+					}
+					switch elem[0] {
+					case '/': // Prefix: "/suggestions"
+
+						if l := len("/suggestions"); len(elem) >= l && elem[0:l] == "/suggestions" {
+							elem = elem[l:]
+						} else {
+							break
+						}
+
+						if len(elem) == 0 {
+							// Leaf node.
+							switch method {
+							case "GET":
+								r.name = ListChildcareProviderSuggestionsOperation
+								r.summary = "List childcare providers ranked by recent usage"
+								r.operationID = "listChildcareProviderSuggestions"
+								r.operationGroup = ""
+								r.pathPattern = "/childcare/providers/suggestions"
+								r.args = args
+								r.count = 0
+								return r, true
+							default:
+								return
+							}
+						}
+
+					}
+
+				}
+
+			case 'd': // Prefix: "directory/people"
+
+				if l := len("directory/people"); len(elem) >= l && elem[0:l] == "directory/people" {
 					elem = elem[l:]
 				} else {
 					break
@@ -231,11 +420,11 @@ func (s *Server) FindPath(method string, u *url.URL) (r Route, _ bool) {
 					// Leaf node.
 					switch method {
 					case "GET":
-						r.name = ListCalendarEventsOperation
-						r.summary = "List calendar event instances in a date range"
-						r.operationID = "listCalendarEvents"
+						r.name = ListDirectoryPeopleOperation
+						r.summary = "List directory people"
+						r.operationID = "listDirectoryPeople"
 						r.operationGroup = ""
-						r.pathPattern = "/calendar/events"
+						r.pathPattern = "/directory/people"
 						r.args = args
 						r.count = 0
 						return r, true

@@ -1,0 +1,50 @@
+Provider:
+  type: object
+  description: A childcare provider — may be a household person (e.g. a grandparent) or standalone (e.g. a daycare). Local overlay.
+  properties:
+    id:
+      type: string
+      description: The provider's stable id (UUID).
+    display_name:
+      type: string
+      description: Human-readable name.
+    person_id:
+      type: string
+      description: The linked directory person id, when the provider is also a household person.
+    relationship:
+      type: string
+      description: Free-text relationship to the household, when set.
+    archived:
+      type: boolean
+      description: Whether the provider has been archived (soft-deleted; frequency history is preserved).
+  required:
+    - id
+    - display_name
+    - archived
+  example:
+    id: "22222222-2222-4222-8222-222222222222"
+    display_name: "Sue"
+    relationship: "grandparent"
+    archived: false
+
+ProviderSuggestion:
+  type: object
+  description: A non-archived provider ranked by recent per-occurrence usage (higher score = more recently/frequently used).
+  properties:
+    id:
+      type: string
+      description: The provider's id (UUID).
+    display_name:
+      type: string
+      description: Human-readable name.
+    score:
+      type: number
+      description: Recency-weighted per-occurrence usage score over the recency window.
+  required:
+    - id
+    - display_name
+    - score
+  example:
+    id: "22222222-2222-4222-8222-222222222222"
+    display_name: "Sue"
+    score: 4.5

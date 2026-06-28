@@ -12,6 +12,8 @@ from ..types import UNSET, Unset
 from typing import cast
 import datetime
 
+if TYPE_CHECKING:
+  from ..models.calendar_instance_attendees_item import CalendarInstanceAttendeesItem
 
 
 
@@ -33,7 +35,8 @@ class CalendarInstance:
         Example:
             {'google_event_id': 'abc123', 'summary': 'Dentist', 'start': '2026-06-26T13:00:00Z', 'end':
                 '2026-06-26T14:00:00Z', 'all_day': False, 'status': 'confirmed', 'location': '123 Main St', 'description':
-                'Cleaning', 'subjects': []}
+                'Cleaning', 'subjects': [], 'attendees': [{'email': 'michael.katie.rubanka@gmail.com', 'person_id':
+                '11111111-1111-4111-8111-111111111111', 'response_status': 'accepted'}]}
 
         Attributes:
             google_event_id (str): The Google event id of the master (or override child) this instance came from.
@@ -47,6 +50,8 @@ class CalendarInstance:
             subjects (list[str] | Unset): Resolved subject person ids (the "FOR" lane) — local overlay, never written to
                 Google.
             childcare (str | Unset): Resolved childcare provider id for this event; omitted when none — local overlay.
+            attendees (list[CalendarInstanceAttendeesItem] | Unset): Google attendees, each reconciled to a directory person
+                id by email where matched, with Google RSVP status.
      """
 
     google_event_id: str
@@ -59,6 +64,7 @@ class CalendarInstance:
     description: str | Unset = UNSET
     subjects: list[str] | Unset = UNSET
     childcare: str | Unset = UNSET
+    attendees: list[CalendarInstanceAttendeesItem] | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -66,6 +72,7 @@ class CalendarInstance:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.calendar_instance_attendees_item import CalendarInstanceAttendeesItem
         google_event_id = self.google_event_id
 
         start = self.start.isoformat()
@@ -90,6 +97,15 @@ class CalendarInstance:
 
         childcare = self.childcare
 
+        attendees: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.attendees, Unset):
+            attendees = []
+            for attendees_item_data in self.attendees:
+                attendees_item = attendees_item_data.to_dict()
+                attendees.append(attendees_item)
+
+
+
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -110,6 +126,8 @@ class CalendarInstance:
             field_dict["subjects"] = subjects
         if childcare is not UNSET:
             field_dict["childcare"] = childcare
+        if attendees is not UNSET:
+            field_dict["attendees"] = attendees
 
         return field_dict
 
@@ -117,6 +135,7 @@ class CalendarInstance:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.calendar_instance_attendees_item import CalendarInstanceAttendeesItem
         d = dict(src_dict)
         google_event_id = d.pop("google_event_id")
 
@@ -145,6 +164,18 @@ class CalendarInstance:
 
         childcare = d.pop("childcare", UNSET)
 
+        _attendees = d.pop("attendees", UNSET)
+        attendees: list[CalendarInstanceAttendeesItem] | Unset = UNSET
+        if _attendees is not UNSET:
+            attendees = []
+            for attendees_item_data in _attendees:
+                attendees_item = CalendarInstanceAttendeesItem.from_dict(attendees_item_data)
+
+
+
+                attendees.append(attendees_item)
+
+
         calendar_instance = cls(
             google_event_id=google_event_id,
             start=start,
@@ -156,6 +187,7 @@ class CalendarInstance:
             description=description,
             subjects=subjects,
             childcare=childcare,
+            attendees=attendees,
         )
 
 

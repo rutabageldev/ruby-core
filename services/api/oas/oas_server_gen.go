@@ -18,6 +18,29 @@ type Handler interface {
 	//
 	// GET /calendar/events
 	ListCalendarEvents(ctx context.Context, params ListCalendarEventsParams) (ListCalendarEventsRes, error)
+	// ListChildcareProviderSuggestions implements listChildcareProviderSuggestions operation.
+	//
+	// Returns non-archived providers ranked by per-occurrence recent usage: each provider's associated
+	// event series' past occurrences are expanded over a recency window, counted per occurrence, and
+	// recency-weighted (a weekly slot counts as many; a one-off counts as one). Nothing is stored — the
+	// ranking is computed from associations plus expansion, so it can't drift.
+	//
+	// GET /childcare/providers/suggestions
+	ListChildcareProviderSuggestions(ctx context.Context) (ListChildcareProviderSuggestionsRes, error)
+	// ListChildcareProviders implements listChildcareProviders operation.
+	//
+	// Returns the active (non-archived) childcare provider roster. Archived providers are excluded but
+	// retained server-side so frequency history is preserved. Local overlay; never written to Google.
+	//
+	// GET /childcare/providers
+	ListChildcareProviders(ctx context.Context) (ListChildcareProvidersRes, error)
+	// ListDirectoryPeople implements listDirectoryPeople operation.
+	//
+	// Returns the active people and groups in the household directory — the roster that feeds the "FOR"
+	// subject picker and childcare-provider linking. Local overlay; never reflects Google data.
+	//
+	// GET /directory/people
+	ListDirectoryPeople(ctx context.Context) (ListDirectoryPeopleRes, error)
 	// Ping implements ping operation.
 	//
 	// Returns a small payload confirming the API is reachable and the caller's bearer token was accepted.

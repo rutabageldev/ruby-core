@@ -23,6 +23,10 @@ tags:
     description: Service metadata and liveness of the API surface itself.
   - name: calendar
     description: Read access to the family calendar mirror (ROADMAP-0012).
+  - name: directory
+    description: Household people and groups (the household overlay).
+  - name: childcare
+    description: Childcare providers and usage-ranked suggestions (the household overlay).
 paths:
   /ping:
     get:
@@ -159,6 +163,147 @@ paths:
                 title: Internal Server Error
                 status: 500
                 detail: An unexpected error occurred.
+  /directory/people:
+    get:
+      operationId: listDirectoryPeople
+      tags:
+        - directory
+      summary: List directory people
+      description: |
+        Returns the active people and groups in the household directory — the roster
+        that feeds the "FOR" subject picker and childcare-provider linking. Local
+        overlay; never reflects Google data.
+      responses:
+        '200':
+          description: The active directory people.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Person'
+              example:
+                - id: 11111111-1111-4111-8111-111111111111
+                  display_name: Katie
+                  kind: person
+                  email: michael.katie.rubanka@gmail.com
+                  family: Rubanka
+                  active: true
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Unauthorized
+                status: 401
+                detail: A valid bearer token is required.
+        default:
+          description: Unexpected error, as an RFC 9457 Problem Details object.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Internal Server Error
+                status: 500
+                detail: An unexpected error occurred.
+  /childcare/providers:
+    get:
+      operationId: listChildcareProviders
+      tags:
+        - childcare
+      summary: List childcare providers
+      description: |
+        Returns the active (non-archived) childcare provider roster. Archived providers
+        are excluded but retained server-side so frequency history is preserved. Local
+        overlay; never written to Google.
+      responses:
+        '200':
+          description: The active childcare providers.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Provider'
+              example:
+                - id: 22222222-2222-4222-8222-222222222222
+                  display_name: Sue
+                  relationship: grandparent
+                  archived: false
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Unauthorized
+                status: 401
+                detail: A valid bearer token is required.
+        default:
+          description: Unexpected error, as an RFC 9457 Problem Details object.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Internal Server Error
+                status: 500
+                detail: An unexpected error occurred.
+  /childcare/providers/suggestions:
+    get:
+      operationId: listChildcareProviderSuggestions
+      tags:
+        - childcare
+      summary: List childcare providers ranked by recent usage
+      description: |
+        Returns non-archived providers ranked by per-occurrence recent usage: each
+        provider's associated event series' past occurrences are expanded over a recency
+        window, counted per occurrence, and recency-weighted (a weekly slot counts as
+        many; a one-off counts as one). Nothing is stored — the ranking is computed from
+        associations plus expansion, so it can't drift.
+      responses:
+        '200':
+          description: Providers ranked by descending score.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderSuggestion'
+              example:
+                - id: 22222222-2222-4222-8222-222222222222
+                  display_name: Sue
+                  score: 4.5
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Unauthorized
+                status: 401
+                detail: A valid bearer token is required.
+        default:
+          description: Unexpected error, as an RFC 9457 Problem Details object.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Internal Server Error
+                status: 500
+                detail: An unexpected error occurred.
 components:
   securitySchemes:
     bearerAuth:
@@ -248,6 +393,23 @@ components:
         childcare:
           type: string
           description: Resolved childcare provider id for this event; omitted when none — local overlay.
+        attendees:
+          type: array
+          description: Google attendees, each reconciled to a directory person id by email where matched, with Google RSVP status.
+          items:
+            type: object
+            properties:
+              email:
+                type: string
+                description: The attendee's email address (from Google).
+              person_id:
+                type: string
+                description: The matched directory person id, when the email reconciles to a known person.
+              response_status:
+                type: string
+                description: Google RSVP status — needsAction, declined, tentative, or accepted.
+            required:
+              - email
       required:
         - google_event_id
         - start
@@ -264,3 +426,96 @@ components:
         location: 123 Main St
         description: Cleaning
         subjects: []
+        attendees:
+          - email: michael.katie.rubanka@gmail.com
+            person_id: 11111111-1111-4111-8111-111111111111
+            response_status: accepted
+    Person:
+      type: object
+      description: A person or group in the household directory — feeds the "FOR" subject picker and provider linking. Local overlay, never written to Google.
+      properties:
+        id:
+          type: string
+          description: The person's stable id (UUID).
+        display_name:
+          type: string
+          description: Human-readable name.
+        kind:
+          type: string
+          description: Either `person` or `group` (a group like "Household" has no membership in MVP).
+        ha_person_entity_id:
+          type: string
+          description: The Home Assistant person entity id this maps to, when present.
+        email:
+          type: string
+          description: Email used to reconcile calendar attendees to this person, when present.
+        family:
+          type: string
+          description: Family grouping used to colour-by-family in clients.
+        color:
+          type: string
+          description: Display colour, when set.
+        active:
+          type: boolean
+          description: Whether the person is active.
+      required:
+        - id
+        - display_name
+        - kind
+        - active
+      example:
+        id: 11111111-1111-4111-8111-111111111111
+        display_name: Katie
+        kind: person
+        email: michael.katie.rubanka@gmail.com
+        family: Rubanka
+        active: true
+    Provider:
+      type: object
+      description: A childcare provider — may be a household person (e.g. a grandparent) or standalone (e.g. a daycare). Local overlay.
+      properties:
+        id:
+          type: string
+          description: The provider's stable id (UUID).
+        display_name:
+          type: string
+          description: Human-readable name.
+        person_id:
+          type: string
+          description: The linked directory person id, when the provider is also a household person.
+        relationship:
+          type: string
+          description: Free-text relationship to the household, when set.
+        archived:
+          type: boolean
+          description: Whether the provider has been archived (soft-deleted; frequency history is preserved).
+      required:
+        - id
+        - display_name
+        - archived
+      example:
+        id: 22222222-2222-4222-8222-222222222222
+        display_name: Sue
+        relationship: grandparent
+        archived: false
+    ProviderSuggestion:
+      type: object
+      description: A non-archived provider ranked by recent per-occurrence usage (higher score = more recently/frequently used).
+      properties:
+        id:
+          type: string
+          description: The provider's id (UUID).
+        display_name:
+          type: string
+          description: Human-readable name.
+        score:
+          type: number
+          description: Recency-weighted per-occurrence usage score over the recency window.
+      required:
+        - id
+        - display_name
+        - score
+      example:
+        id: 22222222-2222-4222-8222-222222222222
+        display_name: Sue
+        score: 4.5

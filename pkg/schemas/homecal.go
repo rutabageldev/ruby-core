@@ -51,3 +51,19 @@ type CalendarDeleteData struct {
 	GoogleEventID string `json:"google_event_id"`
 	LoggedBy      string `json:"logged_by,omitempty"`
 }
+
+// ChildcareProviderUpsertData is the payload of ruby_home.childcare.provider.upsert
+// (create when ID absent, else update). Local overlay only (Slice D).
+type ChildcareProviderUpsertData struct {
+	ID           string  `json:"id,omitempty"`
+	DisplayName  string  `json:"display_name"`
+	PersonID     *string `json:"person_id,omitempty"`
+	Relationship *string `json:"relationship,omitempty"`
+	Archived     bool    `json:"archived,omitempty"`
+}
+
+// ChildcareProviderDeleteData is the payload of ruby_home.childcare.provider.delete
+// (delete = archive, preserving frequency history).
+type ChildcareProviderDeleteData struct {
+	ID string `json:"id"`
+}

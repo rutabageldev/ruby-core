@@ -26,6 +26,38 @@ func (UnimplementedHandler) ListCalendarEvents(ctx context.Context, params ListC
 	return r, ht.ErrNotImplemented
 }
 
+// ListChildcareProviderSuggestions implements listChildcareProviderSuggestions operation.
+//
+// Returns non-archived providers ranked by per-occurrence recent usage: each provider's associated
+// event series' past occurrences are expanded over a recency window, counted per occurrence, and
+// recency-weighted (a weekly slot counts as many; a one-off counts as one). Nothing is stored — the
+// ranking is computed from associations plus expansion, so it can't drift.
+//
+// GET /childcare/providers/suggestions
+func (UnimplementedHandler) ListChildcareProviderSuggestions(ctx context.Context) (r ListChildcareProviderSuggestionsRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ListChildcareProviders implements listChildcareProviders operation.
+//
+// Returns the active (non-archived) childcare provider roster. Archived providers are excluded but
+// retained server-side so frequency history is preserved. Local overlay; never written to Google.
+//
+// GET /childcare/providers
+func (UnimplementedHandler) ListChildcareProviders(ctx context.Context) (r ListChildcareProvidersRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
+// ListDirectoryPeople implements listDirectoryPeople operation.
+//
+// Returns the active people and groups in the household directory — the roster that feeds the "FOR"
+// subject picker and childcare-provider linking. Local overlay; never reflects Google data.
+//
+// GET /directory/people
+func (UnimplementedHandler) ListDirectoryPeople(ctx context.Context) (r ListDirectoryPeopleRes, _ error) {
+	return r, ht.ErrNotImplemented
+}
+
 // Ping implements ping operation.
 //
 // Returns a small payload confirming the API is reachable and the caller's bearer token was accepted.

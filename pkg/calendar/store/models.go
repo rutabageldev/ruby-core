@@ -36,6 +36,41 @@ type CalendarEvent struct {
 	SyncedAt              pgtype.Timestamptz
 }
 
+type ChildcareProvider struct {
+	ID           pgtype.UUID
+	DisplayName  string
+	PersonID     pgtype.UUID
+	Relationship pgtype.Text
+	Archived     bool
+	CreatedAt    pgtype.Timestamptz
+}
+
+type DirectoryPerson struct {
+	ID               pgtype.UUID
+	DisplayName      string
+	Kind             string
+	HaPersonEntityID pgtype.Text
+	Email            pgtype.Text
+	Family           pgtype.Text
+	Color            pgtype.Text
+	Active           bool
+	CreatedAt        pgtype.Timestamptz
+}
+
+type EventChildcare struct {
+	ID            pgtype.UUID
+	GoogleEventID string
+	ProviderID    pgtype.UUID
+	CreatedAt     pgtype.Timestamptz
+}
+
+type EventSubject struct {
+	ID            pgtype.UUID
+	GoogleEventID string
+	PersonID      pgtype.UUID
+	CreatedAt     pgtype.Timestamptz
+}
+
 type SyncState struct {
 	CalendarID       string
 	SyncToken        pgtype.Text

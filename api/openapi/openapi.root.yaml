@@ -23,11 +23,21 @@ tags:
     description: Service metadata and liveness of the API surface itself.
   - name: calendar
     description: Read access to the family calendar mirror (ROADMAP-0012).
+  - name: directory
+    description: Household people and groups (the household overlay).
+  - name: childcare
+    description: Childcare providers and usage-ranked suggestions (the household overlay).
 paths:
   /ping:
     $ref: "./paths/ping.yaml"
   /calendar/events:
     $ref: "./paths/calendar.yaml"
+  /directory/people:
+    $ref: "./paths/directory_people.yaml"
+  /childcare/providers:
+    $ref: "./paths/childcare_providers.yaml"
+  /childcare/providers/suggestions:
+    $ref: "./paths/childcare_suggestions.yaml"
 components:
   securitySchemes:
     bearerAuth:
