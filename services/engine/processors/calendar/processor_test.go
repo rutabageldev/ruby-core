@@ -25,6 +25,7 @@ import (
 
 type fakeGCal struct {
 	events            map[string]*calendarv3.Event
+	instances         map[string]string // "recurringEventID|originalStart" -> instance event id
 	inserts, updates  int
 	patches           int
 	lastPatch         *calendarv3.Event // event arg of the most recent Patch
@@ -35,7 +36,9 @@ type fakeGCal struct {
 	listIdx           int
 }
 
-func newFakeGCal() *fakeGCal { return &fakeGCal{events: map[string]*calendarv3.Event{}} }
+func newFakeGCal() *fakeGCal {
+	return &fakeGCal{events: map[string]*calendarv3.Event{}, instances: map[string]string{}}
+}
 
 func (f *fakeGCal) Get(_ context.Context, _, id string) (*calendarv3.Event, error) {
 	f.gets++
@@ -98,6 +101,18 @@ func (f *fakeGCal) Patch(_ context.Context, _, id, _ string, ev *calendarv3.Even
 	out.Etag = `"etag-patched"`
 	f.events[id] = &out
 	return &out, nil
+}
+
+func (f *fakeGCal) InstanceAt(_ context.Context, _, recurringEventID, originalStart string) (*calendarv3.Event, error) {
+	id, ok := f.instances[recurringEventID+"|"+originalStart]
+	if !ok {
+		return nil, gcal.ErrAlreadyGone
+	}
+	ev, ok := f.events[id]
+	if !ok {
+		return nil, gcal.ErrAlreadyGone
+	}
+	return ev, nil
 }
 
 func (f *fakeGCal) Delete(_ context.Context, _, id string) error {
@@ -665,5 +680,71 @@ func TestHandlePersonDelete_Deactivates(t *testing.T) {
 	}
 	if len(st.deactivated) != 1 {
 		t.Fatalf("deactivated = %d, want 1", len(st.deactivated))
+	}
+}
+
+// TestHandleUpsert_PerInstanceEditPatchesInstance covers ADR-0044 §2: Scope=this resolves
+// the occurrence and patches the instance's own id (an override), never the master.
+func TestHandleUpsert_PerInstanceEditPatchesInstance(t *testing.T) {
+	p, g, st := newTestProcessor()
+	start, end := timedEvent(t)
+	// Seed the resolvable instance.
+	g.events["g1_20260622"] = &calendarv3.Event{Id: "g1_20260622", Etag: `"inst-etag"`}
+	g.instances["g1|2026-06-22T13:00:00Z"] = "g1_20260622"
+
+	evt := cloudEvent(t, schemas.CalendarUpsertData{
+		Scope: schemas.ScopeThis, RecurringEventID: "g1", OriginalStart: "2026-06-22T13:00:00Z",
+		Summary: "Just this one", Start: start, End: end,
+	})
+	if err := p.handleUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("per-instance edit: %v", err)
+	}
+	if g.patches != 1 {
+		t.Fatalf("expected 1 instance patch, got %d", g.patches)
+	}
+	if g.lastPatch.Recurrence != nil {
+		t.Errorf("an override instance must not carry recurrence, got %v", g.lastPatch.Recurrence)
+	}
+	if st.upserts == 0 {
+		t.Error("expected the override to be mirrored")
+	}
+}
+
+// TestHandleDelete_PerInstanceCancelsOccurrence covers ADR-0044 §2 delete: Scope=this
+// cancels the resolved instance (status=cancelled), not the series.
+func TestHandleDelete_PerInstanceCancelsOccurrence(t *testing.T) {
+	p, g, _ := newTestProcessor()
+	g.events["g1_20260622"] = &calendarv3.Event{Id: "g1_20260622", Etag: `"inst-etag"`}
+	g.instances["g1|2026-06-22T13:00:00Z"] = "g1_20260622"
+
+	evt := cloudEvent(t, schemas.CalendarDeleteData{
+		Scope: schemas.ScopeThis, RecurringEventID: "g1", OriginalStart: "2026-06-22T13:00:00Z",
+	})
+	if err := p.handleDelete(context.Background(), evt); err != nil {
+		t.Fatalf("per-instance delete: %v", err)
+	}
+	if g.patches != 1 || g.deletes != 0 {
+		t.Fatalf("expected 1 cancel-patch and 0 series deletes, got patches=%d deletes=%d", g.patches, g.deletes)
+	}
+	if g.lastPatch.Status != "cancelled" {
+		t.Errorf("instance status = %q, want cancelled", g.lastPatch.Status)
+	}
+}
+
+// TestHandleUpsert_ThisAndFollowingIsIgnored covers ADR-0044 obligation 5: the deferred
+// scope is a no-op (not silently downgraded), touching neither Google nor the mirror.
+func TestHandleUpsert_ThisAndFollowingIsIgnored(t *testing.T) {
+	p, g, st := newTestProcessor()
+	start, end := timedEvent(t)
+	evt := cloudEvent(t, schemas.CalendarUpsertData{
+		Scope: schemas.ScopeThisAndFollowing, RecurringEventID: "g1", OriginalStart: "2026-06-22T13:00:00Z",
+		Summary: "nope", Start: start, End: end,
+	})
+	if err := p.handleUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if g.patches != 0 || g.inserts != 0 || g.updates != 0 || st.upserts != 0 {
+		t.Errorf("this_and_following must be a no-op, got patches=%d inserts=%d updates=%d upserts=%d",
+			g.patches, g.inserts, g.updates, st.upserts)
 	}
 }

@@ -41,6 +41,11 @@ type Service interface {
 	// is surfaced as ErrAlreadyGone so the caller can treat the absent postcondition
 	// as satisfied rather than failing.
 	Delete(ctx context.Context, calendarID, eventID string) error
+	// InstanceAt resolves the single occurrence of recurringEventID whose original start
+	// equals originalStart (RFC 3339). It returns the instance's own event id (which
+	// per-instance edits/deletes then Patch), or ErrAlreadyGone when no such occurrence
+	// exists (ADR-0044).
+	InstanceAt(ctx context.Context, calendarID, recurringEventID, originalStart string) (*calendarv3.Event, error)
 }
 
 // ListResult is one page from a sync pass.
@@ -171,6 +176,21 @@ func (a *apiService) Patch(ctx context.Context, calendarID, eventID, etag string
 		return nil, fmt.Errorf("gcal: patch: %w", err)
 	}
 	return out, nil
+}
+
+func (a *apiService) InstanceAt(ctx context.Context, calendarID, recurringEventID, originalStart string) (*calendarv3.Event, error) {
+	res, err := a.svc.Events.Instances(calendarID, recurringEventID).OriginalStart(originalStart).Context(ctx).Do()
+	if err != nil {
+		var gerr *googleapi.Error
+		if errors.As(err, &gerr) && (gerr.Code == 404 || gerr.Code == 410) {
+			return nil, ErrAlreadyGone
+		}
+		return nil, fmt.Errorf("gcal: instances: %w", err)
+	}
+	if len(res.Items) == 0 {
+		return nil, ErrAlreadyGone
+	}
+	return res.Items[0], nil
 }
 
 func (a *apiService) Delete(ctx context.Context, calendarID, eventID string) error {

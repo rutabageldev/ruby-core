@@ -31,29 +31,45 @@ type CalendarEventDate struct {
 	TimeZone string `json:"timezone,omitempty"` // IANA zone, with DateTime
 }
 
+// Calendar edit/delete scope (ADR-0044). Absent/empty means ScopeAll for back-compat.
+const (
+	ScopeAll              = "all"                // the whole series (or a single event)
+	ScopeThis             = "this"               // only the addressed occurrence
+	ScopeThisAndFollowing = "this_and_following" // deferred (ADR-0044 obligation 5)
+)
+
 // CalendarUpsertData is the payload of a calendar.event.upsert write event
-// (ROADMAP-0012). Absent GoogleEventID means create; present means update.
+// (ROADMAP-0012). Absent GoogleEventID means create; present means update. For a
+// per-occurrence edit (Scope=this) RecurringEventID + OriginalStart address the
+// occurrence (ADR-0044, #155 §2).
 type CalendarUpsertData struct {
-	GoogleEventID  string            `json:"google_event_id,omitempty"`
-	Summary        string            `json:"summary"`
-	Start          CalendarEventDate `json:"start"`
-	End            CalendarEventDate `json:"end"`
-	AllDay         bool              `json:"all_day"`
-	Recurrence     []string          `json:"recurrence,omitempty"`
-	Location       string            `json:"location,omitempty"`
-	Description    string            `json:"description,omitempty"`
-	Subjects       []string          `json:"subjects,omitempty"`  // person_ids — overlay (Slice D)
-	Childcare      *string           `json:"childcare,omitempty"` // provider_id | null — overlay (Slice D)
-	Etag           string            `json:"etag,omitempty"`      // update only → If-Match
-	IdempotencyKey string            `json:"idempotency_key,omitempty"`
-	LoggedBy       string            `json:"logged_by,omitempty"`
+	GoogleEventID    string            `json:"google_event_id,omitempty"`
+	Summary          string            `json:"summary"`
+	Start            CalendarEventDate `json:"start"`
+	End              CalendarEventDate `json:"end"`
+	AllDay           bool              `json:"all_day"`
+	Recurrence       []string          `json:"recurrence,omitempty"`
+	Location         string            `json:"location,omitempty"`
+	Description      string            `json:"description,omitempty"`
+	Subjects         []string          `json:"subjects,omitempty"`  // person_ids — overlay (Slice D)
+	Childcare        *string           `json:"childcare,omitempty"` // provider_id | null — overlay (Slice D)
+	Etag             string            `json:"etag,omitempty"`      // update only → If-Match
+	IdempotencyKey   string            `json:"idempotency_key,omitempty"`
+	LoggedBy         string            `json:"logged_by,omitempty"`
+	Scope            string            `json:"scope,omitempty"`              // all (default) | this | this_and_following
+	RecurringEventID string            `json:"recurring_event_id,omitempty"` // series master, for Scope=this
+	OriginalStart    string            `json:"original_start,omitempty"`     // RFC3339 occurrence, for Scope=this
 }
 
-// CalendarDeleteData is the payload of a calendar.event.delete write event
-// (series-level for MVP).
+// CalendarDeleteData is the payload of a calendar.event.delete write event. Scope=this
+// cancels a single occurrence (RecurringEventID + OriginalStart); Scope=all (default)
+// deletes the whole series (ADR-0044).
 type CalendarDeleteData struct {
-	GoogleEventID string `json:"google_event_id"`
-	LoggedBy      string `json:"logged_by,omitempty"`
+	GoogleEventID    string `json:"google_event_id"`
+	LoggedBy         string `json:"logged_by,omitempty"`
+	Scope            string `json:"scope,omitempty"`
+	RecurringEventID string `json:"recurring_event_id,omitempty"`
+	OriginalStart    string `json:"original_start,omitempty"`
 }
 
 // ChildcareProviderUpsertData is the payload of ruby_home.childcare.provider.upsert

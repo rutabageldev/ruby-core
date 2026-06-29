@@ -28,9 +28,17 @@ func (p *Processor) handleUpsert(ctx context.Context, evt *schemas.CloudEvent) e
 
 	var result *calendarv3.Event
 	var err error
-	if d.GoogleEventID == "" {
+	switch {
+	case d.Scope == schemas.ScopeThisAndFollowing:
+		// Deferred (ADR-0044 obligation 5). Do not silently downgrade to all/this.
+		p.log.Warn("calendar: scope=this_and_following not yet supported — ignoring edit",
+			slog.String("recurring_event_id", d.RecurringEventID))
+		return nil
+	case d.Scope == schemas.ScopeThis:
+		result, err = p.updateInstance(ctx, &d, gev)
+	case d.GoogleEventID == "":
 		result, err = p.create(ctx, evt.ID, &d, gev)
-	} else {
+	default:
 		result, err = p.update(ctx, &d, gev)
 	}
 	if err != nil {
@@ -120,6 +128,60 @@ func (p *Processor) update(ctx context.Context, d *schemas.CalendarUpsertData, g
 	return out, nil
 }
 
+// updateInstance edits a single occurrence of a recurring series (Scope=this, ADR-0044):
+// resolve the occurrence by original_start, then patch that instance's own event id — an
+// instance override at Google. Recurrence is cleared (an instance cannot carry an RRULE).
+func (p *Processor) updateInstance(ctx context.Context, d *schemas.CalendarUpsertData, gev *calendarv3.Event) (*calendarv3.Event, error) {
+	inst, err := p.gcal.InstanceAt(ctx, p.calendarID, d.RecurringEventID, d.OriginalStart)
+	if errors.Is(err, gcal.ErrAlreadyGone) {
+		p.log.Warn("calendar: per-instance edit — occurrence not found, skipping",
+			slog.String("recurring_event_id", d.RecurringEventID), slog.String("original_start", d.OriginalStart))
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("calendar: resolve instance: %w", err)
+	}
+	gev.Recurrence = nil // an override instance cannot hold an RRULE
+
+	out, perr := p.gcal.Patch(ctx, p.calendarID, inst.Id, trimEtag(inst.Etag), gev)
+	if errors.Is(perr, gcal.ErrConflict) {
+		fresh, rerr := p.gcal.Get(ctx, p.calendarID, inst.Id)
+		if rerr != nil {
+			return nil, fmt.Errorf("calendar: resync instance after 412: %w", rerr)
+		}
+		out, perr = p.gcal.Patch(ctx, p.calendarID, inst.Id, trimEtag(fresh.Etag), gev)
+	}
+	if perr != nil {
+		return nil, fmt.Errorf("calendar: patch instance: %w", perr)
+	}
+	return out, nil
+}
+
+// deleteInstance cancels a single occurrence (Scope=this, ADR-0044): patch the resolved
+// instance's status to cancelled — an override tombstone the mirror + expansion subtract.
+func (p *Processor) deleteInstance(ctx context.Context, d *schemas.CalendarDeleteData) error {
+	inst, err := p.gcal.InstanceAt(ctx, p.calendarID, d.RecurringEventID, d.OriginalStart)
+	if errors.Is(err, gcal.ErrAlreadyGone) {
+		p.log.Info("calendar: per-instance delete — occurrence already gone, skipping",
+			slog.String("recurring_event_id", d.RecurringEventID), slog.String("original_start", d.OriginalStart))
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("calendar: resolve instance: %w", err)
+	}
+	out, perr := p.gcal.Patch(ctx, p.calendarID, inst.Id, trimEtag(inst.Etag), &calendarv3.Event{Status: "cancelled"})
+	if perr != nil {
+		return fmt.Errorf("calendar: cancel instance: %w", perr)
+	}
+	// Mirror the cancelled override immediately so the read expansion subtracts it.
+	if params, mperr := googleToParams(out, p.calendarID); mperr == nil {
+		_ = p.q.UpsertEvent(ctx, params)
+	}
+	p.log.Info("calendar: occurrence cancelled",
+		slog.String("recurring_event_id", d.RecurringEventID), slog.String("original_start", d.OriginalStart))
+	return nil
+}
+
 // handleDelete applies a calendar.event.delete (series-level for MVP): delete in
 // Google, then remove the mirror row. Overlay rows cascade via the FK.
 //
@@ -136,6 +198,16 @@ func (p *Processor) handleDelete(ctx context.Context, evt *schemas.CloudEvent) e
 		p.log.Warn("calendar: bad delete payload", slog.String("error", err.Error()))
 		return nil
 	}
+
+	switch d.Scope {
+	case schemas.ScopeThisAndFollowing:
+		p.log.Warn("calendar: scope=this_and_following not yet supported — ignoring delete",
+			slog.String("recurring_event_id", d.RecurringEventID))
+		return nil
+	case schemas.ScopeThis:
+		return p.deleteInstance(ctx, &d)
+	}
+
 	if d.GoogleEventID == "" {
 		p.log.Warn("calendar: delete missing google_event_id")
 		return nil
