@@ -2,12 +2,16 @@
 package nats
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	goNats "github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 )
@@ -15,12 +19,18 @@ import (
 // Publisher wraps a NATS connection and publishes HA events and gateway
 // health heartbeats as CloudEvents.
 type Publisher struct {
-	nc *goNats.Conn
+	nc             *goNats.Conn
+	eventsReceived metric.Int64Counter // ruby_core_ha_events_received_total{entity_domain}
 }
 
-// New returns a Publisher for the given NATS connection.
+// New returns a Publisher for the given NATS connection. It registers the
+// ha-events-received counter under the global MeterProvider (no-op without otel.Init).
 func New(nc *goNats.Conn) *Publisher {
-	return &Publisher{nc: nc}
+	eventsReceived, _ := otel.Meter("github.com/primaryrutabaga/ruby-core/services/gateway").Int64Counter(
+		"ruby_core_ha_events_received_total",
+		metric.WithDescription("Home Assistant state_changed events ingested and published, by entity domain"),
+	)
+	return &Publisher{nc: nc, eventsReceived: eventsReceived}
 }
 
 // PublishHAEvent publishes a HA state_changed event as a CloudEvent to
@@ -64,7 +74,13 @@ func (p *Publisher) PublishHAEvent(entityID, state string, attrs map[string]any,
 	}
 
 	subject := fmt.Sprintf("ha.events.%s.%s", domain, entityName)
-	return p.nc.Publish(subject, payload)
+	if err := p.nc.Publish(subject, payload); err != nil {
+		return err
+	}
+	if p.eventsReceived != nil {
+		p.eventsReceived.Add(context.Background(), 1, metric.WithAttributes(attribute.String("entity_domain", domain)))
+	}
+	return nil
 }
 
 // PublishHealth publishes a gateway health heartbeat CloudEvent to the

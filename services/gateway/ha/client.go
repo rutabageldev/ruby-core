@@ -12,6 +12,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	goNats "github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 	"github.com/primaryrutabaga/ruby-core/services/gateway/ada"
@@ -75,6 +77,7 @@ type Client struct {
 	log          *slog.Logger
 	haConnected  atomic.Bool
 	httpClient   *http.Client
+	reconnects   metric.Int64Counter // ruby_core_ha_websocket_reconnects_total
 }
 
 // NewClient creates a Client.
@@ -88,6 +91,10 @@ func NewClient(
 	reconciler *Reconciler,
 	log *slog.Logger,
 ) *Client {
+	reconnects, _ := otel.Meter("github.com/primaryrutabaga/ruby-core/services/gateway").Int64Counter(
+		"ruby_core_ha_websocket_reconnects_total",
+		metric.WithDescription("Successful Home Assistant WebSocket connection establishments (includes the initial connect)"),
+	)
 	return &Client{
 		haURL:        haURL,
 		haToken:      haToken,
@@ -99,6 +106,7 @@ func NewClient(
 		reconciler:   reconciler,
 		log:          log,
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		reconnects:   reconnects,
 	}
 }
 
@@ -241,6 +249,9 @@ func (c *Client) runOnce(ctx context.Context) error {
 	// heartbeat reads this flag to publish ha_connected, which the engine watches
 	// to trigger restoreSensors on the false→true transition.
 	c.haConnected.Store(true)
+	if c.reconnects != nil {
+		c.reconnects.Add(ctx, 1)
+	}
 
 	// Trigger targeted reconciliation after a successful reconnect (ADR-0008).
 	go c.reconciler.Run(ctx, c.critEntities)

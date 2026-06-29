@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,9 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 )
@@ -31,6 +35,8 @@ type handler struct {
 	mu           sync.Mutex
 	currentState string
 	debounce     *time.Timer
+
+	statePublished metric.Int64Counter // ruby_core_presence_state_published_total{person_id,state}
 }
 
 func newHandler(
@@ -40,14 +46,19 @@ func newHandler(
 	kv nats.KeyValue,
 	log *slog.Logger,
 ) *handler {
+	statePublished, _ := otel.Meter("github.com/primaryrutabaga/ruby-core/services/presence").Int64Counter(
+		"ruby_core_presence_state_published_total",
+		metric.WithDescription("Presence state-change events published, by person and resulting state"),
+	)
 	return &handler{
-		cfg:     cfg,
-		haURL:   haURL,
-		haToken: haToken,
-		client:  &http.Client{Timeout: 10 * time.Second},
-		nc:      nc,
-		kv:      kv,
-		log:     log,
+		cfg:            cfg,
+		haURL:          haURL,
+		haToken:        haToken,
+		client:         &http.Client{Timeout: 10 * time.Second},
+		nc:             nc,
+		kv:             kv,
+		log:            log,
+		statePublished: statePublished,
 	}
 }
 
@@ -261,6 +272,13 @@ func (h *handler) publishState(state string) {
 			slog.String("error", err.Error()),
 		)
 		return
+	}
+
+	if h.statePublished != nil {
+		h.statePublished.Add(context.Background(), 1, metric.WithAttributes(
+			attribute.String("person_id", h.cfg.PersonID),
+			attribute.String("state", state),
+		))
 	}
 
 	h.log.Info("presence: published state",

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
@@ -291,12 +292,13 @@ type maxDeliverAdvisory struct {
 // StreamConfig.RePublish copies ALL messages, not just dead-lettered ones.
 // The advisory is the only server-side signal for max-delivery exhaustion.
 type DLQForwarder struct {
-	js       nats.JetStreamContext
-	sub      *nats.Subscription
-	msgCh    chan *nats.Msg
-	log      *slog.Logger
-	stream   string // e.g. "HA_EVENTS"
-	consumer string // e.g. "engine_processor"
+	js        nats.JetStreamContext
+	sub       *nats.Subscription
+	msgCh     chan *nats.Msg
+	log       *slog.Logger
+	stream    string              // e.g. "HA_EVENTS"
+	consumer  string              // e.g. "engine_processor"
+	forwarded metric.Int64Counter // ruby_core_dlq_forwarded_total{stream}
 }
 
 // logger returns f.log if set, otherwise slog.Default().
@@ -316,13 +318,18 @@ func NewDLQForwarder(nc *nats.Conn, js nats.JetStreamContext, stream, consumer s
 	if err != nil {
 		return nil, fmt.Errorf("engine: dlq forwarder subscribe %q: %w", advisorySubj, err)
 	}
+	forwarded, _ := otel.Meter("github.com/primaryrutabaga/ruby-core/services/engine").Int64Counter(
+		"ruby_core_dlq_forwarded_total",
+		metric.WithDescription("Messages routed to the DLQ stream after max-delivery exhaustion"),
+	)
 	return &DLQForwarder{
-		js:       js,
-		sub:      sub,
-		msgCh:    msgCh,
-		log:      log,
-		stream:   stream,
-		consumer: consumer,
+		js:        js,
+		sub:       sub,
+		msgCh:     msgCh,
+		log:       log,
+		stream:    stream,
+		consumer:  consumer,
+		forwarded: forwarded,
 	}, nil
 }
 
@@ -382,6 +389,9 @@ func (f *DLQForwarder) handleAdvisory(msg *nats.Msg) {
 			slog.String("error", err.Error()),
 		)
 		return
+	}
+	if f.forwarded != nil {
+		f.forwarded.Add(context.Background(), 1, metric.WithAttributes(attribute.String("stream", f.stream)))
 	}
 	f.logger().Info("engine: dlq: routed",
 		slog.String("stream", f.stream),
