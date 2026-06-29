@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/rutabageldev/ruby-core/compare/v0.30.0...v0.30.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **api:** grant read-only role SELECT on person_email + correct default-privileges scope ([9ea8e55](https://github.com/rutabageldev/ruby-core/commit/9ea8e55f54972c45cfaa39e574c714c241ac6a25))
+
 ## [0.30.0](https://github.com/rutabageldev/ruby-core/compare/v0.29.0...v0.30.0) (2026-06-29)
 
 
