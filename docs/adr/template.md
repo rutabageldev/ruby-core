@@ -1,3 +1,5 @@
+<!-- After adding a new ADR, run `make docs-index` to refresh docs/ARCHITECTURE_DECISIONS.md. -->
+
 # [ADR-XXXX] - Title of Decision
 
 * **Status:** Proposed | Accepted | Deprecated | Superseded by [ADR-YYYY](ADR-YYYY-link.md)
