@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/nats-io/nats.go"
 
@@ -60,6 +61,10 @@ func main() {
 	}
 	defer nc.Close()
 	logger.Info("connected to NATS", slog.String("url", cfg.NATSUrl))
+
+	// Exit for a Docker restart if NATS is permanently lost (reconnects exhausted), #18.
+	var natsLost atomic.Bool
+	nc.SetClosedHandler(boot.OnNATSClosed(ctx, cancel, &natsLost, logger))
 
 	haVaultPath := os.Getenv("VAULT_HA_PATH")
 	if haVaultPath == "" {
@@ -119,6 +124,9 @@ func main() {
 	logger.Info("presence running")
 	runConsumer(ctx, sub, h, consumerCfg.FetchBatch, logger)
 	logger.Info("presence stopped")
+	if natsLost.Load() {
+		os.Exit(1)
+	}
 }
 
 func runConsumer(ctx context.Context, sub *nats.Subscription, h *handler, batchSize int, log *slog.Logger) {
@@ -128,13 +136,19 @@ func runConsumer(ctx context.Context, sub *nats.Subscription, h *handler, batchS
 		}
 		msgs, err := sub.Fetch(batchSize, nats.MaxWait(5*nats.DefaultTimeout))
 		if err != nil {
-			if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.Canceled) {
-				continue
-			}
-			if ctx.Err() != nil {
+			// Survive a NATS bounce (#18): exit only on ctx cancellation; back off on a
+			// transient error so we don't hot-spin while nats.go reconnects.
+			switch natsx.ClassifyFetchErr(err, ctx.Err()) {
+			case natsx.FetchStop:
 				return
+			case natsx.FetchBackoff:
+				log.Warn("presence: transient fetch error, retrying", slog.String("error", err.Error()))
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(natsx.FetchRetryBackoff):
+				}
 			}
-			log.Warn("presence: fetch error", slog.String("error", err.Error()))
 			continue
 		}
 		for _, msg := range msgs {

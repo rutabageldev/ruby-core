@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -110,15 +109,23 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 		msgs, err := c.sub.Fetch(c.batchSize, nats.MaxWait(2*time.Second))
 		if err != nil {
-			if errors.Is(err, nats.ErrTimeout) {
-				continue
-			}
-			if errors.Is(err, context.Canceled) ||
-				errors.Is(err, nats.ErrConnectionClosed) ||
-				errors.Is(err, nats.ErrSubscriptionClosed) {
+			// Survive a NATS bounce: only ctx cancellation exits the loop; every other
+			// fetch error is transient (nats.go reconnects underneath) so we log, back
+			// off, and resume rather than returning a fatal error that wedged the
+			// process (#18).
+			switch natsx.ClassifyFetchErr(err, ctx.Err()) {
+			case natsx.FetchStop:
 				return nil
+			case natsx.FetchBackoff:
+				c.logger().Warn("engine: transient fetch error, retrying",
+					slog.String("error", err.Error()))
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(natsx.FetchRetryBackoff):
+				}
 			}
-			return fmt.Errorf("engine: fetch: %w", err)
+			continue
 		}
 
 		for _, msg := range msgs {

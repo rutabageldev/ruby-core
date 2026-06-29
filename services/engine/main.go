@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -64,6 +65,11 @@ func main() {
 	}
 	defer nc.Close()
 	logger.Info("connected to NATS", slog.String("url", cfg.NATSUrl))
+
+	// Exit for a Docker restart if NATS is permanently lost (reconnects exhausted), #18.
+	// The cancel also unblocks the DLQ forwarder so wg.Wait() returns instead of hanging.
+	var natsLost atomic.Bool
+	nc.SetClosedHandler(boot.OnNATSClosed(ctx, cancel, &natsLost, logger))
 
 	// --- Phase 3: JetStream setup ---
 
@@ -326,6 +332,9 @@ func main() {
 	)
 	wg.Wait()
 	logger.Info("engine stopped")
+	if natsLost.Load() {
+		os.Exit(1)
+	}
 }
 
 // ENGINE_FORCE_FAIL: if set to "true" at startup, every event is rejected with
