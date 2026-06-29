@@ -7,7 +7,7 @@ Active plans below are hand-maintained. The **Archived** table is generated from
 
 | # | Title | Status | Roadmap Item |
 |---|---|---|---|
-| [0009](PLAN-0009-full-stack-observability.md) | Full-Stack Observability | In Progress | [ROADMAP-0009](../roadmap/ROADMAP-0009-full-stack-observability.md) |
+| _none_ | | | |
 
 ## Archived
 
@@ -15,6 +15,7 @@ Active plans below are hand-maintained. The **Archived** table is generated from
 
 | Plan | Title | Status |
 |---|---|---|
+| [0009](archived/PLAN-0009-full-stack-observability.md) | Full-Stack Observability | Complete |
 | [0010](archived/PLAN-0010-ada-backend-phase2.md) | Ada Backend Phase 2: Event Ingestion and Persistence | Complete |
 | [0011](archived/PLAN-0011-ada-phase3b-event-bus.md) | Ada Phase 3b: Replace HTTP Gateway Calls with HA Event Bus | Complete |
 | [0012](archived/PLAN-0012-ada-sleep-timer-and-sensor-refresh.md) | Ada: Live Sleep Timer and Periodic Sensor Refresh | In Progress |

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,9 +11,17 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/primaryrutabaga/ruby-core/pkg/audit"
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 )
+
+// tracer opens the notify.send span; delegates to the global provider installed by otel.Init.
+var tracer = otel.Tracer("github.com/primaryrutabaga/ruby-core/services/notifier")
 
 // notifyRequest is the HA mobile_app REST notification payload.
 type notifyRequest struct {
@@ -42,7 +51,7 @@ func newHandler(haURL, haToken string, rec *audit.Publisher, log *slog.Logger) *
 
 // process is the consumer process func for the notifier pull consumer.
 // subject is the NATS subject (e.g. "ruby_engine.commands.notify.{evtID}").
-func (h *handler) process(subject string, data []byte) error {
+func (h *handler) process(ctx context.Context, subject string, data []byte) error {
 	var evt schemas.CloudEvent
 	if err := json.Unmarshal(data, &evt); err != nil {
 		h.log.Warn("notifier: unmarshal command",
@@ -77,7 +86,7 @@ func (h *handler) process(subject string, data []byte) error {
 		return nil // ack: nothing useful to retry until HA is configured
 	}
 
-	if err := h.sendNotification(subject, title, message, device, evt); err != nil {
+	if err := h.sendNotification(ctx, subject, title, message, device, evt); err != nil {
 		// Non-nil error will trigger NAK + backoff redelivery in the consumer.
 		return err
 	}
@@ -85,7 +94,17 @@ func (h *handler) process(subject string, data []byte) error {
 }
 
 // sendNotification POSTs to HA's mobile_app notify service.
-func (h *handler) sendNotification(subject, title, message, device string, cause schemas.CloudEvent) error {
+func (h *handler) sendNotification(ctx context.Context, subject, title, message, device string, cause schemas.CloudEvent) (err error) {
+	ctx, span := tracer.Start(ctx, "notify.send",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(attribute.String("device", device)))
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
 	// HA service name: "mobile_app_{device}" — underscores, lowercase.
 	svcName := "mobile_app_" + strings.ToLower(strings.ReplaceAll(device, "-", "_"))
 	apiURL := strings.TrimRight(h.haURL, "/") + "/api/services/notify/" + svcName
@@ -95,7 +114,8 @@ func (h *handler) sendNotification(subject, title, message, device string, cause
 		return fmt.Errorf("notifier: marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(body))
+	//nolint:gosec // G704: apiURL host is the Vault-configured Home Assistant base; the path is a fixed notify route, not user-controlled.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("notifier: build request: %w", err)
 	}

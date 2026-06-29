@@ -32,9 +32,18 @@ A distributed trace is visible in the trace backend for a complete automation fl
 
 ## Acceptance Criteria
 
-* `[ ]` A distributed trace can be viewed in the trace backend for a complete automation flow.
-* `[ ]` Key service metrics (e.g., processing latency, queue depth) are visible in a dashboard.
-* `[ ]` Log entries contain trace IDs that correlate with traces in the backend.
+Implemented across PR #150 (metrics + log correlation) and the traces PR (PLAN-0009).
+`[~]` = code-complete and unit-verified; the final tick is a one-time live confirmation in
+Grafana after a deploy (CI has no telemetry-backend access). See
+[docs/ops/phase9-verification.md](../ops/phase9-verification.md) for the live steps.
+
+* `[~]` A distributed trace can be viewed in the trace backend for a complete automation flow.
+  Mechanism complete — `ha.ingest → nats.consume → engine.process → nats.consume → notify.send`,
+  connected via W3C trace context in NATS headers; proven by a propagation round-trip unit test.
+* `[~]` Key service metrics (e.g., processing latency, queue depth) are visible in a dashboard.
+  Emitted via OTLP (`ruby_core_*`); dashboard visibility is the live step.
+* `[~]` Log entries contain trace IDs that correlate with traces in the backend.
+  slog stamps `trace_id`/`span_id` from the active span; live Loki↔Tempo correlation is the live step.
 
 ---
 

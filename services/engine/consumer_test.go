@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -47,10 +48,10 @@ func (m *mockStore) Close() error { return nil }
 func TestDecide_Success(t *testing.T) {
 	c := &Consumer{
 		idStore: newMockStore(),
-		process: func(_ string, _ []byte) error { return nil },
+		process: func(_ context.Context, _ string, _ []byte) error { return nil },
 	}
 
-	result, err := c.decide("ha.events.person.wife", "evt-001", []byte("data"))
+	result, err := c.decide(context.Background(), "ha.events.person.wife", "evt-001", []byte("data"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -62,10 +63,10 @@ func TestDecide_Success(t *testing.T) {
 func TestDecide_ProcessFailure(t *testing.T) {
 	c := &Consumer{
 		idStore: newMockStore(),
-		process: func(_ string, _ []byte) error { return errors.New("transient error") },
+		process: func(_ context.Context, _ string, _ []byte) error { return errors.New("transient error") },
 	}
 
-	result, err := c.decide("ha.events.person.wife", "evt-002", []byte("data"))
+	result, err := c.decide(context.Background(), "ha.events.person.wife", "evt-002", []byte("data"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,13 +82,13 @@ func TestDecide_Duplicate(t *testing.T) {
 	processed := false
 	c := &Consumer{
 		idStore: store,
-		process: func(_ string, _ []byte) error {
+		process: func(_ context.Context, _ string, _ []byte) error {
 			processed = true
 			return nil
 		},
 	}
 
-	result, err := c.decide("ha.events.person.wife", "evt-003", []byte("data"))
+	result, err := c.decide(context.Background(), "ha.events.person.wife", "evt-003", []byte("data"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,10 +105,10 @@ func TestDecide_IdempotencyCheckError(t *testing.T) {
 	store.seeErr = errors.New("kv unreachable")
 	c := &Consumer{
 		idStore: store,
-		process: func(_ string, _ []byte) error { return nil },
+		process: func(_ context.Context, _ string, _ []byte) error { return nil },
 	}
 
-	result, err := c.decide("ha.events.person.wife", "evt-004", []byte("data"))
+	result, err := c.decide(context.Background(), "ha.events.person.wife", "evt-004", []byte("data"))
 	if err == nil {
 		t.Fatal("expected error from idempotency failure, got nil")
 	}
@@ -177,14 +178,14 @@ func TestExtractEventID_FallbackOnEmptyCloudEventID(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewConsumer_FetchBatchExceedsWorkerN(t *testing.T) {
-	_, err := NewConsumer(nil, newMockStore(), func(_ string, _ []byte) error { return nil }, 10, 11, nil, nil, nil)
+	_, err := NewConsumer(nil, newMockStore(), func(_ context.Context, _ string, _ []byte) error { return nil }, 10, 11, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error when batchSize > workerN, got nil")
 	}
 }
 
 func TestNewConsumer_ValidConfig(t *testing.T) {
-	c, err := NewConsumer(nil, newMockStore(), func(_ string, _ []byte) error { return nil }, 20, 20, nil, nil, nil)
+	c, err := NewConsumer(nil, newMockStore(), func(_ context.Context, _ string, _ []byte) error { return nil }, 20, 20, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

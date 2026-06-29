@@ -173,7 +173,7 @@ func (p *Processor) Shutdown() {
 }
 
 // ProcessEvent routes a calendar write event to write-through.
-func (p *Processor) ProcessEvent(subject string, data []byte) error {
+func (p *Processor) ProcessEvent(ctx context.Context, subject string, data []byte) error {
 	if !p.syncEnabled {
 		// Non-prod: do not touch the shared calendar. Ack and ignore.
 		return nil
@@ -185,7 +185,6 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return nil // ack malformed
 	}
 
-	ctx := context.Background()
 	switch subject {
 	case schemas.HomeEventCalendarUpsert:
 		return p.handleUpsert(ctx, &evt)

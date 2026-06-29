@@ -6,11 +6,61 @@ import (
 	"context"
 	"testing"
 
+	"github.com/nats-io/nats.go"
 	"go.opentelemetry.io/otel"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
+	nooptrace "go.opentelemetry.io/otel/trace/noop"
 )
+
+// pubFunc adapts a function to the MsgPublisher interface.
+type pubFunc func(*nats.Msg) error
+
+func (f pubFunc) PublishMsg(m *nats.Msg) error { return f(m) }
+
+// PublishWithContext injects the active span's W3C context into the message headers, and a
+// downstream Observe extracts it so the consumer span shares the producer's trace — the
+// mechanism that connects a gateway→engine→notifier trace.
+func TestPublishWithContext_PropagatesTraceToObserve(t *testing.T) {
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	tp := sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() { otel.SetTracerProvider(nooptrace.NewTracerProvider()) })
+
+	// Producer: start a span and publish, capturing the message that would hit NATS.
+	ctx, span := tracer.Start(context.Background(), "producer")
+	parentTraceID := span.SpanContext().TraceID()
+
+	var captured *nats.Msg
+	pub := pubFunc(func(m *nats.Msg) error { captured = m; return nil })
+	if err := PublishWithContext(ctx, pub, "ruby_engine.commands.notify.x", []byte("{}")); err != nil {
+		t.Fatalf("PublishWithContext: %v", err)
+	}
+	span.End()
+
+	if captured.Header.Get("traceparent") == "" {
+		t.Fatal("publish did not inject a traceparent header")
+	}
+
+	// Consumer: Observe extracts the parent and opens a child span in the same trace.
+	mi, err := NewMsgInstruments("notifier")
+	if err != nil {
+		t.Fatalf("NewMsgInstruments: %v", err)
+	}
+	var childTraceID trace.TraceID
+	mi.Observe(context.Background(), captured, "COMMANDS", "notifier_processor", func(sctx context.Context) string {
+		childTraceID = trace.SpanContextFromContext(sctx).TraceID()
+		return OutcomeSuccess
+	})
+
+	if childTraceID != parentTraceID {
+		t.Errorf("consumer span trace ID = %s, want %s (not connected)", childTraceID, parentTraceID)
+	}
+}
 
 // sumValue returns the total of all int64 data points for the named counter in rm, and
 // whether the metric was found at all.
@@ -61,7 +111,7 @@ func TestObserve_RecordsProcessedAndDuration(t *testing.T) {
 
 	runs := 0
 	for i := 0; i < 3; i++ {
-		mi.Observe(context.Background(), "HA_EVENTS", "engine_processor", func() string {
+		mi.Observe(context.Background(), &nats.Msg{Subject: "ha.events.x"}, "HA_EVENTS", "engine_processor", func(context.Context) string {
 			runs++
 			return OutcomeSuccess
 		})
@@ -88,7 +138,7 @@ func TestObserve_RecordsProcessedAndDuration(t *testing.T) {
 func TestObserve_NilReceiverRunsWork(t *testing.T) {
 	var mi *MsgInstruments
 	ran := false
-	mi.Observe(context.Background(), "S", "c", func() string {
+	mi.Observe(context.Background(), &nats.Msg{}, "S", "c", func(context.Context) string {
 		ran = true
 		return OutcomeSuccess
 	})

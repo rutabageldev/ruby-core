@@ -8,6 +8,8 @@
 package processor
 
 import (
+	"context"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 
@@ -48,7 +50,7 @@ type Config struct {
 type Processor interface {
 	Initialize(cfg Config) error
 	Subscriptions() []string
-	ProcessEvent(subject string, data []byte) error
+	ProcessEvent(ctx context.Context, subject string, data []byte) error
 	Shutdown()
 }
 

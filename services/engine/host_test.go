@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"testing"
@@ -21,7 +22,7 @@ type mockProcessor struct {
 
 func (m *mockProcessor) Initialize(_ processor.Config) error { return m.initErr }
 func (m *mockProcessor) Subscriptions() []string             { return m.subs }
-func (m *mockProcessor) ProcessEvent(subject string, _ []byte) error {
+func (m *mockProcessor) ProcessEvent(_ context.Context, subject string, _ []byte) error {
 	m.events = append(m.events, subject)
 	return m.processErr
 }
@@ -47,7 +48,7 @@ func TestHost_RoutesExactMatch(t *testing.T) {
 	p := &mockProcessor{subs: []string{"ha.events.person.wife"}}
 	h := newHost(t, p)
 
-	if err := h.Process("ha.events.person.wife", []byte("{}")); err != nil {
+	if err := h.Process(context.Background(), "ha.events.person.wife", []byte("{}")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(p.events) != 1 || p.events[0] != "ha.events.person.wife" {
@@ -59,7 +60,7 @@ func TestHost_RoutesWildcard(t *testing.T) {
 	p := &mockProcessor{subs: []string{"ha.events.device_tracker.>"}}
 	h := newHost(t, p)
 
-	if err := h.Process("ha.events.device_tracker.tracker_one", []byte("{}")); err != nil {
+	if err := h.Process(context.Background(), "ha.events.device_tracker.tracker_one", []byte("{}")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(p.events) != 1 {
@@ -71,7 +72,7 @@ func TestHost_NoMatchIsNotAnError(t *testing.T) {
 	p := &mockProcessor{subs: []string{"ha.events.light.>"}}
 	h := newHost(t, p)
 
-	if err := h.Process("ha.events.person.wife", []byte("{}")); err != nil {
+	if err := h.Process(context.Background(), "ha.events.person.wife", []byte("{}")); err != nil {
 		t.Fatalf("no-match should not return error, got: %v", err)
 	}
 	if len(p.events) != 0 {
@@ -84,7 +85,7 @@ func TestHost_ProcessorNotCalledTwicePerEvent(t *testing.T) {
 	p := &mockProcessor{subs: []string{"ha.events.person.>", "ha.events.person.wife"}}
 	h := newHost(t, p)
 
-	if err := h.Process("ha.events.person.wife", []byte("{}")); err != nil {
+	if err := h.Process(context.Background(), "ha.events.person.wife", []byte("{}")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(p.events) != 1 {
@@ -97,7 +98,7 @@ func TestHost_MultipleProcessors(t *testing.T) {
 	p2 := &mockProcessor{subs: []string{"ha.events.device_tracker.>"}}
 	h := newHost(t, p1, p2)
 
-	if err := h.Process("ha.events.person.wife", []byte("{}")); err != nil {
+	if err := h.Process(context.Background(), "ha.events.person.wife", []byte("{}")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(p1.events) != 1 {
@@ -116,7 +117,7 @@ func TestHost_ReturnsFirstProcessorError(t *testing.T) {
 	}
 	h := newHost(t, p)
 
-	err := h.Process("ha.events.person.wife", []byte("{}"))
+	err := h.Process(context.Background(), "ha.events.person.wife", []byte("{}"))
 	if !errors.Is(err, wantErr) {
 		t.Errorf("error = %v, want %v", err, wantErr)
 	}

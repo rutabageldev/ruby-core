@@ -198,7 +198,7 @@ func runFetchLoop(ctx context.Context, sub *nats.Subscription, writer *NDJSONWri
 			}
 			go func(m *nats.Msg) {
 				defer func() { <-sem }()
-				instr.Observe(ctx, cfg.Stream, cfg.Durable, func() string {
+				instr.Observe(ctx, m, cfg.Stream, cfg.Durable, func(_ context.Context) string {
 					return handleAuditMsg(m, writer, logger)
 				})
 			}(msg)

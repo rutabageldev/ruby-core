@@ -16,10 +16,15 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 )
+
+// tracer opens the presence.wifi_check span; delegates to the global provider set by otel.Init.
+var tracer = otel.Tracer("github.com/primaryrutabaga/ruby-core/services/presence")
 
 // handler implements multi-source presence fusion with debounce and WiFi
 // corroboration for uncertain states (unknown/unavailable).
@@ -80,7 +85,7 @@ func (h *handler) initState() {
 }
 
 // process handles a NATS message from the HA_EVENTS pull consumer.
-func (h *handler) process(subject string, data []byte) error {
+func (h *handler) process(ctx context.Context, subject string, data []byte) error {
 	var evt schemas.CloudEvent
 	if err := json.Unmarshal(data, &evt); err != nil {
 		h.log.Warn("presence: unmarshal event",
@@ -103,7 +108,7 @@ func (h *handler) process(subject string, data []byte) error {
 	}
 
 	if h.cfg.isUncertain(newState) {
-		h.handleUncertain(newState)
+		h.handleUncertain(ctx, newState)
 	} else {
 		h.handleTrusted(newState)
 	}
@@ -149,7 +154,7 @@ func (h *handler) handleTrusted(newState string) {
 
 // handleUncertain processes an uncertain state (unknown/unavailable).
 // It corroborates via WiFi before starting a debounce timer.
-func (h *handler) handleUncertain(uncertainState string) {
+func (h *handler) handleUncertain(ctx context.Context, uncertainState string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -175,7 +180,7 @@ func (h *handler) handleUncertain(uncertainState string) {
 
 	// Corroborate via WiFi (lock released during HTTP call to avoid holding it).
 	h.mu.Unlock()
-	wifiState, err := h.queryWifiState()
+	wifiState, err := h.queryWifiState(ctx)
 	h.mu.Lock()
 
 	if err != nil {
@@ -295,13 +300,24 @@ func (h *handler) persistState(state string) error {
 }
 
 // queryWifiState fetches the current state of the WiFi entity from HA REST API.
-func (h *handler) queryWifiState() (string, error) {
+func (h *handler) queryWifiState(ctx context.Context) (state string, err error) {
+	ctx, span := tracer.Start(ctx, "presence.wifi_check",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(attribute.String("wifi_entity", h.cfg.WifiEntity)))
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+
 	if h.haURL == "" {
 		return "", fmt.Errorf("HA URL not configured")
 	}
 	url := strings.TrimRight(h.haURL, "/") + "/api/states/" + h.cfg.WifiEntity
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	//nolint:gosec // G704: url host is the Vault-configured Home Assistant base; the path is the configured WiFi entity, not user-controlled.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
 	}

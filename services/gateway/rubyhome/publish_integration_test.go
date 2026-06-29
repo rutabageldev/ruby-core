@@ -70,7 +70,7 @@ func TestRubyHomeAndAdaLandInHAEvents(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// New domain-neutral path: a calendar write event.
-	if err := rubyhome.Publish(nc, map[string]any{
+	if err := rubyhome.Publish(context.Background(), nc, map[string]any{
 		"event":           "calendar.event.upsert",
 		"summary":         "Dentist",
 		"idempotency_key": "test-key-1",
@@ -80,7 +80,7 @@ func TestRubyHomeAndAdaLandInHAEvents(t *testing.T) {
 	assertCloudEventStored(t, js, schemas.HomeEventCalendarUpsert)
 
 	// New domain-neutral path: a childcare overlay write event.
-	if err := rubyhome.Publish(nc, map[string]any{
+	if err := rubyhome.Publish(context.Background(), nc, map[string]any{
 		"event":        "ruby_home.childcare.provider.upsert",
 		"display_name": "Maya",
 	}, log); err != nil {
@@ -89,7 +89,7 @@ func TestRubyHomeAndAdaLandInHAEvents(t *testing.T) {
 	assertCloudEventStored(t, js, schemas.HomeEventChildcareProviderUpsert)
 
 	// Regression: the existing ada path still routes onto HA_EVENTS unchanged.
-	if err := ada.Publish(nc, map[string]any{
+	if err := ada.Publish(context.Background(), nc, map[string]any{
 		"event": "ada.diaper.log",
 		"type":  "wet",
 	}, log); err != nil {

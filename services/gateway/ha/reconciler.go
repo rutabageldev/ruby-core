@@ -67,7 +67,7 @@ func (r *Reconciler) Run(ctx context.Context, criticalEntities []string) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := r.reconcileOne(entityID); err != nil {
+		if err := r.reconcileOne(ctx, entityID); err != nil {
 			r.log.Warn("reconciler: entity reconcile failed",
 				slog.String("entity_id", entityID),
 				slog.String("error", err.Error()),
@@ -78,7 +78,7 @@ func (r *Reconciler) Run(ctx context.Context, criticalEntities []string) {
 }
 
 // reconcileOne reconciles a single entity.
-func (r *Reconciler) reconcileOne(entityID string) error {
+func (r *Reconciler) reconcileOne(ctx context.Context, entityID string) error {
 	haState, err := r.fetchHAState(entityID)
 	if err != nil {
 		return fmt.Errorf("fetch HA state: %w", err)
@@ -112,7 +112,7 @@ func (r *Reconciler) reconcileOne(entityID string) error {
 		return err
 	}
 	filtered := r.norm.Apply(domain, haState.Attributes)
-	return r.publisher.PublishHAEvent(entityID, haState.State, filtered, haState.LastChanged)
+	return r.publisher.PublishHAEvent(ctx, entityID, haState.State, filtered, haState.LastChanged)
 }
 
 // fetchHAState calls the HA REST API to retrieve the current state of an entity.

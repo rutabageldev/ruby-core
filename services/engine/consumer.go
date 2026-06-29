@@ -42,7 +42,7 @@ func (NoopRecorder) Record(_, _, _, _, _ string) {}
 type Consumer struct {
 	sub       *nats.Subscription
 	idStore   idempotency.Store
-	process   func(subject string, data []byte) error
+	process   func(ctx context.Context, subject string, data []byte) error
 	audit     Recorder
 	log       *slog.Logger
 	workerN   int
@@ -73,7 +73,7 @@ func (c *Consumer) logger() *slog.Logger {
 func NewConsumer(
 	sub *nats.Subscription,
 	idStore idempotency.Store,
-	process func(subject string, data []byte) error,
+	process func(ctx context.Context, subject string, data []byte) error,
 	workerN, batchSize int,
 	backOff []time.Duration,
 	log *slog.Logger,
@@ -147,8 +147,8 @@ func (c *Consumer) Run(ctx context.Context) error {
 			}
 			go func(m *nats.Msg) {
 				defer func() { <-sem }()
-				c.instruments.Observe(ctx, c.stream, c.consumerName, func() string {
-					return c.handle(m)
+				c.instruments.Observe(ctx, m, c.stream, c.consumerName, func(sctx context.Context) string {
+					return c.handle(sctx, m)
 				})
 			}(msg)
 		}
@@ -158,7 +158,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 // handle processes a single message: checks idempotency, calls process, then acks/naks.
 // Structured log entries include correlationid and causationid from the CloudEvent payload.
 // It returns the outcome label (natsx.Outcome*) for metric recording by the caller.
-func (c *Consumer) handle(msg *nats.Msg) string {
+func (c *Consumer) handle(ctx context.Context, msg *nats.Msg) string {
 	meta, err := msg.Metadata()
 	if err != nil {
 		c.logger().Error("engine: metadata error", slog.String("error", err.Error()))
@@ -169,7 +169,7 @@ func (c *Consumer) handle(msg *nats.Msg) string {
 	eventID := extractEventID(msg.Header, msg.Data, meta)
 	correlationID, causationID := extractCorrelationFields(msg.Data)
 
-	result, err := c.decide(msg.Subject, eventID, msg.Data)
+	result, err := c.decide(ctx, msg.Subject, eventID, msg.Data)
 	if err != nil {
 		c.logger().Error("engine: decide error",
 			slog.String("eventid", eventID),
@@ -221,7 +221,7 @@ func (c *Consumer) handle(msg *nats.Msg) string {
 
 // decide evaluates idempotency and calls the process function.
 // It is a pure decision function, separated from NATS types to enable unit testing.
-func (c *Consumer) decide(subject, eventID string, data []byte) (handleResult, error) {
+func (c *Consumer) decide(ctx context.Context, subject, eventID string, data []byte) (handleResult, error) {
 	seen, err := c.idStore.Seen(eventID)
 	if err != nil {
 		return resultNak, fmt.Errorf("idempotency check: %w", err)
@@ -232,7 +232,7 @@ func (c *Consumer) decide(subject, eventID string, data []byte) (handleResult, e
 		)
 		return resultSkip, nil
 	}
-	if err := c.process(subject, data); err != nil {
+	if err := c.process(ctx, subject, data); err != nil {
 		c.logger().Warn("engine: process error, will nak",
 			slog.String("eventid", eventID),
 			slog.String("error", err.Error()),

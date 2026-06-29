@@ -3,6 +3,7 @@
 package rubyhome
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"strings"
@@ -56,7 +57,7 @@ func TestSubjectsValidPerADR0027(t *testing.T) {
 // NATS (nil conn proves no publish is attempted).
 func TestPublishUnknownEvent(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Publish(nil, map[string]any{"event": "calendar.nope"}, log); err == nil {
+	if err := Publish(context.Background(), nil, map[string]any{"event": "calendar.nope"}, log); err == nil {
 		t.Fatal("expected error for unknown event, got nil")
 	}
 }
@@ -64,7 +65,7 @@ func TestPublishUnknownEvent(t *testing.T) {
 // TestPublishMissingEventField verifies a payload with no event field is rejected.
 func TestPublishMissingEventField(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Publish(nil, map[string]any{}, log); err == nil {
+	if err := Publish(context.Background(), nil, map[string]any{}, log); err == nil {
 		t.Fatal("expected error for missing event field, got nil")
 	}
 }
