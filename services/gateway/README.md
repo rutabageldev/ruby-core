@@ -26,6 +26,8 @@ Fire `ruby_home_event` with the caller's payload wrapped under a `payload` key (
 
 Example HA event data: `{"payload": {"event": "calendar.event.upsert", "summary": "Dentist", "start": {...}, "idempotency_key": "…"}}`. Full payload field contracts are in ROADMAP-0012.
 
+Calendar creates are made idempotent at Google via a deterministic event id derived from `idempotency_key` (ADR-0042). The HA producer **SHOULD** supply a unique-per-action `idempotency_key`; if it doesn't, the gateway derives one from the stable content fields so a re-published create cannot double-insert (#138). Supplying your own key is preferred when two same-time/same-summary events could be legitimately distinct.
+
 > The HA-side producer migration (firing `ruby_home_event`, and the eventual retirement of `ada_event` once all producers move over) is cross-repo work in the `homeassistant` repo and is **not** part of this repo. The gateway dual-subscribes so the cutover is non-breaking.
 
 External access is routed through Traefik; the HTTP port is never published directly to the host (ADR-0020).

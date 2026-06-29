@@ -21,6 +21,20 @@ ON CONFLICT (id) DO UPDATE SET
     color = EXCLUDED.color,
     active = EXCLUDED.active;
 
+-- ============================ person_email ============================
+
+-- person_email holds a directory person's alias / secondary addresses (#133); the
+-- primary stays on directory_person.email. Attendee reconciliation matches either source.
+
+-- name: UpsertPersonEmail :exec
+INSERT INTO person_email (person_id, email)
+VALUES (@person_id, @email)
+ON CONFLICT (lower(email)) DO UPDATE SET person_id = EXCLUDED.person_id;
+
+-- ListAllPersonEmails returns every alias email -> person mapping for the read index.
+-- name: ListAllPersonEmails :many
+SELECT person_id, email FROM person_email;
+
 -- ============================ childcare_provider ============================
 
 -- name: ListActiveProviders :many

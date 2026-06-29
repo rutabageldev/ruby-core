@@ -7,6 +7,8 @@ package rubyhome
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -37,6 +39,8 @@ func Publish(nc *goNats.Conn, payload map[string]any, log *slog.Logger) error {
 		log.Warn("ruby_home: unknown event type", slog.String("event", eventType))
 		return fmt.Errorf("ruby_home: unknown event type %q", eventType)
 	}
+
+	ensureCalendarIdempotencyKey(eventType, payload)
 
 	id := newID()
 	evt := schemas.CloudEvent{
@@ -72,4 +76,29 @@ func newID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return fmt.Sprintf("%x", b)
+}
+
+// ensureCalendarIdempotencyKey guarantees a calendar create can be made idempotent at
+// Google (ADR-0042). The engine derives the deterministic Google event id from the
+// payload's idempotency_key (falling back to the random CloudEvent id), so without a
+// STABLE key a gateway re-publish of the same logical create — an HA reconnect replay or
+// a double-fire — would derive a different id and double-insert. When the HA producer
+// already supplied a key we keep it (the ideal: a unique-per-action id); otherwise we
+// derive one from the stable content fields so re-publishes converge. (Two genuinely
+// identical creates collapse to one — almost always a desirable dedup of a double-submit.)
+func ensureCalendarIdempotencyKey(eventType string, payload map[string]any) {
+	if eventType != "calendar.event.upsert" {
+		return
+	}
+	if k, ok := payload["idempotency_key"].(string); ok && k != "" {
+		return
+	}
+	seed := []any{
+		payload["summary"], payload["start"], payload["end"],
+		payload["recurrence"], payload["logged_by"],
+	}
+	// json.Marshal sorts map keys, so the nested start/end objects hash deterministically.
+	b, _ := json.Marshal(seed)
+	sum := sha256.Sum256(b)
+	payload["idempotency_key"] = hex.EncodeToString(sum[:])
 }
