@@ -1,6 +1,6 @@
 # PLAN-0009 — Full-Stack Observability
 
-* **Status:** Approved
+* **Status:** In Progress (reconciled 2026-06-29 — see Reconciliation)
 * **Date:** 2026-03-20
 * **Project:** ruby-core
 * **Roadmap Item:** [docs/roadmap/ROADMAP-0009-full-stack-observability.md](../roadmap/ROADMAP-0009-full-stack-observability.md)
@@ -312,3 +312,28 @@ The `pkg/otel` graceful degradation (Step 2) means a misconfigured or unreachabl
 produces a `WARN` log and a no-op provider, not a crash. A blocked gRPC dial at startup
 (wrong endpoint, network misconfigured) is the most likely failure mode — the `WithTimeout`
 on the gRPC connection must be set to avoid hanging the boot sequence.
+
+---
+
+## Reconciliation (2026-06-29) — executed on `phase-9-observability`
+
+The plan above is ~3 months old; several steps target files that moved or are self-contradictory.
+Corrections applied during execution:
+
+* **Step 1 deps:** the OTel API (`otel`, `/metric`, `/trace` v1.44.0) is already a direct dep. Add
+  only `otel/sdk`, `otel/sdk/metric`, `otlptracegrpc`, `otlpmetricgrpc`, `contrib/bridges/otelslog`.
+* **Step 2 no-op:** key the no-op decision on the **raw empty** `OTEL_EXPORTER_OTLP_ENDPOINT` — do
+  **not** default it (defaulting breaks dev no-op). The gRPC exporters are lazy-connect, so `Init`
+  never hangs on an unreachable collector; do **not** add `WithBlock`/dial-timeout (supersedes the
+  Rollback note's `WithTimeout` advice). Set-but-unreachable = background export errors, self-healing.
+* **Step 4 location:** `pkg/natsx/consumer.go` is setup-only. The per-message loops live in 4 files
+  (engine `consumer.go`, notifier/audit-sink `main.go`, presence `handler.go`); a shared
+  `pkg/natsx/instrument.go` helper wraps them.
+* **Step 7 ordering:** `otel.Init` runs **before** `logging.NewLogger` (Step 3 is right, Step 7's
+  "after NewLogger" is wrong). Reorder `ctx` creation above `NewLogger` in each main. `os.Exit`
+  paths (PLAN-0037 `natsLost`) skip the deferred otel flush — accepted on the crash path.
+* **Step 8 engine span:** no per-rule loop exists; use `engine.process` per dispatched event
+  (`host.go` `Process`), attrs `subject`/`processor` (drop the fictional `rule_name`/`triggered`).
+* **#137 folded in** (mark-failure counter + KV-entries observable gauge registered in engine main).
+  The existing `ada_boundary_crossings_total` direct-Prometheus counter is refactored to OTel
+  (ADR-0004). **#31** closes as superseded-by-OTLP (no `/metrics` endpoint built).
