@@ -5,6 +5,7 @@ package oas
 import (
 	"math/bits"
 	"strconv"
+	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/jx"
@@ -60,6 +61,34 @@ func (s *CalendarInstance) encodeFields(e *jx.Encoder) {
 		}
 	}
 	{
+		if s.Etag.Set {
+			e.FieldStart("etag")
+			s.Etag.Encode(e)
+		}
+	}
+	{
+		if s.Recurrence != nil {
+			e.FieldStart("recurrence")
+			e.ArrStart()
+			for _, elem := range s.Recurrence {
+				e.Str(elem)
+			}
+			e.ArrEnd()
+		}
+	}
+	{
+		if s.RecurringEventID.Set {
+			e.FieldStart("recurring_event_id")
+			s.RecurringEventID.Encode(e)
+		}
+	}
+	{
+		if s.OriginalStart.Set {
+			e.FieldStart("original_start")
+			s.OriginalStart.Encode(e, json.EncodeDateTime)
+		}
+	}
+	{
 		if s.Subjects != nil {
 			e.FieldStart("subjects")
 			e.ArrStart()
@@ -87,7 +116,7 @@ func (s *CalendarInstance) encodeFields(e *jx.Encoder) {
 	}
 }
 
-var jsonFieldsNameOfCalendarInstance = [11]string{
+var jsonFieldsNameOfCalendarInstance = [15]string{
 	0:  "google_event_id",
 	1:  "summary",
 	2:  "start",
@@ -96,9 +125,13 @@ var jsonFieldsNameOfCalendarInstance = [11]string{
 	5:  "status",
 	6:  "location",
 	7:  "description",
-	8:  "subjects",
-	9:  "childcare",
-	10: "attendees",
+	8:  "etag",
+	9:  "recurrence",
+	10: "recurring_event_id",
+	11: "original_start",
+	12: "subjects",
+	13: "childcare",
+	14: "attendees",
 }
 
 // Decode decodes CalendarInstance from json.
@@ -199,6 +232,55 @@ func (s *CalendarInstance) Decode(d *jx.Decoder) error {
 				return nil
 			}(); err != nil {
 				return errors.Wrap(err, "decode field \"description\"")
+			}
+		case "etag":
+			if err := func() error {
+				s.Etag.Reset()
+				if err := s.Etag.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"etag\"")
+			}
+		case "recurrence":
+			if err := func() error {
+				s.Recurrence = make([]string, 0)
+				if err := d.Arr(func(d *jx.Decoder) error {
+					var elem string
+					v, err := d.Str()
+					elem = string(v)
+					if err != nil {
+						return err
+					}
+					s.Recurrence = append(s.Recurrence, elem)
+					return nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"recurrence\"")
+			}
+		case "recurring_event_id":
+			if err := func() error {
+				s.RecurringEventID.Reset()
+				if err := s.RecurringEventID.Decode(d); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"recurring_event_id\"")
+			}
+		case "original_start":
+			if err := func() error {
+				s.OriginalStart.Reset()
+				if err := s.OriginalStart.Decode(d, json.DecodeDateTime); err != nil {
+					return err
+				}
+				return nil
+			}(); err != nil {
+				return errors.Wrap(err, "decode field \"original_start\"")
 			}
 		case "subjects":
 			if err := func() error {
@@ -707,6 +789,41 @@ func (s ListDirectoryPeopleOKApplicationJSON) MarshalJSON() ([]byte, error) {
 func (s *ListDirectoryPeopleOKApplicationJSON) UnmarshalJSON(data []byte) error {
 	d := jx.DecodeBytes(data)
 	return s.Decode(d)
+}
+
+// Encode encodes time.Time as json.
+func (o OptDateTime) Encode(e *jx.Encoder, format func(*jx.Encoder, time.Time)) {
+	if !o.Set {
+		return
+	}
+	format(e, o.Value)
+}
+
+// Decode decodes time.Time from json.
+func (o *OptDateTime) Decode(d *jx.Decoder, format func(*jx.Decoder) (time.Time, error)) error {
+	if o == nil {
+		return errors.New("invalid: unable to decode OptDateTime to nil")
+	}
+	o.Set = true
+	v, err := format(d)
+	if err != nil {
+		return err
+	}
+	o.Value = v
+	return nil
+}
+
+// MarshalJSON implements stdjson.Marshaler.
+func (s OptDateTime) MarshalJSON() ([]byte, error) {
+	e := jx.Encoder{}
+	s.Encode(&e, json.EncodeDateTime)
+	return e.Bytes(), nil
+}
+
+// UnmarshalJSON implements stdjson.Unmarshaler.
+func (s *OptDateTime) UnmarshalJSON(data []byte) error {
+	d := jx.DecodeBytes(data)
+	return s.Decode(d, json.DecodeDateTime)
 }
 
 // Encode encodes string as json.

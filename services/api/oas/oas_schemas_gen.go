@@ -59,6 +59,18 @@ type CalendarInstance struct {
 	Location OptString `json:"location"`
 	// Free-text description, when set.
 	Description OptString `json:"description"`
+	// Mirror etag of the source row (trimmed of Google's surrounding quotes); supply as If-Match on
+	// updates.
+	Etag OptString `json:"etag"`
+	// Raw RRULE/EXDATE/RDATE lines of the series master when this instance comes from a recurring event;
+	// empty for single events.
+	Recurrence []string `json:"recurrence"`
+	// Google event id of the series master when this instance belongs to a recurring series; omitted for
+	// single events.
+	RecurringEventID OptString `json:"recurring_event_id"`
+	// The series occurrence this instance corresponds to (RFC 3339 UTC) — set for recurring/override
+	// instances; addresses a single occurrence in per-instance writes.
+	OriginalStart OptDateTime `json:"original_start"`
 	// Resolved subject person ids (the "FOR" lane) — local overlay, never written to Google.
 	Subjects []string `json:"subjects"`
 	// Resolved childcare provider id for this event; omitted when none — local overlay.
@@ -106,6 +118,26 @@ func (s *CalendarInstance) GetLocation() OptString {
 // GetDescription returns the value of Description.
 func (s *CalendarInstance) GetDescription() OptString {
 	return s.Description
+}
+
+// GetEtag returns the value of Etag.
+func (s *CalendarInstance) GetEtag() OptString {
+	return s.Etag
+}
+
+// GetRecurrence returns the value of Recurrence.
+func (s *CalendarInstance) GetRecurrence() []string {
+	return s.Recurrence
+}
+
+// GetRecurringEventID returns the value of RecurringEventID.
+func (s *CalendarInstance) GetRecurringEventID() OptString {
+	return s.RecurringEventID
+}
+
+// GetOriginalStart returns the value of OriginalStart.
+func (s *CalendarInstance) GetOriginalStart() OptDateTime {
+	return s.OriginalStart
 }
 
 // GetSubjects returns the value of Subjects.
@@ -161,6 +193,26 @@ func (s *CalendarInstance) SetLocation(val OptString) {
 // SetDescription sets the value of Description.
 func (s *CalendarInstance) SetDescription(val OptString) {
 	s.Description = val
+}
+
+// SetEtag sets the value of Etag.
+func (s *CalendarInstance) SetEtag(val OptString) {
+	s.Etag = val
+}
+
+// SetRecurrence sets the value of Recurrence.
+func (s *CalendarInstance) SetRecurrence(val []string) {
+	s.Recurrence = val
+}
+
+// SetRecurringEventID sets the value of RecurringEventID.
+func (s *CalendarInstance) SetRecurringEventID(val OptString) {
+	s.RecurringEventID = val
+}
+
+// SetOriginalStart sets the value of OriginalStart.
+func (s *CalendarInstance) SetOriginalStart(val OptDateTime) {
+	s.OriginalStart = val
 }
 
 // SetSubjects sets the value of Subjects.
@@ -240,6 +292,52 @@ func (*ListChildcareProvidersOKApplicationJSON) listChildcareProvidersRes() {}
 type ListDirectoryPeopleOKApplicationJSON []Person
 
 func (*ListDirectoryPeopleOKApplicationJSON) listDirectoryPeopleRes() {}
+
+// NewOptDateTime returns new OptDateTime with value set to v.
+func NewOptDateTime(v time.Time) OptDateTime {
+	return OptDateTime{
+		Value: v,
+		Set:   true,
+	}
+}
+
+// OptDateTime is optional time.Time.
+type OptDateTime struct {
+	Value time.Time
+	Set   bool
+}
+
+// IsSet returns true if OptDateTime was set.
+func (o OptDateTime) IsSet() bool { return o.Set }
+
+// Reset unsets value.
+func (o *OptDateTime) Reset() {
+	var v time.Time
+	o.Value = v
+	o.Set = false
+}
+
+// SetTo sets value to v.
+func (o *OptDateTime) SetTo(v time.Time) {
+	o.Set = true
+	o.Value = v
+}
+
+// Get returns value and boolean that denotes whether value was set.
+func (o OptDateTime) Get() (v time.Time, ok bool) {
+	if !o.Set {
+		return v, false
+	}
+	return o.Value, true
+}
+
+// Or returns value if set, or given parameter if does not.
+func (o OptDateTime) Or(d time.Time) time.Time {
+	if v, ok := o.Get(); ok {
+		return v
+	}
+	return d
+}
 
 // NewOptString returns new OptString with value set to v.
 func NewOptString(v string) OptString {

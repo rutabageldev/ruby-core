@@ -4,9 +4,11 @@ package handlers
 
 import (
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/calendar/expand"
 	"github.com/primaryrutabaga/ruby-core/pkg/calendar/store"
 )
 
@@ -42,4 +44,59 @@ func TestBuildEmailIndex(t *testing.T) {
 	if len(idx) != 3 { // mom primary, dad primary, mom alias
 		t.Errorf("index size = %d, want 3 (%v)", len(idx), idx)
 	}
+}
+
+// TestToAPIInstance_RecurrenceFields covers the #155 §1 read-API exposure: recurring
+// occurrences carry recurrence + recurring_event_id + original_start; override instances
+// carry the master id and pinned original slot; single events carry none of them.
+func TestToAPIInstance_RecurrenceFields(t *testing.T) {
+	occ := time.Date(2026, 6, 22, 13, 0, 0, 0, time.UTC)
+
+	t.Run("recurring master occurrence", func(t *testing.T) {
+		row := &store.CalendarEvent{
+			GoogleEventID: "master1", Status: "confirmed", Etag: "etag-m1",
+			Recurrence: []string{"RRULE:FREQ=WEEKLY;BYDAY=MO"},
+		}
+		ci := toAPIInstance(expand.Instance{GoogleEventID: "master1", Start: occ, End: occ.Add(time.Hour)}, row)
+		if ci.Etag.Value != "etag-m1" {
+			t.Errorf("etag = %q", ci.Etag.Value)
+		}
+		if len(ci.Recurrence) != 1 || ci.Recurrence[0] != "RRULE:FREQ=WEEKLY;BYDAY=MO" {
+			t.Errorf("recurrence = %v", ci.Recurrence)
+		}
+		if ci.RecurringEventID.Value != "master1" {
+			t.Errorf("recurring_event_id = %q, want master1", ci.RecurringEventID.Value)
+		}
+		if !ci.OriginalStart.Set || !ci.OriginalStart.Value.Equal(occ) {
+			t.Errorf("original_start = %v (set=%v), want %v", ci.OriginalStart.Value, ci.OriginalStart.Set, occ)
+		}
+	})
+
+	t.Run("override instance", func(t *testing.T) {
+		moved := occ.Add(2 * time.Hour)
+		row := &store.CalendarEvent{
+			GoogleEventID: "ovr1", Status: "confirmed", Etag: "etag-o1",
+			RecurringEventID:      txt("master1"),
+			OriginalStartDatetime: pgtype.Timestamptz{Time: occ, Valid: true},
+		}
+		ci := toAPIInstance(expand.Instance{GoogleEventID: "ovr1", Start: moved, End: moved.Add(time.Hour), IsOverride: true}, row)
+		if ci.RecurringEventID.Value != "master1" {
+			t.Errorf("recurring_event_id = %q, want master1", ci.RecurringEventID.Value)
+		}
+		if !ci.OriginalStart.Set || !ci.OriginalStart.Value.Equal(occ) {
+			t.Errorf("original_start = %v, want pinned slot %v (not the moved time)", ci.OriginalStart.Value, occ)
+		}
+		if len(ci.Recurrence) != 0 {
+			t.Errorf("override must not carry recurrence, got %v", ci.Recurrence)
+		}
+	})
+
+	t.Run("single event", func(t *testing.T) {
+		row := &store.CalendarEvent{GoogleEventID: "s1", Status: "confirmed", Etag: "etag-s1"}
+		ci := toAPIInstance(expand.Instance{GoogleEventID: "s1", Start: occ, End: occ.Add(time.Hour)}, row)
+		if len(ci.Recurrence) != 0 || ci.RecurringEventID.Set || ci.OriginalStart.Set {
+			t.Errorf("single event should carry no recurrence fields: rec=%v rid=%v os=%v",
+				ci.Recurrence, ci.RecurringEventID.Set, ci.OriginalStart.Set)
+		}
+	})
 }

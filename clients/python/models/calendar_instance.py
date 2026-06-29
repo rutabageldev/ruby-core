@@ -47,6 +47,14 @@ class CalendarInstance:
             summary (str | Unset): The event title.
             location (str | Unset): Free-text location, when set.
             description (str | Unset): Free-text description, when set.
+            etag (str | Unset): Mirror etag of the source row (trimmed of Google's surrounding quotes); supply as If-Match
+                on updates.
+            recurrence (list[str] | Unset): Raw RRULE/EXDATE/RDATE lines of the series master when this instance comes from
+                a recurring event; empty for single events.
+            recurring_event_id (str | Unset): Google event id of the series master when this instance belongs to a recurring
+                series; omitted for single events.
+            original_start (datetime.datetime | Unset): The series occurrence this instance corresponds to (RFC 3339 UTC) —
+                set for recurring/override instances; addresses a single occurrence in per-instance writes.
             subjects (list[str] | Unset): Resolved subject person ids (the "FOR" lane) — local overlay, never written to
                 Google.
             childcare (str | Unset): Resolved childcare provider id for this event; omitted when none — local overlay.
@@ -62,6 +70,10 @@ class CalendarInstance:
     summary: str | Unset = UNSET
     location: str | Unset = UNSET
     description: str | Unset = UNSET
+    etag: str | Unset = UNSET
+    recurrence: list[str] | Unset = UNSET
+    recurring_event_id: str | Unset = UNSET
+    original_start: datetime.datetime | Unset = UNSET
     subjects: list[str] | Unset = UNSET
     childcare: str | Unset = UNSET
     attendees: list[CalendarInstanceAttendeesItem] | Unset = UNSET
@@ -88,6 +100,20 @@ class CalendarInstance:
         location = self.location
 
         description = self.description
+
+        etag = self.etag
+
+        recurrence: list[str] | Unset = UNSET
+        if not isinstance(self.recurrence, Unset):
+            recurrence = self.recurrence
+
+
+
+        recurring_event_id = self.recurring_event_id
+
+        original_start: str | Unset = UNSET
+        if not isinstance(self.original_start, Unset):
+            original_start = self.original_start.isoformat()
 
         subjects: list[str] | Unset = UNSET
         if not isinstance(self.subjects, Unset):
@@ -122,6 +148,14 @@ class CalendarInstance:
             field_dict["location"] = location
         if description is not UNSET:
             field_dict["description"] = description
+        if etag is not UNSET:
+            field_dict["etag"] = etag
+        if recurrence is not UNSET:
+            field_dict["recurrence"] = recurrence
+        if recurring_event_id is not UNSET:
+            field_dict["recurring_event_id"] = recurring_event_id
+        if original_start is not UNSET:
+            field_dict["original_start"] = original_start
         if subjects is not UNSET:
             field_dict["subjects"] = subjects
         if childcare is not UNSET:
@@ -159,6 +193,23 @@ class CalendarInstance:
 
         description = d.pop("description", UNSET)
 
+        etag = d.pop("etag", UNSET)
+
+        recurrence = cast(list[str], d.pop("recurrence", UNSET))
+
+
+        recurring_event_id = d.pop("recurring_event_id", UNSET)
+
+        _original_start = d.pop("original_start", UNSET)
+        original_start: datetime.datetime | Unset
+        if isinstance(_original_start,  Unset):
+            original_start = UNSET
+        else:
+            original_start = datetime.datetime.fromisoformat(_original_start)
+
+
+
+
         subjects = cast(list[str], d.pop("subjects", UNSET))
 
 
@@ -185,6 +236,10 @@ class CalendarInstance:
             summary=summary,
             location=location,
             description=description,
+            etag=etag,
+            recurrence=recurrence,
+            recurring_event_id=recurring_event_id,
+            original_start=original_start,
             subjects=subjects,
             childcare=childcare,
             attendees=attendees,
