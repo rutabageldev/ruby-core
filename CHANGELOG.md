@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.27.0](https://github.com/rutabageldev/ruby-core/compare/v0.26.2...v0.27.0) (2026-06-29)
+
+
+### Features
+
+* **calendar:** constrain relationship + multi-email attendee reconciliation ([#134](https://github.com/rutabageldev/ruby-core/issues/134), [#133](https://github.com/rutabageldev/ruby-core/issues/133)) ([25fc6d4](https://github.com/rutabageldev/ruby-core/commit/25fc6d422213f02bf8823e62ea3cce239dda9c12))
+
+
+### Bug Fixes
+
+* **gateway:** derive stable idempotency_key for calendar upserts ([#138](https://github.com/rutabageldev/ruby-core/issues/138)) ([b901c6e](https://github.com/rutabageldev/ruby-core/commit/b901c6e3dd77c05ce88b1fc1939bf0ae938b6727))
+
 ## [0.26.2](https://github.com/rutabageldev/ruby-core/compare/v0.26.1...v0.26.2) (2026-06-28)
 
 
