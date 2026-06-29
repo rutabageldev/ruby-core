@@ -115,3 +115,23 @@ mapping.go}`. The `calendar_idempotency` KV bucket is retained for reminder-firi
 Caveat: Google retains the ids of deleted events, so reusing an `idempotency_key` after a
 delete yields a 409 for a genuinely-new create. This is acceptable provided
 `idempotency_key` is unique per logical create — the producer contract.
+
+### 2026-06-29 — Producer key contract, multi-email reconciliation, relationship vocabulary (PLAN-0035)
+
+* **Gateway `idempotency_key` contract (#138).** §5's idempotency holds only if the
+  `idempotency_key` (or the CloudEvent id fallback) is **stable across re-publishes** of the
+  same logical create. The gateway previously stamped a *random* CloudEvent id per publish and
+  set no key, so an HA reconnect replay / double-fire derived a different Google id and
+  double-inserted. The producer contract is now: the HA producer **SHOULD** supply a
+  unique-per-action `idempotency_key`; when absent, the gateway derives one from the stable
+  content fields (`summary|start|end|recurrence|logged_by`) so re-publishes converge
+  (`services/gateway/rubyhome/publish.go`). Two genuinely-identical creates collapse to one —
+  an accepted, usually-desirable dedup of an accidental double-submit.
+* **Multi-email attendee reconciliation (#133).** Attendees reconcile to directory people by
+  email; a `person_email` side table now holds alias / secondary addresses so reconciliation
+  matches any of a person's emails (active people only; a primary wins on collision), not just
+  `directory_person.email`.
+* **Childcare relationship vocabulary (#134).** `childcare_provider.relationship` is now
+  `text + CHECK` over a starter vocabulary (`grandparent, sibling, aunt_uncle, nanny, daycare,
+  babysitter, friend, neighbour, other`; NULL allowed) per the overlay enum-as-CHECK
+  convention — extend with another `ALTER` migration as the set grows.
