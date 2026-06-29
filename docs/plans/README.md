@@ -8,7 +8,6 @@ Active plans below are hand-maintained. The **Archived** table is generated from
 | # | Title | Status | Roadmap Item |
 |---|---|---|---|
 | [0009](PLAN-0009-full-stack-observability.md) | Full-Stack Observability | Approved | [ROADMAP-0009](../roadmap/ROADMAP-0009-full-stack-observability.md) |
-| [0037](PLAN-0037-nats-resilience.md) | Production NATS-Resilience Hardening | In Progress | none |
 
 ## Archived
 
@@ -42,5 +41,6 @@ Active plans below are hand-maintained. The **Archived** table is generated from
 | [0034](archived/PLAN-0034-calendar-idempotency-hardening.md) | Calendar Idempotency Hardening | Complete |
 | [0035](archived/PLAN-0035-calendar-issue-cleanup.md) | Calendar Issue Cleanup | Complete |
 | [0036](archived/PLAN-0036-docs-index-hygiene.md) | Docs / Index Hygiene | Complete |
+| [0037](archived/PLAN-0037-nats-resilience.md) | Production NATS-Resilience Hardening | Complete |
 
 <!-- END archived -->

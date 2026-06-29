@@ -1,6 +1,6 @@
 # PLAN-0037 - Production NATS-Resilience Hardening
 
-* **Status:** In Progress
+* **Status:** Complete
 * **Date:** 2026-06-29
 * **Project:** ruby-core
 * **Roadmap Item:** none (resilience / drift cleanup)
@@ -94,3 +94,20 @@ bounce/outage checks gate it.
 
 None. PR description must call out the corrected scope (4 loops, 5 mains) and the known limitation
 (deleted durable consumer → relies on restart path, not in-loop re-ensure).
+
+---
+
+## Completion Notes (2026-06-29)
+
+Done on `fix/nats-resilience`; `go build ./...`, `go test -tags=fast ./...`, golangci-lint (0),
+shellcheck, actionlint, yamllint all green. Commits: `ad172b8` (Go resilience: pkg/boot
+resilienceOpts + retried dial + OnNATSClosed, pkg/natsx.ClassifyFetchErr, 4 consume loops, 5
+mains, unit tests), `b170887` (deploy-prod.sh reorder, both branches), `4316b6b` (#62 docstrings
+
+* gateway README). #62 closed.
+
+**Deviation:** the container pause/unpause **integration test was deliberately skipped** — the
+decision logic is fully unit-tested (`ClassifyFetchErr`, `OnNATSClosed`, `withRetryLabeled`), the
+reconnect-survival is nats.go behavior + a trivial `continue`, and a timing-based container-pause
+test risks CI flakiness. Verification is the unit tests + manual NATS bounce/outage in dev (in the
+PR's test plan). An automated bounce test is a noted follow-up.
