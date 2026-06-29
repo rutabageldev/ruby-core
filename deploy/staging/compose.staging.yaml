@@ -144,6 +144,7 @@ services:
     networks:
       - default
       - vault-ruby-core-staging
+      - observability
     depends_on:
       nats:
         condition: service_healthy
@@ -166,6 +167,11 @@ services:
       # HA ingestion gate: only prod consumes the shared Home Assistant event
       # stream. Non-prod stays off it to avoid duplicate fan-out writes.
       - HA_INGEST_ENABLED=false
+      # OTLP export (ADR-0004). OTEL_DEPLOYMENT_ENVIRONMENT overrides ENVIRONMENT=production
+      # so staging telemetry is labeled "staging", not "production".
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_DEPLOYMENT_ENVIRONMENT=staging
     # No Traefik labels — staging gateway is not publicly routed
 
   # ==========================================================================
@@ -184,6 +190,7 @@ services:
       - default
       - vault-ruby-core-staging
       - postgres
+      - observability
     depends_on:
       nats:
         condition: service_healthy
@@ -208,6 +215,10 @@ services:
       - HA_INGEST_ENABLED=false
       - RULES_DIR=/etc/ruby-core/rules
       - TZ=America/New_York
+      # OTLP export (ADR-0004); staging-labeled telemetry (see gateway note).
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_DEPLOYMENT_ENVIRONMENT=staging
 
   # ==========================================================================
   # API Service (Staging)
@@ -259,6 +270,7 @@ services:
     networks:
       - default
       - vault-ruby-core-staging
+      - observability
     depends_on:
       nats:
         condition: service_healthy
@@ -279,6 +291,10 @@ services:
       - VAULT_PKI_ROLE=ruby-core-notifier
       # Uses prod HA credentials — staging smoke test sends a real push notification
       - VAULT_HA_PATH=secret/data/ruby-core/ha
+      # OTLP export (ADR-0004); staging-labeled telemetry (see gateway note).
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_DEPLOYMENT_ENVIRONMENT=staging
 
   # ==========================================================================
   # Presence Service (Staging)
@@ -295,6 +311,7 @@ services:
     networks:
       - default
       - vault-ruby-core-staging
+      - observability
     depends_on:
       nats:
         condition: service_healthy
@@ -305,6 +322,10 @@ services:
       - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-presence:/vault/secret-id:ro
     environment:
       - ENVIRONMENT=production
+      # OTLP export (ADR-0004); staging-labeled telemetry (see gateway note).
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_DEPLOYMENT_ENVIRONMENT=staging
       - VAULT_ADDR=https://vault:8200
       - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN}
@@ -334,6 +355,7 @@ services:
     networks:
       - default
       - vault-ruby-core-staging
+      - observability
     depends_on:
       nats:
         condition: service_healthy
@@ -348,6 +370,10 @@ services:
       - VAULT_TLS_PATH=secret/data/ruby-core/staging/tls/audit-sink
       - VAULT_PKI_ROLE=ruby-core-audit-sink
       - AUDIT_DATA_DIR=/data/audit
+      # OTLP export (ADR-0004); staging-labeled telemetry (see gateway note).
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_DEPLOYMENT_ENVIRONMENT=staging
     volumes:
       # Staging audit: named volume (ephemeral; removed on `down -v`)
       - staging-audit-data:/data/audit
@@ -368,6 +394,11 @@ networks:
   postgres:
     external: true
     name: postgres
+  # Foundation observability network (ADR-0004/0028) — shared OTel collector at
+  # otel-collector:4317. Owned by /opt/foundation/observability.
+  observability:
+    external: true
+    name: observability
 
 # ==========================================================================
 # Volumes

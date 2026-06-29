@@ -143,6 +143,7 @@ services:
       - vault-ruby-core-prod
       - traefik_proxy
       - traefik-public
+      - observability
     depends_on:
       nats:
         condition: service_healthy
@@ -153,6 +154,9 @@ services:
       - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-gateway:/vault/secret-id:ro
     environment:
       - ENVIRONMENT=production
+      # OTLP export to the Foundation collector (ADR-0004). Unset => no-op telemetry.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - VAULT_ADDR=https://vault:8200
       - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN}
@@ -243,6 +247,7 @@ services:
       - default
       - vault-ruby-core-prod
       - postgres
+      - observability
     depends_on:
       nats:
         condition: service_healthy
@@ -271,6 +276,9 @@ services:
       - CALENDAR_SYNC_ENABLED=true
       - VAULT_GOOGLE_PATH=secret/data/ruby-core/google
       - TZ=America/New_York
+      # OTLP export to the Foundation collector (ADR-0004). Unset => no-op telemetry.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 
   # ==========================================================================
   # Notifier Service
@@ -287,6 +295,7 @@ services:
     networks:
       - default
       - vault-ruby-core-prod
+      - observability
     depends_on:
       nats:
         condition: service_healthy
@@ -297,6 +306,9 @@ services:
       - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-notifier:/vault/secret-id:ro
     environment:
       - ENVIRONMENT=production
+      # OTLP export to the Foundation collector (ADR-0004). Unset => no-op telemetry.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - VAULT_ADDR=https://vault:8200
       - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN}
@@ -322,6 +334,7 @@ services:
     networks:
       - default
       - vault-ruby-core-prod
+      - observability
     depends_on:
       nats:
         condition: service_healthy
@@ -332,6 +345,9 @@ services:
       - /opt/foundation/vault/.secret-id-foundation-agent-ruby-core-presence:/vault/secret-id:ro
     environment:
       - ENVIRONMENT=production
+      # OTLP export to the Foundation collector (ADR-0004). Unset => no-op telemetry.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - VAULT_ADDR=https://vault:8200
       - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN}
@@ -364,11 +380,15 @@ services:
     networks:
       - default
       - vault-ruby-core-prod
+      - observability
     depends_on:
       nats:
         condition: service_healthy
     environment:
       - ENVIRONMENT=production
+      # OTLP export to the Foundation collector (ADR-0004). Unset => no-op telemetry.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
       - VAULT_ADDR=https://vault:8200
       - VAULT_CACERT=/vault/tls/vault-ca.crt
       - VAULT_TOKEN=${VAULT_TOKEN}
@@ -413,6 +433,12 @@ networks:
   postgres:
     external: true
     name: postgres
+  # Foundation observability network (ADR-0004/0028). App services join this to reach
+  # the shared OTel collector at otel-collector:4317 for OTLP trace+metric export.
+  # Owned by /opt/foundation/observability; created there.
+  observability:
+    external: true
+    name: observability
 
 # ==========================================================================
 # Volumes

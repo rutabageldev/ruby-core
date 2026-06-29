@@ -44,7 +44,13 @@ func Init(ctx context.Context, serviceName, serviceVersion string) (func(context
 		return noop, nil
 	}
 
-	env := os.Getenv("ENVIRONMENT")
+	// deployment.environment: prefer the dedicated OTEL_DEPLOYMENT_ENVIRONMENT so the
+	// staging stack (which sets ENVIRONMENT=production to exercise prod code paths) can
+	// still label its telemetry "staging" and stay distinguishable from real prod.
+	env := os.Getenv("OTEL_DEPLOYMENT_ENVIRONMENT")
+	if env == "" {
+		env = os.Getenv("ENVIRONMENT")
+	}
 	if env == "" {
 		env = "development"
 	}
