@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	otelapi "go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/audit"
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
@@ -134,9 +136,27 @@ func main() {
 		logger.Error("nats: idempotency KV bucket failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-	idStore := idempotency.NewHybridStore(kv, config.DefaultIdempotencyTTL)
+	idStore := idempotency.NewHybridStore(kv, config.DefaultIdempotencyTTL, "engine")
 	defer func() { _ = idStore.Close() }()
 	logger.Info("idempotency: hybrid store ready", slog.Duration("ttl", config.DefaultIdempotencyTTL))
+
+	// Observe the live idempotency KV depth (#137). An observable gauge keeps the
+	// nats.KeyValue handle here (no wider interface) and is collected on each export.
+	if _, gerr := otelapi.Meter("github.com/primaryrutabaga/ruby-core/services/engine").Int64ObservableGauge(
+		"ruby_core_idempotency_kv_entries",
+		metric.WithDescription("Current number of entries in the idempotency KV bucket"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			st, serr := kv.Status()
+			if serr != nil {
+				return serr
+			}
+			// A KV bucket entry count cannot approach int64 max, so the conversion is safe.
+			o.Observe(int64(st.Values())) //nolint:gosec // entry count fits in int64
+			return nil
+		}),
+	); gerr != nil {
+		logger.Warn("otel: kv-entries gauge unavailable", slog.String("error", gerr.Error()))
+	}
 
 	// --- Phase 4: Audit publisher ---
 

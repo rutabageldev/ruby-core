@@ -4,12 +4,16 @@
 package idempotency
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Store is the interface for checking and marking processed event IDs.
@@ -26,16 +30,25 @@ type Store interface {
 // Writes go to both stores. KV write failures are logged but do not surface as errors,
 // consistent with ADR-0025's acknowledged small race window.
 type hybridStore struct {
-	mem *memStore
-	kv  *kvStore
+	mem      *memStore
+	kv       *kvStore
+	service  string
+	markFail metric.Int64Counter // ruby_core_idempotency_mark_failures_total{service}
 }
 
 // NewHybridStore returns a Store backed by an in-memory TTL cache and a NATS KV bucket.
-// In production, pass the nats.KeyValue returned by CreateOrBindKVBucket.
-func NewHybridStore(kv nats.KeyValue, ttl time.Duration) Store {
+// In production, pass the nats.KeyValue returned by CreateOrBindKVBucket. service labels
+// the durable-mark-failure metric (#137).
+func NewHybridStore(kv nats.KeyValue, ttl time.Duration, service string) Store {
+	markFail, _ := otel.Meter("github.com/primaryrutabaga/ruby-core/pkg/idempotency").Int64Counter(
+		"ruby_core_idempotency_mark_failures_total",
+		metric.WithDescription("Durable (KV) idempotency mark writes that failed — widens the at-least-once race window (ADR-0025)"),
+	)
 	return &hybridStore{
-		mem: newMemStore(ttl),
-		kv:  &kvStore{kv: kv},
+		mem:      newMemStore(ttl),
+		kv:       &kvStore{kv: kv},
+		service:  service,
+		markFail: markFail,
 	}
 }
 
@@ -63,6 +76,9 @@ func (h *hybridStore) Mark(id string) error {
 		return err
 	}
 	if err := h.kv.Mark(id); err != nil {
+		if h.markFail != nil {
+			h.markFail.Add(context.Background(), 1, metric.WithAttributes(attribute.String("service", h.service)))
+		}
 		slog.Warn("idempotency: kv mark failed (non-fatal, race window acknowledged)",
 			slog.String("id", id),
 			slog.String("error", err.Error()),

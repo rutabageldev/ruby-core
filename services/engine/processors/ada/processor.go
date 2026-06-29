@@ -20,8 +20,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processor"
@@ -80,12 +80,14 @@ const (
 	sensorGrowthCurves            = "sensor.ada_growth_curves"
 )
 
-// adaBoundaryCrossingsTotal counts bedtime boundary crossings that trigger a
-// daily aggregate refresh.
-var adaBoundaryCrossingsTotal = promauto.NewCounter(prometheus.CounterOpts{
-	Name: "ada_boundary_crossings_total",
-	Help: "Number of bedtime boundary crossings triggering daily aggregate refresh.",
-})
+// adaBoundaryCrossingsTotal counts bedtime boundary crossings that trigger a daily
+// aggregate refresh. It is an OTel counter exported via OTLP (ADR-0004 — direct Prometheus
+// instrumentation is disallowed). Created at package scope: the global OTel meter delegates
+// to the real MeterProvider once otel.Init installs it, so pre-Init creation is safe.
+var adaBoundaryCrossingsTotal, _ = otel.Meter("github.com/primaryrutabaga/ruby-core/services/engine/processors/ada").Int64Counter(
+	"ruby_core_ada_boundary_crossings_total",
+	metric.WithDescription("Bedtime boundary crossings triggering a daily aggregate refresh"),
+)
 
 // Processor implements processor.StatefulProcessor for Ada baby tracking.
 // It persists feeding, diaper, sleep, and tummy time events to Postgres
@@ -1561,7 +1563,7 @@ func (p *Processor) startBoundaryTicker(ctx context.Context) {
 					return
 				case <-boundaryTimer.C:
 					p.log.Info("ada: bedtime boundary crossed — refreshing daily aggregates")
-					adaBoundaryCrossingsTotal.Inc()
+					adaBoundaryCrossingsTotal.Add(ctx, 1)
 					p.pushTodayBoundary(ctx)
 					p.pushDailyAggregates(ctx)
 					break inner
