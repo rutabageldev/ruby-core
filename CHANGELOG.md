@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.27.1](https://github.com/rutabageldev/ruby-core/compare/v0.27.0...v0.27.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **deploy:** reload NATS CA before starting app services ([#61](https://github.com/rutabageldev/ruby-core/issues/61)) ([b170887](https://github.com/rutabageldev/ruby-core/commit/b17088710d1fcb16b6544d645a47f3cef7ef4322))
+* production NATS-resilience — survive bounces, retry cold dial, clean deploy ordering ([c60e7cd](https://github.com/rutabageldev/ruby-core/commit/c60e7cd3d81fb1e1d43d7365e0bd547588d971db))
+* **services:** survive NATS bounces + retry cold dial, exit cleanly on permanent loss ([#18](https://github.com/rutabageldev/ruby-core/issues/18), [#111](https://github.com/rutabageldev/ruby-core/issues/111)) ([ad172b8](https://github.com/rutabageldev/ruby-core/commit/ad172b86eb65da865f12106b9b1747c32772a9be))
+
 ## [0.27.0](https://github.com/rutabageldev/ruby-core/compare/v0.26.2...v0.27.0) (2026-06-29)
 
 
