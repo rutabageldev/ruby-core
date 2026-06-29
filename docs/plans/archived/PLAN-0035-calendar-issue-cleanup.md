@@ -1,6 +1,6 @@
 # PLAN-0035 - Calendar Issue Cleanup
 
-* **Status:** In Progress
+* **Status:** Complete
 * **Date:** 2026-06-29
 * **Project:** ruby-core
 * **Roadmap Item:** [ROADMAP-0012](../roadmap/ROADMAP-0012-home-calendar.md)
@@ -110,3 +110,24 @@ Gateway/api/test changes are code-revert.
 
 None blocking. Apply-time confirmations: existing prod `relationship` values (Step 2); the
 `directory_person` write/seed path (Step 3).
+
+---
+
+## Completion Notes (2026-06-29)
+
+Implemented on `fix/calendar-overlay-and-idempotency`; `go test -tags=fast ./...` green,
+`golangci-lint` 0 issues, Spectral lint green (#126), sqlc no drift, and the new
+`make test-integration` harness passes against real Postgres. Commits:
+
+* `25fc6d4` — migration 000003 (relationship CHECK + `person_email`) + sqlc queries +
+  `buildEmailIndex` multi-email merge + fast test (#134, #133).
+* `b901c6e` — gateway derives a stable `idempotency_key` for calendar upserts (#138).
+* `a59d43e` — Postgres testcontainers integration harness (#127).
+* `a3c2bfe` — style-guide omit-vs-null (#126) + ADR-0042 amendment + gateway README.
+
+Deviations: the API-layer attendee reconciliation is exercised via the pure `buildEmailIndex`
+fast test + the store-layer integration assertions (no separate `services/api` integration
+harness this round). `directory_person`/`person_email` remain seed/manual data — no runtime
+write event (the calendar processor's `calStore` doesn't wire person writes); `UpsertPersonEmail`
+exists for seeding + the integration test. The relationship Step-2 normalization is a no-op in
+prod if the table is empty — confirm before the migration runs.
