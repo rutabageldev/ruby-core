@@ -1,6 +1,6 @@
 # PLAN-0009 — Full-Stack Observability
 
-* **Status:** In Progress (reconciled 2026-06-29 — see Reconciliation)
+* **Status:** Complete (2026-06-29 — shipped as PR #150 metrics+logs and the traces PR; see Reconciliation)
 * **Date:** 2026-03-20
 * **Project:** ruby-core
 * **Roadmap Item:** [docs/roadmap/ROADMAP-0009-full-stack-observability.md](../roadmap/ROADMAP-0009-full-stack-observability.md)
@@ -364,5 +364,9 @@ Corrections applied during execution:
   paths), which would mislabel its ephemeral smoke-test telemetry as production. Added an
   `OTEL_DEPLOYMENT_ENVIRONMENT` override (preferred over `ENVIRONMENT` in `otel.Init`); staging
   compose sets it to `staging`.
-* **Plan stays In Progress** until PR 2 lands — it is archived as the final commit of PR 2, not
-  PR 1. PR-1 verification: `docs/ops/phase9-verification.md`.
+* **PR split landed:** PR 1 (metrics + log correlation) merged as #150 (release 0.28.0); PR 2
+  (distributed traces) completed the spans + W3C propagation + engine `ctx` threading. The
+  connected `ha.ingest → nats.consume → engine.process → nats.consume → notify.send` trace is
+  unit-proven (`TestPublishWithContext_PropagatesTraceToObserve`); the one-time live Grafana
+  confirmation of the three ACs is documented in `docs/ops/phase9-verification.md` (CI has no
+  telemetry-backend access, so it can't be ticked from the repo). Plan archived with PR 2.

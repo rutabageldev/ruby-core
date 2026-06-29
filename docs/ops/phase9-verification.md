@@ -1,23 +1,26 @@
 # Phase 9 Verification — Full-Stack Observability (PLAN-0009)
 
-PLAN-0009 ships in two PRs on `phase-9-observability`:
+PLAN-0009 shipped in two PRs:
 
-* **PR 1 — metrics + log correlation** (this PR): the OTel SDK foundation, OTLP metric
-  export from all 5 services, log-trace ID injection, and compose wiring. Closes **#31**
+* **PR 1 — metrics + log correlation** (#150, merged): the OTel SDK foundation, OTLP metric
+  export from all 5 services, log-trace ID injection, and compose wiring. Closed **#31**
   (superseded by OTLP — no `/metrics` endpoint) and **#137** (idempotency metrics).
-* **PR 2 — distributed traces** (follow-up): per-service spans, W3C context propagation
-  across NATS, and `ctx` threading through the engine `process` path to connect a
+* **PR 2 — distributed traces** (this PR): per-service spans, W3C context propagation across
+  NATS, and `ctx` threading through the engine `process` path to connect a
   gateway→engine→notifier trace.
 
 ## Acceptance Criteria (ROADMAP-0009)
 
 | # | Criterion | Status | Notes |
 |---|---|---|---|
-| AC-1 | A distributed trace for a complete automation flow is viewable | `[ ]` | PR 2 (spans + W3C propagation) |
-| AC-2 | Key service metrics visible in a dashboard | `[~]` | Emission code-complete (PR 1); dashboard visibility needs the live staging/prod export below |
-| AC-3 | Log entries contain trace IDs that correlate with traces | `[~]` | Injection mechanism shipped (PR 1); IDs are non-empty only once spans exist (PR 2) |
+| AC-1 | A distributed trace for a complete automation flow is viewable | `[~]` | Mechanism complete + unit-verified (inject→extract shares one trace ID); the live Tempo view is the deploy step below |
+| AC-2 | Key service metrics visible in a dashboard | `[~]` | Emission code-complete (PR 1); dashboard visibility needs the live export below |
+| AC-3 | Log entries contain trace IDs that correlate with traces | `[~]` | Injection shipped (PR 1) + spans now populate the IDs (PR 2); live Loki↔Tempo correlation is the deploy step |
 
-`[~]` = code-complete in PR 1, full sign-off pending PR 2 + a live deploy.
+`[~]` = code-complete and unit-verified; final sign-off is the one-time live confirmation in
+Grafana after a deploy (this node has no telemetry backend access from CI, so it can't be
+ticked from the repo). The connected-trace mechanism itself is proven by
+`TestPublishWithContext_PropagatesTraceToObserve` in `pkg/natsx`.
 
 ---
 
@@ -98,10 +101,38 @@ ruby_core_idempotency_kv_entries
 Expect a series per running service, filterable by `deployment_environment`
 (`production` vs `staging`).
 
-### Deferred to PR 2
+## What PR 2 delivers — distributed traces
 
-* AC-1 (connected gateway→engine→notifier trace in Tempo).
-* AC-3 full sign-off (Loki entries carrying non-empty `trace_id` matching a Tempo trace).
-* Spans: `nats.consume`, `ha.ingest`, `engine.process`, `notify.send`, `presence.wifi_check`.
-* W3C `traceparent` injection on the 3 gateway publish paths + `ctx` threading through the
-  engine `process`/`ProcessEvent` path.
+**Spans** (all OTLP-exported, parented via W3C trace context carried in NATS headers):
+
+| Span | Service | Where |
+|---|---|---|
+| `ha.ingest` | gateway | `handleEvent` — root span per HA WebSocket event |
+| `nats.consume` | engine, notifier, presence, audit-sink | `pkg/natsx.MsgInstruments.Observe` (extracts the parent from headers) |
+| `engine.process` | engine | `ProcessorHost.Process` |
+| `notify.send` | notifier | `sendNotification` (HA push REST call) |
+| `presence.wifi_check` | presence | `queryWifiState` (WiFi corroboration REST call) |
+
+**Propagation.** `natsx.PublishWithContext` injects the active span's `traceparent` into the
+NATS message headers; the consumer's `Observe` extracts it and opens `nats.consume` as a child.
+The gateway injects on all three publish paths (`state_changed`, `ada_event`, `ruby_home_event`);
+the engine threads `ctx` through `handle → decide → process → ProcessorHost.Process →
+Processor.ProcessEvent`, and `presence_notify` publishes the notify command with context — so the
+full flow connects:
+
+```text
+ha.ingest → nats.consume(engine) → engine.process → nats.consume(notifier) → notify.send
+```
+
+**Unit-verified:** `TestPublishWithContext_PropagatesTraceToObserve` asserts the consumer span
+shares the producer's trace ID (inject→extract round-trip).
+
+### Live verification (run once after a deploy — completes AC sign-off)
+
+1. **Trace (AC-1):** trigger a presence transition (or publish a notify command); in Grafana →
+   Tempo, search for service `gateway` and open the trace. Expect the connected span chain above
+   with the engine and notifier spans as descendants of `ha.ingest`.
+2. **Log correlation (AC-3):** in Loki, find an `engine`/`notifier` log line emitted during that
+   flow; it carries `trace_id`/`span_id`. Paste the `trace_id` into Tempo and confirm it opens the
+   same trace.
+3. **Metrics (AC-2):** the PromQL above returns a series per service.
