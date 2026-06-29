@@ -1,17 +1,25 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
 	"github.com/primaryrutabaga/ruby-core/services/engine/config"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processor"
 )
+
+// tracer opens engine spans; delegates to the global provider installed by otel.Init.
+var tracer = otel.Tracer("github.com/primaryrutabaga/ruby-core/services/engine")
 
 // ProcessorHost manages the lifecycle of all registered Logical Processors
 // (ADR-0007) and routes incoming events to the processors that subscribed
@@ -76,7 +84,11 @@ func (h *ProcessorHost) Initialize(ruleCfg *config.CompiledConfig, nc *nats.Conn
 // Errors from individual processors are logged but do not prevent other processors
 // from running; the error from the first failing processor is returned to the caller
 // so the consumer can NAK the message.
-func (h *ProcessorHost) Process(subject string, data []byte) error {
+func (h *ProcessorHost) Process(ctx context.Context, subject string, data []byte) error {
+	ctx, span := tracer.Start(ctx, "engine.process",
+		trace.WithAttributes(attribute.String("subject", subject)))
+	defer span.End()
+
 	var firstErr error
 	matched := false
 
@@ -84,7 +96,7 @@ func (h *ProcessorHost) Process(subject string, data []byte) error {
 		for _, pattern := range p.Subscriptions() {
 			if matchesSubject(pattern, subject) {
 				matched = true
-				if err := p.ProcessEvent(subject, data); err != nil {
+				if err := p.ProcessEvent(ctx, subject, data); err != nil {
 					h.log.Warn("host: processor error",
 						slog.String("subject", subject),
 						slog.String("error", err.Error()),
@@ -100,6 +112,9 @@ func (h *ProcessorHost) Process(subject string, data []byte) error {
 
 	if !matched {
 		h.log.Debug("host: no processor matched subject", slog.String("subject", subject))
+	}
+	if firstErr != nil {
+		span.SetStatus(codes.Error, firstErr.Error())
 	}
 	return firstErr
 }

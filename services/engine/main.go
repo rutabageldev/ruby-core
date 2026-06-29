@@ -397,6 +397,6 @@ var forceFail = os.Getenv("ENGINE_FORCE_FAIL") == "true"
 
 // forceFailProcess wraps a process func so every call returns an error.
 // Used only when ENGINE_FORCE_FAIL=true.
-func forceFailProcess(_ string, _ []byte) error {
+func forceFailProcess(_ context.Context, _ string, _ []byte) error {
 	return errors.New("ENGINE_FORCE_FAIL: forced failure for DLQ verification")
 }

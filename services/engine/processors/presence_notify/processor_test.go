@@ -3,11 +3,14 @@
 package presence_notify_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nats-io/nats.go"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 	"github.com/primaryrutabaga/ruby-core/services/engine/config"
@@ -53,6 +56,13 @@ type stubNC struct {
 
 func (s *stubNC) Publish(subj string, data []byte) error {
 	s.msgs = append(s.msgs, published{subj, data})
+	return nil
+}
+
+// PublishMsg records the message; presence_notify now publishes via
+// natsx.PublishWithContext (which calls PublishMsg) to carry trace headers.
+func (s *stubNC) PublishMsg(m *nats.Msg) error {
+	s.msgs = append(s.msgs, published{m.Subject, m.Data})
 	return nil
 }
 
@@ -142,7 +152,7 @@ func TestArrival_PublishesNotification(t *testing.T) {
 	nc := &stubNC{}
 	p := newTestProcessor(t, kv, nc, minimalConfig())
 
-	if err := p.ProcessEvent("ha.events.person.wife", stateEvent("person.wife", "home")); err != nil {
+	if err := p.ProcessEvent(context.Background(), "ha.events.person.wife", stateEvent("person.wife", "home")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -173,7 +183,7 @@ func TestDeparture_PublishesNotification(t *testing.T) {
 
 	p := newTestProcessor(t, kv, nc, minimalConfig())
 
-	if err := p.ProcessEvent("ha.events.person.wife", stateEvent("person.wife", "not_home")); err != nil {
+	if err := p.ProcessEvent(context.Background(), "ha.events.person.wife", stateEvent("person.wife", "not_home")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -202,7 +212,7 @@ func TestSameState_NoNotification(t *testing.T) {
 	p := newTestProcessor(t, kv, nc, minimalConfig())
 
 	// Receive another "home" event — no transition, no notification.
-	if err := p.ProcessEvent("ha.events.person.wife", stateEvent("person.wife", "home")); err != nil {
+	if err := p.ProcessEvent(context.Background(), "ha.events.person.wife", stateEvent("person.wife", "home")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(nc.msgs) != 0 {
@@ -216,7 +226,7 @@ func TestUnwatchedEntity_NoNotification(t *testing.T) {
 	p := newTestProcessor(t, kv, nc, minimalConfig())
 
 	// "person.stranger" is not in any rule.
-	if err := p.ProcessEvent("ha.events.person.stranger", stateEvent("person.stranger", "home")); err != nil {
+	if err := p.ProcessEvent(context.Background(), "ha.events.person.stranger", stateEvent("person.stranger", "home")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(nc.msgs) != 0 {
@@ -230,7 +240,7 @@ func TestMalformedEvent_AckedNotErrored(t *testing.T) {
 	p := newTestProcessor(t, kv, nc, minimalConfig())
 
 	// A non-JSON payload should not return an error (ack and move on).
-	if err := p.ProcessEvent("ha.events.person.wife", []byte("not-json")); err != nil {
+	if err := p.ProcessEvent(context.Background(), "ha.events.person.wife", []byte("not-json")); err != nil {
 		t.Errorf("malformed payload should not return error, got: %v", err)
 	}
 }
@@ -253,7 +263,7 @@ func TestNoStateField_NoNotification(t *testing.T) {
 	}
 	data, _ := json.Marshal(evt)
 
-	if err := p.ProcessEvent("ha.events.person.wife", data); err != nil {
+	if err := p.ProcessEvent(context.Background(), "ha.events.person.wife", data); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(nc.msgs) != 0 {
@@ -278,7 +288,7 @@ func TestCorrelationID_PropagatedToCommand(t *testing.T) {
 	}
 	data, _ := json.Marshal(evt)
 
-	if err := p.ProcessEvent("ha.events.person.wife", data); err != nil {
+	if err := p.ProcessEvent(context.Background(), "ha.events.person.wife", data); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(nc.msgs) == 0 {

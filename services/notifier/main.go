@@ -153,7 +153,7 @@ func runConsumer(ctx context.Context, sub *nats.Subscription, h *handler, batchS
 		}
 		for _, msg := range msgs {
 			m := msg
-			instr.Observe(ctx, stream, consumer, func() string {
+			instr.Observe(ctx, m, stream, consumer, func(_ context.Context) string {
 				if err := h.process(m.Subject, m.Data); err != nil {
 					log.Warn("notifier: process failed, naking",
 						slog.String("subject", m.Subject),

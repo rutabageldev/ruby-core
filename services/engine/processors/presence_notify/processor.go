@@ -13,6 +13,7 @@
 package presence_notify
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -36,9 +37,11 @@ type kvStore interface {
 }
 
 // natsPub is a narrow interface over *nats.Conn for publishing, allowing
-// test injection without a live NATS connection.
+// test injection without a live NATS connection. PublishMsg carries headers so the
+// notify command can propagate W3C trace context to the notifier (PLAN-0009).
 type natsPub interface {
 	Publish(subject string, data []byte) error
+	PublishMsg(*nats.Msg) error
 }
 
 // kvAdapter adapts nats.KeyValue to the kvStore interface.
@@ -135,7 +138,7 @@ func (p *Processor) Subscriptions() []string {
 // ProcessEvent receives a CloudEvent from the HA gateway, determines whether
 // a presence transition occurred for a watched entity, and publishes a
 // notification command if so.
-func (p *Processor) ProcessEvent(subject string, data []byte) error {
+func (p *Processor) ProcessEvent(ctx context.Context, subject string, data []byte) error {
 	var evt schemas.CloudEvent
 	if err := json.Unmarshal(data, &evt); err != nil {
 		p.log.Warn("presence_notify: unmarshal event",
@@ -179,7 +182,7 @@ func (p *Processor) ProcessEvent(subject string, data []byte) error {
 		return nil // transition to an unmonitored state (e.g. "unavailable")
 	}
 
-	return p.publishNotify(evt, params)
+	return p.publishNotify(ctx, evt, params)
 }
 
 // Shutdown is a no-op; the KV bucket and NATS connection are owned by the engine.
@@ -220,7 +223,7 @@ func (p *Processor) saveState(entityID, state string) error {
 	return p.kv.Put(entityID, data)
 }
 
-func (p *Processor) publishNotify(cause schemas.CloudEvent, params notifyParams) error {
+func (p *Processor) publishNotify(ctx context.Context, cause schemas.CloudEvent, params notifyParams) error {
 	corrID := cause.CorrelationID
 	if corrID == "" {
 		corrID = cause.ID
@@ -248,7 +251,7 @@ func (p *Processor) publishNotify(cause schemas.CloudEvent, params notifyParams)
 	}
 
 	subj := "ruby_engine.commands.notify." + evtID
-	if err := p.nc.Publish(subj, data); err != nil {
+	if err := natsx.PublishWithContext(ctx, p.nc, subj, data); err != nil {
 		return fmt.Errorf("presence_notify: publish notify command: %w", err)
 	}
 

@@ -194,7 +194,7 @@ func (p *Processor) Shutdown() {
 
 // ProcessEvent routes an incoming event by CloudEvent type to the appropriate handler.
 // DB errors are returned to trigger NAK+retry; HA push failures are non-fatal.
-func (p *Processor) ProcessEvent(subject string, data []byte) error {
+func (p *Processor) ProcessEvent(_ context.Context, subject string, data []byte) error {
 	var evt schemas.CloudEvent
 	if err := json.Unmarshal(data, &evt); err != nil {
 		return fmt.Errorf("ada: unmarshal CloudEvent: %w", err)
