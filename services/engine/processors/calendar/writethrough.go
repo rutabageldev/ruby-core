@@ -96,8 +96,11 @@ func (p *Processor) create(ctx context.Context, eventID string, d *schemas.Calen
 	return out, nil
 }
 
+// update uses Google events.patch (not update/replace) so fields the caller omits — notably
+// recurrence, which the HA surface drops when untouched — are preserved rather than stripped
+// (ADR-0044). Optimistic concurrency and the resync-and-retry-once-on-412 flow are unchanged.
 func (p *Processor) update(ctx context.Context, d *schemas.CalendarUpsertData, gev *calendarv3.Event) (*calendarv3.Event, error) {
-	out, err := p.gcal.Update(ctx, p.calendarID, d.GoogleEventID, d.Etag, gev)
+	out, err := p.gcal.Patch(ctx, p.calendarID, d.GoogleEventID, d.Etag, gev)
 	if errors.Is(err, gcal.ErrConflict) {
 		// Stale etag: fetch the current event, refresh the mirror, retry once with
 		// the fresh etag rather than clobbering a concurrent edit.
@@ -109,7 +112,7 @@ func (p *Processor) update(ctx context.Context, d *schemas.CalendarUpsertData, g
 		if params, perr := googleToParams(fresh, p.calendarID); perr == nil {
 			_ = p.q.UpsertEvent(ctx, params)
 		}
-		out, err = p.gcal.Update(ctx, p.calendarID, d.GoogleEventID, trimEtag(fresh.Etag), gev)
+		out, err = p.gcal.Patch(ctx, p.calendarID, d.GoogleEventID, trimEtag(fresh.Etag), gev)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("calendar: google update: %w", err)

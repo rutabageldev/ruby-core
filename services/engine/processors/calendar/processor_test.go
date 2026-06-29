@@ -26,6 +26,8 @@ import (
 type fakeGCal struct {
 	events            map[string]*calendarv3.Event
 	inserts, updates  int
+	patches           int
+	lastPatch         *calendarv3.Event // event arg of the most recent Patch
 	deletes, gets     int
 	nextID            int
 	failNextUpdate412 bool
@@ -71,6 +73,29 @@ func (f *fakeGCal) Update(_ context.Context, _, id, _ string, ev *calendarv3.Eve
 	out := *ev
 	out.Id = id
 	out.Etag = `"etag-upd"`
+	f.events[id] = &out
+	return &out, nil
+}
+
+func (f *fakeGCal) Patch(_ context.Context, _, id, _ string, ev *calendarv3.Event) (*calendarv3.Event, error) {
+	if f.failNextUpdate412 {
+		f.failNextUpdate412 = false
+		return nil, gcal.ErrConflict
+	}
+	f.patches++
+	f.lastPatch = ev
+	// Patch merges: preserve fields the caller omitted (nil) from the stored event.
+	out := *ev
+	if cur, ok := f.events[id]; ok {
+		if out.Recurrence == nil {
+			out.Recurrence = cur.Recurrence
+		}
+		if out.Summary == "" {
+			out.Summary = cur.Summary
+		}
+	}
+	out.Id = id
+	out.Etag = `"etag-patched"`
 	f.events[id] = &out
 	return &out, nil
 }
@@ -329,8 +354,41 @@ func TestHandleUpsert_Update412ResyncsAndRetries(t *testing.T) {
 	if g.gets != 1 {
 		t.Errorf("expected 1 resync Get after 412, got %d", g.gets)
 	}
-	if g.updates != 1 {
-		t.Errorf("expected 1 successful update after retry, got %d", g.updates)
+	if g.patches != 1 {
+		t.Errorf("expected 1 successful patch after retry, got %d", g.patches)
+	}
+}
+
+// TestHandleUpsert_UpdatePreservesOmittedRecurrence is the ADR-0044 §4b guarantee: editing a
+// field of a recurring event while omitting recurrence must NOT strip the series. The update
+// path goes through events.patch, and the patched event carries no recurrence (so Google
+// preserves it) — the legacy events.update full-replace would have cleared it.
+func TestHandleUpsert_UpdatePreservesOmittedRecurrence(t *testing.T) {
+	p, g, st := newTestProcessor()
+	start, end := timedEvent(t)
+	rrule := []string{"RRULE:FREQ=WEEKLY;BYDAY=MO"}
+	g.events["g1"] = &calendarv3.Event{
+		Id: "g1", Etag: `"fresh"`, Summary: "Standup", Recurrence: rrule,
+		Start: &calendarv3.EventDateTime{DateTime: "2026-06-22T09:00:00-04:00"},
+		End:   &calendarv3.EventDateTime{DateTime: "2026-06-22T10:00:00-04:00"},
+	}
+	st.events["g1"] = &store.CalendarEvent{GoogleEventID: "g1", Etag: "fresh"}
+
+	// Edit only the summary; recurrence omitted (HA's "untouched" contract).
+	evt := cloudEvent(t, schemas.CalendarUpsertData{
+		GoogleEventID: "g1", Summary: "Standup (moved)", Start: start, End: end, Etag: "fresh",
+	})
+	if err := p.handleUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if g.patches != 1 || g.updates != 0 {
+		t.Fatalf("expected exactly 1 patch and 0 updates, got patches=%d updates=%d", g.patches, g.updates)
+	}
+	if len(g.lastPatch.Recurrence) != 0 {
+		t.Errorf("patch must omit recurrence so Google preserves it, got %v", g.lastPatch.Recurrence)
+	}
+	if got := g.events["g1"].Recurrence; len(got) != 1 || got[0] != rrule[0] {
+		t.Errorf("series recurrence not preserved after edit: %v", got)
 	}
 }
 

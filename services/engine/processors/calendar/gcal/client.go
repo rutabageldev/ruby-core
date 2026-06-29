@@ -32,6 +32,11 @@ type Service interface {
 	// Update modifies an event with If-Match optimistic concurrency. A Google 412
 	// (etag mismatch) is surfaced as ErrConflict.
 	Update(ctx context.Context, calendarID, eventID, etag string, ev *calendarv3.Event) (*calendarv3.Event, error)
+	// Patch partially updates an event (Google events.patch): fields absent from ev are
+	// left unchanged, so a caller that omits untouched fields (e.g. recurrence) does not
+	// strip them — unlike Update's full replace (ADR-0044). Same If-Match etag concurrency
+	// as Update; a Google 412 is surfaced as ErrConflict.
+	Patch(ctx context.Context, calendarID, eventID, etag string, ev *calendarv3.Event) (*calendarv3.Event, error)
 	// Delete removes an event (series-level for MVP). A Google 410/404 (already gone)
 	// is surfaced as ErrAlreadyGone so the caller can treat the absent postcondition
 	// as satisfied rather than failing.
@@ -146,6 +151,24 @@ func (a *apiService) Update(ctx context.Context, calendarID, eventID, etag strin
 			return nil, ErrConflict
 		}
 		return nil, fmt.Errorf("gcal: update: %w", err)
+	}
+	return out, nil
+}
+
+func (a *apiService) Patch(ctx context.Context, calendarID, eventID, etag string, ev *calendarv3.Event) (*calendarv3.Event, error) {
+	call := a.svc.Events.Patch(calendarID, eventID, ev)
+	if etag != "" {
+		// If-Match requires the quoted entity-tag form (see Update); the mirror stores
+		// etags trimmed, so a bare value never matches → Google 412.
+		call.Header().Set("If-Match", quoteEtag(etag))
+	}
+	out, err := call.Context(ctx).Do()
+	if err != nil {
+		var gerr *googleapi.Error
+		if errors.As(err, &gerr) && gerr.Code == 412 {
+			return nil, ErrConflict
+		}
+		return nil, fmt.Errorf("gcal: patch: %w", err)
 	}
 	return out, nil
 }
