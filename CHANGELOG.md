@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.28.0](https://github.com/rutabageldev/ruby-core/compare/v0.27.1...v0.28.0) (2026-06-29)
+
+
+### Features
+
+* **deploy:** wire app services to OTLP collector via observability network (PLAN-0009 Step 9) ([e35cf60](https://github.com/rutabageldev/ruby-core/commit/e35cf60db1ed147cee8dd23c469ad5e45f37f795))
+* **logging:** inject trace_id/span_id into stdout JSON logs (PLAN-0009 Step 3) ([f69411d](https://github.com/rutabageldev/ruby-core/commit/f69411dec3fe6f34c0c05a542b4a62601a3690e6))
+* **observability:** OTLP metrics + log-trace correlation (PLAN-0009 PR 1/2) ([230c4fe](https://github.com/rutabageldev/ruby-core/commit/230c4fecfabd7ed31fd4325e6776f9e80a0300c9))
+* **otel:** instrument consumer loops with OTLP metrics + wire otel.Init (PLAN-0009 Steps 4-7) ([54d83e3](https://github.com/rutabageldev/ruby-core/commit/54d83e32ab14f8896b1da990ef4643ad44a48483))
+* **otel:** migrate ada counter to OTLP + idempotency metrics ([#137](https://github.com/rutabageldev/ruby-core/issues/137), ADR-0004) ([6b64613](https://github.com/rutabageldev/ruby-core/commit/6b646136bb4493d870e84f15e3906a3362ed1c8f))
+* **otel:** per-service domain counters (PLAN-0009 Step 8, metrics-only) ([4a9ffc6](https://github.com/rutabageldev/ruby-core/commit/4a9ffc6e79cff39985ce538df5cb5edb10678a22))
+* **otel:** pkg/otel.Init — OTLP gRPC trace+metric providers + W3C propagator (PLAN-0009 Steps 1-2) ([ac78cda](https://github.com/rutabageldev/ruby-core/commit/ac78cdae4953eb7f414f35ffb2836846c2f0ce2e))
+
 ## [0.27.1](https://github.com/rutabageldev/ruby-core/compare/v0.27.0...v0.27.1) (2026-06-29)
 
 
