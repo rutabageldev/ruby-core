@@ -23,7 +23,10 @@ CREATE ROLE ruby_core_ro LOGIN PASSWORD '<generated>';   -- one role; reuse acro
 GRANT CONNECT ON DATABASE ruby_core TO ruby_core_ro;
 GRANT USAGE ON SCHEMA public TO ruby_core_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO ruby_core_ro;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ruby_core_ro;
+-- Default privileges are keyed to the role that CREATES the table. Migrations run as the
+-- `ruby_core` app user, so the FOR ROLE clause is mandatory — without it, every table a
+-- future migration creates is invisible to ruby_core_ro (see "Known failure mode" below).
+ALTER DEFAULT PRIVILEGES FOR ROLE ruby_core IN SCHEMA public GRANT SELECT ON TABLES TO ruby_core_ro;
 ```
 
 > ⚠️ **Gotcha — run this with `psql -c`, not a heredoc.** `docker run` (without `-i`)
@@ -46,7 +49,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ruby_core_ro
 >   -c "GRANT CONNECT ON DATABASE ruby_core TO ruby_core_ro" \
 >   -c "GRANT USAGE ON SCHEMA public TO ruby_core_ro" \
 >   -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ruby_core_ro" \
->   -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ruby_core_ro"
+>   -c "ALTER DEFAULT PRIVILEGES FOR ROLE ruby_core IN SCHEMA public GRANT SELECT ON TABLES TO ruby_core_ro"
 > # then store the same $RO_PW in Vault (next section), and verify:
 > docker run --rm --network postgres -e PGPASSWORD="$RO_PW" postgres:16-alpine \
 >   psql -h foundation-postgres -p 5432 -U ruby_core_ro -d ruby_core -tAc "SELECT count(*) FROM calendar_event"
@@ -57,8 +60,10 @@ while connected to that database.)
 
 > **Status:** prod is provisioned (role `ruby_core_ro` created, `secret/ruby-core/postgres_readonly`
 >
-> + `secret/ruby-core/api` populated, api healthy) as of 2026-06-28 / v0.26.0. staging + dev
-> are not yet provisioned.
+> + `secret/ruby-core/api` populated, api healthy) as of 2026-06-28 / v0.26.0. The
+> `FOR ROLE ruby_core` default-privileges fix was applied to prod on 2026-06-29 (v0.30.0)
+> after migration `000003` created `person_email` without a grant — see "Known failure
+> mode". staging + dev are not yet provisioned (when they are, use the `FOR ROLE` form above).
 
 Store the DSN fields in Vault (the api reads `secret/data/ruby-core/postgres_readonly`):
 
@@ -100,6 +105,46 @@ vault kv get -field=token secret/ruby-core/api >/dev/null && echo "api bearer pr
 
 After deploy: `curl -sf https://<api-host>/health` → 200, and `/v1/ping` with the bearer
 → 200. Register the `/health` monitor in Uptime Kuma.
+
+## Known failure mode — a read endpoint 500s after a new migration
+
+**Symptom:** one endpoint returns HTTP 500 (often with *nothing logged* — ogen's error
+handler swallows the underlying pg error) while sibling read endpoints return 200. Clean
+api startup, healthy container.
+
+**Cause:** `ruby_core_ro` is missing `SELECT` on a table a recent migration created. The
+one-time `GRANT SELECT ON ALL TABLES` only covers tables that existed when it ran;
+anything created later is covered **only** by `ALTER DEFAULT PRIVILEGES`, and that clause
+applies solely to objects created by the role named in `FOR ROLE`. Migrations run as the
+`ruby_core` app user — so a default-privileges grant scoped to `postgres` (or omitting
+`FOR ROLE`) silently covers nothing the migrations create. This is exactly how
+`person_email` (migration `000003`, v0.30.0) broke `GET /v1/calendar/events`: that handler
+unconditionally reads `person_email` via `ListAllPersonEmails`, while `/directory/people`
+and `/childcare/providers` don't touch it.
+
+**Diagnose** (as the `postgres` superuser against the affected DB):
+
+```bash
+ADMIN_PW="$(docker inspect foundation-postgres \
+  --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^POSTGRES_PASSWORD=' | cut -d= -f2-)"
+# list every table ruby_core_ro can NOT read:
+docker run --rm --network postgres -e PGPASSWORD="$ADMIN_PW" postgres:16-alpine \
+  psql -h foundation-postgres -p 5432 -U postgres -d ruby_core -tAc \
+  "SELECT tablename FROM pg_tables WHERE schemaname='public'
+     AND NOT has_table_privilege('ruby_core_ro', schemaname||'.'||tablename, 'SELECT')"
+```
+
+**Remediate** (idempotent; closes the current gap and prevents recurrence):
+
+```bash
+docker run --rm --network postgres -e PGPASSWORD="$ADMIN_PW" postgres:16-alpine \
+  psql -h foundation-postgres -p 5432 -U postgres -d ruby_core -v ON_ERROR_STOP=1 \
+  -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO ruby_core_ro" \
+  -c "ALTER DEFAULT PRIVILEGES FOR ROLE ruby_core IN SCHEMA public GRANT SELECT ON TABLES TO ruby_core_ro"
+```
+
+Once the `FOR ROLE ruby_core` default privilege is in place (it is, on prod, as of
+2026-06-29), future migrations are covered automatically — no per-migration grant needed.
 
 ## Related
 
