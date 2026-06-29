@@ -1,11 +1,11 @@
 # PLAN-0038 — rh-calendar Consumer Parity (#155)
 
-* **Status:** Draft
+* **Status:** Approved
 * **Date:** 2026-06-29
 * **Project:** ruby-core
 * **Roadmap Item:** follow-on to [ROADMAP-0012](../roadmap/archived/ROADMAP-0012-home-calendar-api-foundation.md) (Home Calendar + API Foundation, complete)
 * **Branch:** `feat/rh-calendar-consumer-parity`
-* **Related ADRs:** ADR-0042 (calendar sync) — §4b and §2 refine its write-path obligations; a new ADR for the per-instance recurring-edit model is an open question (see below)
+* **Related ADRs:** [ADR-0044](../adr/0044-calendar-write-semantics-patch-and-per-instance.md) (calendar write semantics — patch-merge + per-instance recurring edits); refines [ADR-0042](../adr/0042-calendar-sync-architecture.md) (calendar sync)
 
 ---
 
@@ -158,14 +158,11 @@ image. No stateful/irreversible step.
 
 ---
 
-## Open Questions
+## Resolved decisions (2026-06-29)
 
-1. **ADR for the per-instance recurring-edit model (§2)?** The override/`this-and-following`-split
-   semantics are a non-obvious, consciously-traded design — likely warrants an ADR refining
-   ADR-0042. Write it as part of this PR, or as a fast-follow?
-2. **Include `this_and_following` (Step 5d) in this PR, or defer?** It is the riskiest sub-part
-   (series split). Recommendation: implement this-occurrence + all here; defer the split if the PR
-   grows too large — HA already withholds that scope option until it lands.
-3. **Recurrence-clearing** (make a recurring series non-recurring) needs a presence-typed payload or
-   an explicit signal; not expressible under today's `omitempty` recurrence. Confirm this is
-   acceptable to defer (HA's editor can route "remove repeat" through §2 instead).
+1. **ADR written.** [ADR-0044](../adr/0044-calendar-write-semantics-patch-and-per-instance.md)
+   captures the patch-merge update rule and the per-instance override model (Accepted).
+2. **`this_and_following` (Step 5d) is DEFERRED** to a fast-follow (ADR-0044 obligation 5). This PR
+   ships this-occurrence + all; the consumer withholds the split option until it lands.
+3. **Explicit recurrence-clearing is DEFERRED** (ADR-0044 obligation 6) — not expressible under the
+   `omitempty` payload; routed through a future scope-aware path, not inferred from an empty value.
