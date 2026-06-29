@@ -7,9 +7,11 @@ import (
 	"os/signal"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
 	"github.com/primaryrutabaga/ruby-core/pkg/logging"
+	rubyotel "github.com/primaryrutabaga/ruby-core/pkg/otel"
 	"github.com/primaryrutabaga/ruby-core/services/gateway/app"
 )
 
@@ -23,6 +25,17 @@ func main() {
 	// Set as the process default so that package-level slog calls (e.g. in pkg/boot)
 	// also emit structured JSON without needing a logger parameter.
 	slog.SetDefault(logger)
+
+	// Initialize OpenTelemetry (no-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset).
+	otelShutdown, err := rubyotel.Init(context.Background(), "gateway", version)
+	if err != nil {
+		logger.Warn("otel: init failed, continuing without telemetry", slog.String("error", err.Error()))
+	}
+	defer func() {
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer scancel()
+		_ = otelShutdown(sctx)
+	}()
 
 	// LoadConfig uses stdlib log.Fatalf internally — it is called before any
 	// business logic and its fatal path is a pre-flight config check, not an

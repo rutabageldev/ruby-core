@@ -16,6 +16,7 @@ import (
 	"github.com/primaryrutabaga/ruby-core/pkg/config"
 	"github.com/primaryrutabaga/ruby-core/pkg/logging"
 	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
+	rubyotel "github.com/primaryrutabaga/ruby-core/pkg/otel"
 )
 
 var (
@@ -32,6 +33,17 @@ func main() {
 	// Set as the process default so that package-level slog calls (e.g. in pkg/boot)
 	// also emit structured JSON without needing a logger parameter.
 	slog.SetDefault(logger)
+
+	// Initialize OpenTelemetry (no-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset).
+	otelShutdown, err := rubyotel.Init(context.Background(), "audit-sink", version)
+	if err != nil {
+		logger.Warn("otel: init failed, continuing without telemetry", slog.String("error", err.Error()))
+	}
+	defer func() {
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer scancel()
+		_ = otelShutdown(sctx)
+	}()
 
 	// LoadConfig uses stdlib log.Fatalf internally — it is called before any
 	// business logic and its fatal path is a pre-flight config check, not an
@@ -131,7 +143,12 @@ func main() {
 		slog.Int("batch", consumerCfg.FetchBatch),
 	)
 
-	if err := runFetchLoop(ctx, sub, writer, consumerCfg, logger); err != nil {
+	msgInstr, err := natsx.NewMsgInstruments("audit-sink")
+	if err != nil {
+		logger.Warn("otel: message instruments unavailable", slog.String("error", err.Error()))
+	}
+
+	if err := runFetchLoop(ctx, sub, writer, consumerCfg, msgInstr, logger); err != nil {
 		logger.Error("fetch loop exited with error", slog.String("error", err.Error()))
 	}
 	logger.Info("audit-sink stopped")
@@ -144,7 +161,7 @@ func main() {
 // It fetches batches of audit events and writes each to the NDJSON file.
 // Write failures are logged but do not cause a NAK — audit-sink always ACKs to
 // avoid retry loops on persistent filesystem errors.
-func runFetchLoop(ctx context.Context, sub *nats.Subscription, writer *NDJSONWriter, cfg natsx.PullConsumerConfig, logger *slog.Logger) error {
+func runFetchLoop(ctx context.Context, sub *nats.Subscription, writer *NDJSONWriter, cfg natsx.PullConsumerConfig, instr *natsx.MsgInstruments, logger *slog.Logger) error {
 	sem := make(chan struct{}, cfg.WorkerCount)
 
 	for {
@@ -181,7 +198,9 @@ func runFetchLoop(ctx context.Context, sub *nats.Subscription, writer *NDJSONWri
 			}
 			go func(m *nats.Msg) {
 				defer func() { <-sem }()
-				handleAuditMsg(m, writer, logger)
+				instr.Observe(ctx, cfg.Stream, cfg.Durable, func() string {
+					return handleAuditMsg(m, writer, logger)
+				})
 			}(msg)
 		}
 	}
@@ -191,12 +210,14 @@ func runFetchLoop(ctx context.Context, sub *nats.Subscription, writer *NDJSONWri
 // Write failures are logged but the message is still ACKed to prevent retry loops
 // on persistent filesystem errors (disk full, etc.). The AUDIT_EVENTS stream
 // retains messages for 72h as a recovery window.
-func handleAuditMsg(msg *nats.Msg, writer *NDJSONWriter, logger *slog.Logger) {
+func handleAuditMsg(msg *nats.Msg, writer *NDJSONWriter, logger *slog.Logger) string {
+	outcome := natsx.OutcomeSuccess
 	if err := writer.Write(msg.Data); err != nil {
 		logger.Warn("audit-sink: write failed, acking to avoid retry loop",
 			slog.String("subject", msg.Subject),
 			slog.String("error", err.Error()),
 		)
+		outcome = natsx.OutcomeFailure
 	} else {
 		logger.Info("audit-sink: event archived",
 			slog.String("subject", msg.Subject),
@@ -204,6 +225,7 @@ func handleAuditMsg(msg *nats.Msg, writer *NDJSONWriter, logger *slog.Logger) {
 		)
 	}
 	_ = msg.Ack()
+	return outcome
 }
 
 func envOrDefault(key, fallback string) string {

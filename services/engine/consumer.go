@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/idempotency"
 	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
@@ -45,6 +47,14 @@ type Consumer struct {
 	workerN   int
 	batchSize int
 	backOff   []time.Duration // NAK delay schedule; mirrors consumer BackOff config
+
+	// Observability (set by main after otel.Init; all nil-safe). stream/consumerName
+	// label the metrics; instruments records processed-count + duration; dedup counts
+	// idempotency discards (#137).
+	stream       string
+	consumerName string
+	instruments  *natsx.MsgInstruments
+	dedup        metric.Int64Counter
 }
 
 // logger returns c.log if set, otherwise slog.Default().
@@ -136,7 +146,9 @@ func (c *Consumer) Run(ctx context.Context) error {
 			}
 			go func(m *nats.Msg) {
 				defer func() { <-sem }()
-				c.handle(m)
+				c.instruments.Observe(ctx, c.stream, c.consumerName, func() string {
+					return c.handle(m)
+				})
 			}(msg)
 		}
 	}
@@ -144,12 +156,13 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 // handle processes a single message: checks idempotency, calls process, then acks/naks.
 // Structured log entries include correlationid and causationid from the CloudEvent payload.
-func (c *Consumer) handle(msg *nats.Msg) {
+// It returns the outcome label (natsx.Outcome*) for metric recording by the caller.
+func (c *Consumer) handle(msg *nats.Msg) string {
 	meta, err := msg.Metadata()
 	if err != nil {
 		c.logger().Error("engine: metadata error", slog.String("error", err.Error()))
 		_ = msg.Nak()
-		return
+		return natsx.OutcomeFailure
 	}
 
 	eventID := extractEventID(msg.Header, msg.Data, meta)
@@ -163,7 +176,7 @@ func (c *Consumer) handle(msg *nats.Msg) {
 			slog.String("error", err.Error()),
 		)
 		_ = msg.Nak()
-		return
+		return natsx.OutcomeFailure
 	}
 
 	switch result {
@@ -182,6 +195,7 @@ func (c *Consumer) handle(msg *nats.Msg) {
 			slog.String("subject", msg.Subject),
 		)
 		_ = msg.Ack()
+		return natsx.OutcomeSuccess
 
 	case resultNak:
 		c.audit.Record(correlationID, causationID, "event.failed", msg.Subject, "failure")
@@ -190,11 +204,18 @@ func (c *Consumer) handle(msg *nats.Msg) {
 		} else {
 			_ = msg.Nak() // final attempt: no delay, let advisory fire promptly
 		}
+		return natsx.OutcomeFailure
 
 	case resultSkip:
 		c.audit.Record(correlationID, causationID, "event.discarded", msg.Subject, "duplicate")
+		if c.dedup != nil {
+			c.dedup.Add(context.Background(), 1, metric.WithAttributes(attribute.String("service", "engine")))
+		}
 		_ = msg.Ack() // ack duplicates to remove from pending
+		return natsx.OutcomeDuplicate
 	}
+
+	return natsx.OutcomeFailure // unreachable: decide returns one of the three results
 }
 
 // decide evaluates idempotency and calls the process function.
