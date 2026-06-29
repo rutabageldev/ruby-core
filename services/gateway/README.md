@@ -23,8 +23,14 @@ Fire `ruby_home_event` with the caller's payload wrapped under a `payload` key (
 | `calendar.event.delete` | `ha.events.calendar.event_delete` | calendar processor (Slice C) |
 | `ruby_home.childcare.provider.upsert` | `ha.events.ruby_home.childcare.provider_upsert` | overlay (Slice D) |
 | `ruby_home.childcare.provider.delete` | `ha.events.ruby_home.childcare.provider_delete` | overlay (Slice D) |
+| `ruby_home.directory.person.upsert` | `ha.events.ruby_home.directory.person_upsert` | overlay (#155 §3) |
+| `ruby_home.directory.person.delete` | `ha.events.ruby_home.directory.person_delete` | overlay (#155 §3) |
 
 Example HA event data: `{"payload": {"event": "calendar.event.upsert", "summary": "Dentist", "start": {...}, "idempotency_key": "…"}}`. Full payload field contracts are in ROADMAP-0012.
+
+**Overlay upsert semantics (#155 §4a):** both `ruby_home.childcare.provider.upsert` and `ruby_home.directory.person.upsert` are **insert-or-update by the client-supplied `id`** (`ON CONFLICT (id) DO UPDATE`). A producer may generate a UUID, send it on the upsert, and attach it to a draft immediately — an unknown id inserts rather than no-ops. A directory person upsert is a **full record** (HA owns the person model and sends the whole object); a childcare provider upsert likewise carries the full provider.
+
+**Calendar edit/delete scope (#155 §2, ADR-0044):** calendar upsert/delete carry an optional `scope` — `all` (default; the whole series or a single event) or `this` (one occurrence, addressed by `recurring_event_id` + `original_start`). `this` writes a Google instance override (edit) or cancels the occurrence (delete). `this_and_following` is **not yet supported** — the engine logs and ignores it; consumers should withhold that option. Calendar **updates are patch-merge** (Google `events.patch`): fields omitted from the payload — notably `recurrence` — are preserved, so editing one field of a recurring event never strips its RRULE.
 
 Calendar creates are made idempotent at Google via a deterministic event id derived from `idempotency_key` (ADR-0042). The HA producer **SHOULD** supply a unique-per-action `idempotency_key`; if it doesn't, the gateway derives one from the stable content fields so a re-published create cannot double-insert (#138). Supplying your own key is preferred when two same-time/same-summary events could be legitimately distinct.
 

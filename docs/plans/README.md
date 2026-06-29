@@ -43,5 +43,6 @@ Active plans below are hand-maintained. The **Archived** table is generated from
 | [0035](archived/PLAN-0035-calendar-issue-cleanup.md) | Calendar Issue Cleanup | Complete |
 | [0036](archived/PLAN-0036-docs-index-hygiene.md) | Docs / Index Hygiene | Complete |
 | [0037](archived/PLAN-0037-nats-resilience.md) | Production NATS-Resilience Hardening | Complete |
+| [0038](archived/PLAN-0038-rh-calendar-consumer-parity.md) | rh-calendar Consumer Parity (#155) | Complete |
 
 <!-- END archived -->

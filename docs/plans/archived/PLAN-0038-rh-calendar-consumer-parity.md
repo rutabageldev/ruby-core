@@ -1,6 +1,6 @@
 # PLAN-0038 — rh-calendar Consumer Parity (#155)
 
-* **Status:** Approved
+* **Status:** Complete (2026-06-29 — §4b/§1/§3/§2 shipped; §2 this_and_following + recurrence-clearing deferred per ADR-0044)
 * **Date:** 2026-06-29
 * **Project:** ruby-core
 * **Roadmap Item:** follow-on to [ROADMAP-0012](../roadmap/archived/ROADMAP-0012-home-calendar-api-foundation.md) (Home Calendar + API Foundation, complete)
