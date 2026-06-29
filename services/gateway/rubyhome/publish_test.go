@@ -68,3 +68,53 @@ func TestPublishMissingEventField(t *testing.T) {
 		t.Fatal("expected error for missing event field, got nil")
 	}
 }
+
+// TestEnsureCalendarIdempotencyKey covers the #138 fix: a calendar create with no
+// idempotency_key gets a deterministic content-derived one (stable across re-publishes);
+// an HA-supplied key is preserved; non-upsert events are untouched.
+func TestEnsureCalendarIdempotencyKey(t *testing.T) {
+	upsert := func() map[string]any {
+		return map[string]any{
+			"event":   "calendar.event.upsert",
+			"summary": "Dentist",
+			"start":   map[string]any{"datetime": "2026-06-30T09:00:00-04:00", "timezone": "America/New_York"},
+			"end":     map[string]any{"datetime": "2026-06-30T09:30:00-04:00", "timezone": "America/New_York"},
+		}
+	}
+
+	// Absent → injected, deterministic across two equal payloads.
+	a, b := upsert(), upsert()
+	ensureCalendarIdempotencyKey("calendar.event.upsert", a)
+	ensureCalendarIdempotencyKey("calendar.event.upsert", b)
+	ka, _ := a["idempotency_key"].(string)
+	kb, _ := b["idempotency_key"].(string)
+	if ka == "" {
+		t.Fatal("expected an injected idempotency_key")
+	}
+	if ka != kb {
+		t.Errorf("same content produced different keys: %q vs %q", ka, kb)
+	}
+
+	// Different content → different key.
+	c := upsert()
+	c["summary"] = "Doctor"
+	ensureCalendarIdempotencyKey("calendar.event.upsert", c)
+	if c["idempotency_key"] == ka {
+		t.Error("different content produced the same key")
+	}
+
+	// HA-supplied key is preserved.
+	d := upsert()
+	d["idempotency_key"] = "ha-supplied-123"
+	ensureCalendarIdempotencyKey("calendar.event.upsert", d)
+	if d["idempotency_key"] != "ha-supplied-123" {
+		t.Errorf("HA-supplied key overwritten: %v", d["idempotency_key"])
+	}
+
+	// Non-upsert events are untouched.
+	del := map[string]any{"event": "calendar.event.delete", "google_event_id": "g1"}
+	ensureCalendarIdempotencyKey("calendar.event.delete", del)
+	if _, ok := del["idempotency_key"]; ok {
+		t.Error("delete event should not get an idempotency_key")
+	}
+}
