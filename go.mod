@@ -15,7 +15,9 @@ require (
 	github.com/ogen-go/ogen v1.22.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/teambition/rrule-go v1.8.2
+	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/nats v0.40.0
+	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
@@ -102,7 +104,6 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
-	github.com/testcontainers/testcontainers-go v0.40.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect

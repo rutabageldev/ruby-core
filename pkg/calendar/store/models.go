@@ -71,6 +71,13 @@ type EventSubject struct {
 	CreatedAt     pgtype.Timestamptz
 }
 
+type PersonEmail struct {
+	ID        pgtype.UUID
+	PersonID  pgtype.UUID
+	Email     string
+	CreatedAt pgtype.Timestamptz
+}
+
 type SyncState struct {
 	CalendarID       string
 	SyncToken        pgtype.Text

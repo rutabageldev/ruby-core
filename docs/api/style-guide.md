@@ -61,6 +61,20 @@ event, person, provider) — not `"string"`.
 - Enpoints return flat, sorted collections where a range is requested (calendar instances are
   expanded and sorted server-side).
 
+## Optional fields — omit, don't null
+
+An optional field that is conditionally present (e.g. `childcare` on a calendar instance) **MUST**
+be modeled as *omitted when absent*, never as an explicit `null`:
+
+- It is **not** in the schema's `required` list, and it does **not** carry `nullable: true`.
+- The Go server uses ogen's `OptString` / `OptInt` etc. (`oas.NewOptString(...)`) so the field is
+  simply absent from the JSON when there's no value.
+
+Rationale: it's cleaner for consumers (no null-checks), and — concretely — `nullable: true`
+currently crashes Spectral's nimma engine during `make openapi-lint` (#126), so an explicit-null
+tri-state is not expressible with the pinned toolchain anyway. Revisit only if a real tri-state is
+needed, on an OpenAPI 3.1 (`type: [string, "null"]`) + Spectral/ogen upgrade.
+
 ## Filtering & ranges
 
 - The calendar read endpoint takes explicit `start` and `end` query parameters (RFC 3339) and
