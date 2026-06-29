@@ -124,10 +124,12 @@ type fakeStore struct {
 	upserts     int
 	fullResyncs int
 
-	providers []*store.UpsertProviderParams
-	archived  []pgtype.UUID
-	subjects  map[string][]pgtype.UUID
-	childcare map[string]pgtype.UUID
+	providers   []*store.UpsertProviderParams
+	archived    []pgtype.UUID
+	people      []*store.UpsertPersonParams
+	deactivated []pgtype.UUID
+	subjects    map[string][]pgtype.UUID
+	childcare   map[string]pgtype.UUID
 }
 
 func newFakeStore() *fakeStore {
@@ -144,6 +146,14 @@ func (s *fakeStore) UpsertProvider(_ context.Context, arg *store.UpsertProviderP
 }
 func (s *fakeStore) ArchiveProvider(_ context.Context, id pgtype.UUID) error {
 	s.archived = append(s.archived, id)
+	return nil
+}
+func (s *fakeStore) UpsertPerson(_ context.Context, arg *store.UpsertPersonParams) error {
+	s.people = append(s.people, arg)
+	return nil
+}
+func (s *fakeStore) DeactivatePerson(_ context.Context, id pgtype.UUID) error {
+	s.deactivated = append(s.deactivated, id)
 	return nil
 }
 func (s *fakeStore) DeleteEventSubjects(_ context.Context, eid string) error {
@@ -601,5 +611,59 @@ func googleTimed(id, etag string) *calendarv3.Event {
 		Id: id, Etag: etag, Status: "confirmed",
 		Start: &calendarv3.EventDateTime{DateTime: "2026-06-26T09:00:00-04:00"},
 		End:   &calendarv3.EventDateTime{DateTime: "2026-06-26T10:00:00-04:00"},
+	}
+}
+
+// TestHandlePersonUpsert_GeneratesIDAndDefaultsKind covers #155 §3 create: an absent id is
+// generated, kind defaults to "person", and the full record is upserted.
+func TestHandlePersonUpsert_GeneratesIDAndDefaultsKind(t *testing.T) {
+	p, _, st := newTestProcessor()
+	evt := cloudEvent(t, schemas.DirectoryPersonUpsertData{DisplayName: "Junior", Color: "#ff0", Email: "junior@example.com"})
+	if err := p.handlePersonUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("person upsert: %v", err)
+	}
+	if len(st.people) != 1 {
+		t.Fatalf("people recorded = %d, want 1", len(st.people))
+	}
+	got := st.people[0]
+	if !got.ID.Valid {
+		t.Error("expected a generated person id")
+	}
+	if got.DisplayName != "Junior" || got.Kind != "person" || !got.Active {
+		t.Errorf("person = %+v, want display=Junior kind=person active=true", got)
+	}
+	if got.Color.String != "#ff0" || got.Email.String != "junior@example.com" {
+		t.Errorf("color/email not mapped: %+v", got)
+	}
+}
+
+// TestHandlePersonUpsert_UpdatesByID covers rename: a supplied id is preserved (update path).
+func TestHandlePersonUpsert_UpdatesByID(t *testing.T) {
+	p, _, st := newTestProcessor()
+	const id = "11111111-1111-4111-8111-111111111111"
+	evt := cloudEvent(t, schemas.DirectoryPersonUpsertData{ID: id, DisplayName: "Renamed", Kind: "group"})
+	if err := p.handlePersonUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("person upsert: %v", err)
+	}
+	if len(st.people) != 1 || st.people[0].Kind != "group" {
+		t.Fatalf("expected one upsert with kind=group, got %+v", st.people)
+	}
+	var want pgtype.UUID
+	_ = want.Scan(id)
+	if st.people[0].ID != want {
+		t.Errorf("id = %v, want supplied %s", st.people[0].ID, id)
+	}
+}
+
+// TestHandlePersonDelete_Deactivates covers soft-delete by id.
+func TestHandlePersonDelete_Deactivates(t *testing.T) {
+	p, _, st := newTestProcessor()
+	const id = "22222222-2222-4222-8222-222222222222"
+	evt := cloudEvent(t, schemas.DirectoryPersonDeleteData{ID: id})
+	if err := p.handlePersonDelete(context.Background(), evt); err != nil {
+		t.Fatalf("person delete: %v", err)
+	}
+	if len(st.deactivated) != 1 {
+		t.Fatalf("deactivated = %d, want 1", len(st.deactivated))
 	}
 }

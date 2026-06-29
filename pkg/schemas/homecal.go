@@ -14,6 +14,10 @@ const (
 	HomeEventChildcareProviderUpsert = "ha.events.ruby_home.childcare.provider_upsert"
 	HomeEventChildcareProviderDelete = "ha.events.ruby_home.childcare.provider_delete"
 
+	// Household-overlay directory person events (#155 §3): add/rename/deactivate people.
+	HomeEventDirectoryPersonUpsert = "ha.events.ruby_home.directory.person_upsert"
+	HomeEventDirectoryPersonDelete = "ha.events.ruby_home.directory.person_delete"
+
 	// CalendarReminderDue is published by the engine when an event reminder fires.
 	HomeEventCalendarReminderDue = "ha.events.calendar.reminder_due"
 )
@@ -65,5 +69,25 @@ type ChildcareProviderUpsertData struct {
 // ChildcareProviderDeleteData is the payload of ruby_home.childcare.provider.delete
 // (delete = archive, preserving frequency history).
 type ChildcareProviderDeleteData struct {
+	ID string `json:"id"`
+}
+
+// DirectoryPersonUpsertData is the payload of ruby_home.directory.person.upsert
+// (create when ID absent, else update by id — #155 §3). Local overlay only. Unlike
+// calendar events, a person upsert is a full record: the consumer (HA) sends the whole
+// person object, so omitted fields are written as their zero/empty value.
+type DirectoryPersonUpsertData struct {
+	ID               string `json:"id,omitempty"`
+	DisplayName      string `json:"display_name"`
+	Kind             string `json:"kind,omitempty"`                // "person" (default) | "group"
+	Email            string `json:"email,omitempty"`               // primary address; reconciles attendees
+	Family           string `json:"family,omitempty"`              // optional family grouping
+	Color            string `json:"color,omitempty"`               // overlay colour
+	HAPersonEntityID string `json:"ha_person_entity_id,omitempty"` // links to an HA person entity
+}
+
+// DirectoryPersonDeleteData is the payload of ruby_home.directory.person.delete
+// (delete = deactivate; the row is retained so historical associations resolve).
+type DirectoryPersonDeleteData struct {
 	ID string `json:"id"`
 }

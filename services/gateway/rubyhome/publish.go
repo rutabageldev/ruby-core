@@ -29,6 +29,8 @@ var eventRoutes = map[string]string{
 	"calendar.event.delete":               schemas.HomeEventCalendarDelete,
 	"ruby_home.childcare.provider.upsert": schemas.HomeEventChildcareProviderUpsert,
 	"ruby_home.childcare.provider.delete": schemas.HomeEventChildcareProviderDelete,
+	"ruby_home.directory.person.upsert":   schemas.HomeEventDirectoryPersonUpsert,
+	"ruby_home.directory.person.delete":   schemas.HomeEventDirectoryPersonDelete,
 }
 
 // Publish wraps payload in a CloudEvent and publishes it to the ha.events.* subject

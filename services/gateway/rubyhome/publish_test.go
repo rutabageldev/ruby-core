@@ -21,6 +21,8 @@ func TestEventRoutes(t *testing.T) {
 		"calendar.event.delete":               schemas.HomeEventCalendarDelete,
 		"ruby_home.childcare.provider.upsert": schemas.HomeEventChildcareProviderUpsert,
 		"ruby_home.childcare.provider.delete": schemas.HomeEventChildcareProviderDelete,
+		"ruby_home.directory.person.upsert":   schemas.HomeEventDirectoryPersonUpsert,
+		"ruby_home.directory.person.delete":   schemas.HomeEventDirectoryPersonDelete,
 	}
 	if len(eventRoutes) != len(want) {
 		t.Fatalf("eventRoutes has %d entries, want %d", len(eventRoutes), len(want))
