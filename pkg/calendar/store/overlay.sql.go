@@ -21,6 +21,17 @@ func (q *Queries) ArchiveProvider(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const deactivatePerson = `-- name: DeactivatePerson :exec
+UPDATE directory_person SET active = false WHERE id = $1
+`
+
+// DeactivatePerson soft-deletes a person (#155 §3) — the row is retained so historical
+// event associations still resolve.
+func (q *Queries) DeactivatePerson(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deactivatePerson, id)
+	return err
+}
+
 const deleteEventChildcare = `-- name: DeleteEventChildcare :exec
 DELETE FROM event_childcare WHERE google_event_id = $1
 `

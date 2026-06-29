@@ -48,3 +48,4 @@ target after adding an ADR. See the individual ADRs for full context.
 | [0041](adr/0041-openapi-lifecycle-and-codegen-governance.md) | OpenAPI Lifecycle & Codegen Governance for the HTTP API | Accepted |
 | [0042](adr/0042-calendar-sync-architecture.md) | Calendar Sync Architecture: Google as Source of Record, Local Durable Mirror | Accepted |
 | [0043](adr/0043-ada-boundary-based-today-rollover.md) | Ada boundary-based "Today" rollover (configurable bedtime, not UTC midnight) | Accepted |
+| [0044](adr/0044-calendar-write-semantics-patch-and-per-instance.md) | Calendar write semantics: patch-merge updates and per-instance recurring edits | Accepted |

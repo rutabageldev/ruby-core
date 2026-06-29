@@ -385,6 +385,21 @@ components:
         description:
           type: string
           description: Free-text description, when set.
+        etag:
+          type: string
+          description: Mirror etag of the source row (trimmed of Google's surrounding quotes); supply as If-Match on updates.
+        recurrence:
+          type: array
+          items:
+            type: string
+          description: Raw RRULE/EXDATE/RDATE lines of the series master when this instance comes from a recurring event; empty for single events.
+        recurring_event_id:
+          type: string
+          description: Google event id of the series master when this instance belongs to a recurring series; omitted for single events.
+        original_start:
+          type: string
+          format: date-time
+          description: The series occurrence this instance corresponds to (RFC 3339 UTC) — set for recurring/override instances; addresses a single occurrence in per-instance writes.
         subjects:
           type: array
           items:

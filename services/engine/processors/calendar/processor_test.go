@@ -25,7 +25,10 @@ import (
 
 type fakeGCal struct {
 	events            map[string]*calendarv3.Event
+	instances         map[string]string // "recurringEventID|originalStart" -> instance event id
 	inserts, updates  int
+	patches           int
+	lastPatch         *calendarv3.Event // event arg of the most recent Patch
 	deletes, gets     int
 	nextID            int
 	failNextUpdate412 bool
@@ -33,7 +36,9 @@ type fakeGCal struct {
 	listIdx           int
 }
 
-func newFakeGCal() *fakeGCal { return &fakeGCal{events: map[string]*calendarv3.Event{}} }
+func newFakeGCal() *fakeGCal {
+	return &fakeGCal{events: map[string]*calendarv3.Event{}, instances: map[string]string{}}
+}
 
 func (f *fakeGCal) Get(_ context.Context, _, id string) (*calendarv3.Event, error) {
 	f.gets++
@@ -75,6 +80,41 @@ func (f *fakeGCal) Update(_ context.Context, _, id, _ string, ev *calendarv3.Eve
 	return &out, nil
 }
 
+func (f *fakeGCal) Patch(_ context.Context, _, id, _ string, ev *calendarv3.Event) (*calendarv3.Event, error) {
+	if f.failNextUpdate412 {
+		f.failNextUpdate412 = false
+		return nil, gcal.ErrConflict
+	}
+	f.patches++
+	f.lastPatch = ev
+	// Patch merges: preserve fields the caller omitted (nil) from the stored event.
+	out := *ev
+	if cur, ok := f.events[id]; ok {
+		if out.Recurrence == nil {
+			out.Recurrence = cur.Recurrence
+		}
+		if out.Summary == "" {
+			out.Summary = cur.Summary
+		}
+	}
+	out.Id = id
+	out.Etag = `"etag-patched"`
+	f.events[id] = &out
+	return &out, nil
+}
+
+func (f *fakeGCal) InstanceAt(_ context.Context, _, recurringEventID, originalStart string) (*calendarv3.Event, error) {
+	id, ok := f.instances[recurringEventID+"|"+originalStart]
+	if !ok {
+		return nil, gcal.ErrAlreadyGone
+	}
+	ev, ok := f.events[id]
+	if !ok {
+		return nil, gcal.ErrAlreadyGone
+	}
+	return ev, nil
+}
+
 func (f *fakeGCal) Delete(_ context.Context, _, id string) error {
 	f.deletes++
 	if _, ok := f.events[id]; !ok {
@@ -99,10 +139,12 @@ type fakeStore struct {
 	upserts     int
 	fullResyncs int
 
-	providers []*store.UpsertProviderParams
-	archived  []pgtype.UUID
-	subjects  map[string][]pgtype.UUID
-	childcare map[string]pgtype.UUID
+	providers   []*store.UpsertProviderParams
+	archived    []pgtype.UUID
+	people      []*store.UpsertPersonParams
+	deactivated []pgtype.UUID
+	subjects    map[string][]pgtype.UUID
+	childcare   map[string]pgtype.UUID
 }
 
 func newFakeStore() *fakeStore {
@@ -119,6 +161,14 @@ func (s *fakeStore) UpsertProvider(_ context.Context, arg *store.UpsertProviderP
 }
 func (s *fakeStore) ArchiveProvider(_ context.Context, id pgtype.UUID) error {
 	s.archived = append(s.archived, id)
+	return nil
+}
+func (s *fakeStore) UpsertPerson(_ context.Context, arg *store.UpsertPersonParams) error {
+	s.people = append(s.people, arg)
+	return nil
+}
+func (s *fakeStore) DeactivatePerson(_ context.Context, id pgtype.UUID) error {
+	s.deactivated = append(s.deactivated, id)
 	return nil
 }
 func (s *fakeStore) DeleteEventSubjects(_ context.Context, eid string) error {
@@ -329,8 +379,41 @@ func TestHandleUpsert_Update412ResyncsAndRetries(t *testing.T) {
 	if g.gets != 1 {
 		t.Errorf("expected 1 resync Get after 412, got %d", g.gets)
 	}
-	if g.updates != 1 {
-		t.Errorf("expected 1 successful update after retry, got %d", g.updates)
+	if g.patches != 1 {
+		t.Errorf("expected 1 successful patch after retry, got %d", g.patches)
+	}
+}
+
+// TestHandleUpsert_UpdatePreservesOmittedRecurrence is the ADR-0044 §4b guarantee: editing a
+// field of a recurring event while omitting recurrence must NOT strip the series. The update
+// path goes through events.patch, and the patched event carries no recurrence (so Google
+// preserves it) — the legacy events.update full-replace would have cleared it.
+func TestHandleUpsert_UpdatePreservesOmittedRecurrence(t *testing.T) {
+	p, g, st := newTestProcessor()
+	start, end := timedEvent(t)
+	rrule := []string{"RRULE:FREQ=WEEKLY;BYDAY=MO"}
+	g.events["g1"] = &calendarv3.Event{
+		Id: "g1", Etag: `"fresh"`, Summary: "Standup", Recurrence: rrule,
+		Start: &calendarv3.EventDateTime{DateTime: "2026-06-22T09:00:00-04:00"},
+		End:   &calendarv3.EventDateTime{DateTime: "2026-06-22T10:00:00-04:00"},
+	}
+	st.events["g1"] = &store.CalendarEvent{GoogleEventID: "g1", Etag: "fresh"}
+
+	// Edit only the summary; recurrence omitted (HA's "untouched" contract).
+	evt := cloudEvent(t, schemas.CalendarUpsertData{
+		GoogleEventID: "g1", Summary: "Standup (moved)", Start: start, End: end, Etag: "fresh",
+	})
+	if err := p.handleUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if g.patches != 1 || g.updates != 0 {
+		t.Fatalf("expected exactly 1 patch and 0 updates, got patches=%d updates=%d", g.patches, g.updates)
+	}
+	if len(g.lastPatch.Recurrence) != 0 {
+		t.Errorf("patch must omit recurrence so Google preserves it, got %v", g.lastPatch.Recurrence)
+	}
+	if got := g.events["g1"].Recurrence; len(got) != 1 || got[0] != rrule[0] {
+		t.Errorf("series recurrence not preserved after edit: %v", got)
 	}
 }
 
@@ -543,5 +626,125 @@ func googleTimed(id, etag string) *calendarv3.Event {
 		Id: id, Etag: etag, Status: "confirmed",
 		Start: &calendarv3.EventDateTime{DateTime: "2026-06-26T09:00:00-04:00"},
 		End:   &calendarv3.EventDateTime{DateTime: "2026-06-26T10:00:00-04:00"},
+	}
+}
+
+// TestHandlePersonUpsert_GeneratesIDAndDefaultsKind covers #155 §3 create: an absent id is
+// generated, kind defaults to "person", and the full record is upserted.
+func TestHandlePersonUpsert_GeneratesIDAndDefaultsKind(t *testing.T) {
+	p, _, st := newTestProcessor()
+	evt := cloudEvent(t, schemas.DirectoryPersonUpsertData{DisplayName: "Junior", Color: "#ff0", Email: "junior@example.com"})
+	if err := p.handlePersonUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("person upsert: %v", err)
+	}
+	if len(st.people) != 1 {
+		t.Fatalf("people recorded = %d, want 1", len(st.people))
+	}
+	got := st.people[0]
+	if !got.ID.Valid {
+		t.Error("expected a generated person id")
+	}
+	if got.DisplayName != "Junior" || got.Kind != "person" || !got.Active {
+		t.Errorf("person = %+v, want display=Junior kind=person active=true", got)
+	}
+	if got.Color.String != "#ff0" || got.Email.String != "junior@example.com" {
+		t.Errorf("color/email not mapped: %+v", got)
+	}
+}
+
+// TestHandlePersonUpsert_UpdatesByID covers rename: a supplied id is preserved (update path).
+func TestHandlePersonUpsert_UpdatesByID(t *testing.T) {
+	p, _, st := newTestProcessor()
+	const id = "11111111-1111-4111-8111-111111111111"
+	evt := cloudEvent(t, schemas.DirectoryPersonUpsertData{ID: id, DisplayName: "Renamed", Kind: "group"})
+	if err := p.handlePersonUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("person upsert: %v", err)
+	}
+	if len(st.people) != 1 || st.people[0].Kind != "group" {
+		t.Fatalf("expected one upsert with kind=group, got %+v", st.people)
+	}
+	var want pgtype.UUID
+	_ = want.Scan(id)
+	if st.people[0].ID != want {
+		t.Errorf("id = %v, want supplied %s", st.people[0].ID, id)
+	}
+}
+
+// TestHandlePersonDelete_Deactivates covers soft-delete by id.
+func TestHandlePersonDelete_Deactivates(t *testing.T) {
+	p, _, st := newTestProcessor()
+	const id = "22222222-2222-4222-8222-222222222222"
+	evt := cloudEvent(t, schemas.DirectoryPersonDeleteData{ID: id})
+	if err := p.handlePersonDelete(context.Background(), evt); err != nil {
+		t.Fatalf("person delete: %v", err)
+	}
+	if len(st.deactivated) != 1 {
+		t.Fatalf("deactivated = %d, want 1", len(st.deactivated))
+	}
+}
+
+// TestHandleUpsert_PerInstanceEditPatchesInstance covers ADR-0044 §2: Scope=this resolves
+// the occurrence and patches the instance's own id (an override), never the master.
+func TestHandleUpsert_PerInstanceEditPatchesInstance(t *testing.T) {
+	p, g, st := newTestProcessor()
+	start, end := timedEvent(t)
+	// Seed the resolvable instance.
+	g.events["g1_20260622"] = &calendarv3.Event{Id: "g1_20260622", Etag: `"inst-etag"`}
+	g.instances["g1|2026-06-22T13:00:00Z"] = "g1_20260622"
+
+	evt := cloudEvent(t, schemas.CalendarUpsertData{
+		Scope: schemas.ScopeThis, RecurringEventID: "g1", OriginalStart: "2026-06-22T13:00:00Z",
+		Summary: "Just this one", Start: start, End: end,
+	})
+	if err := p.handleUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("per-instance edit: %v", err)
+	}
+	if g.patches != 1 {
+		t.Fatalf("expected 1 instance patch, got %d", g.patches)
+	}
+	if g.lastPatch.Recurrence != nil {
+		t.Errorf("an override instance must not carry recurrence, got %v", g.lastPatch.Recurrence)
+	}
+	if st.upserts == 0 {
+		t.Error("expected the override to be mirrored")
+	}
+}
+
+// TestHandleDelete_PerInstanceCancelsOccurrence covers ADR-0044 §2 delete: Scope=this
+// cancels the resolved instance (status=cancelled), not the series.
+func TestHandleDelete_PerInstanceCancelsOccurrence(t *testing.T) {
+	p, g, _ := newTestProcessor()
+	g.events["g1_20260622"] = &calendarv3.Event{Id: "g1_20260622", Etag: `"inst-etag"`}
+	g.instances["g1|2026-06-22T13:00:00Z"] = "g1_20260622"
+
+	evt := cloudEvent(t, schemas.CalendarDeleteData{
+		Scope: schemas.ScopeThis, RecurringEventID: "g1", OriginalStart: "2026-06-22T13:00:00Z",
+	})
+	if err := p.handleDelete(context.Background(), evt); err != nil {
+		t.Fatalf("per-instance delete: %v", err)
+	}
+	if g.patches != 1 || g.deletes != 0 {
+		t.Fatalf("expected 1 cancel-patch and 0 series deletes, got patches=%d deletes=%d", g.patches, g.deletes)
+	}
+	if g.lastPatch.Status != "cancelled" {
+		t.Errorf("instance status = %q, want cancelled", g.lastPatch.Status)
+	}
+}
+
+// TestHandleUpsert_ThisAndFollowingIsIgnored covers ADR-0044 obligation 5: the deferred
+// scope is a no-op (not silently downgraded), touching neither Google nor the mirror.
+func TestHandleUpsert_ThisAndFollowingIsIgnored(t *testing.T) {
+	p, g, st := newTestProcessor()
+	start, end := timedEvent(t)
+	evt := cloudEvent(t, schemas.CalendarUpsertData{
+		Scope: schemas.ScopeThisAndFollowing, RecurringEventID: "g1", OriginalStart: "2026-06-22T13:00:00Z",
+		Summary: "nope", Start: start, End: end,
+	})
+	if err := p.handleUpsert(context.Background(), evt); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if g.patches != 0 || g.inserts != 0 || g.updates != 0 || st.upserts != 0 {
+		t.Errorf("this_and_following must be a no-op, got patches=%d inserts=%d updates=%d upserts=%d",
+			g.patches, g.inserts, g.updates, st.upserts)
 	}
 }

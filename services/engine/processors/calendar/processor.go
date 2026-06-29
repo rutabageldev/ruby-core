@@ -54,6 +54,8 @@ type calStore interface {
 	// Overlay writes (Slice D).
 	UpsertProvider(ctx context.Context, arg *store.UpsertProviderParams) error
 	ArchiveProvider(ctx context.Context, id pgtype.UUID) error
+	UpsertPerson(ctx context.Context, arg *store.UpsertPersonParams) error
+	DeactivatePerson(ctx context.Context, id pgtype.UUID) error
 	DeleteEventSubjects(ctx context.Context, googleEventID string) error
 	InsertEventSubject(ctx context.Context, arg *store.InsertEventSubjectParams) error
 	DeleteEventChildcare(ctx context.Context, googleEventID string) error
@@ -95,6 +97,8 @@ func (p *Processor) Subscriptions() []string {
 		schemas.HomeEventCalendarDelete,
 		schemas.HomeEventChildcareProviderUpsert,
 		schemas.HomeEventChildcareProviderDelete,
+		schemas.HomeEventDirectoryPersonUpsert,
+		schemas.HomeEventDirectoryPersonDelete,
 	}
 }
 
@@ -194,6 +198,10 @@ func (p *Processor) ProcessEvent(ctx context.Context, subject string, data []byt
 		return p.handleProviderUpsert(ctx, &evt)
 	case schemas.HomeEventChildcareProviderDelete:
 		return p.handleProviderDelete(ctx, &evt)
+	case schemas.HomeEventDirectoryPersonUpsert:
+		return p.handlePersonUpsert(ctx, &evt)
+	case schemas.HomeEventDirectoryPersonDelete:
+		return p.handlePersonDelete(ctx, &evt)
 	default:
 		return nil
 	}

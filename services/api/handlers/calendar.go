@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	rubycal "github.com/primaryrutabaga/ruby-core/pkg/calendar"
 	"github.com/primaryrutabaga/ruby-core/pkg/calendar/expand"
@@ -209,6 +210,42 @@ func toAPIInstance(in expand.Instance, row *store.CalendarEvent) oas.CalendarIns
 		if row.Description.Valid {
 			ci.Description = oas.NewOptString(row.Description.String)
 		}
+		if row.Etag != "" {
+			ci.Etag = oas.NewOptString(row.Etag)
+		}
+		// recurrence (raw RRULE/EXDATE/RDATE) lives on the series master row.
+		if len(row.Recurrence) > 0 {
+			ci.Recurrence = row.Recurrence
+		}
+		// recurring_event_id: explicit on an override row; the master's own id for the
+		// occurrences it expands into (so the consumer can address the series).
+		switch {
+		case row.RecurringEventID.Valid && row.RecurringEventID.String != "":
+			ci.RecurringEventID = oas.NewOptString(row.RecurringEventID.String)
+		case len(row.Recurrence) > 0:
+			ci.RecurringEventID = oas.NewOptString(row.GoogleEventID)
+		}
+		// original_start identifies the occurrence for per-instance writes (§2): the
+		// override's pinned slot, else the occurrence's own scheduled start.
+		if os, ok := originalStart(in, row); ok {
+			ci.OriginalStart = oas.NewOptDateTime(os)
+		}
 	}
 	return ci
+}
+
+// originalStart returns the occurrence's original scheduled start and whether it applies:
+// an override's pinned slot (date or datetime), else the scheduled start of a recurring
+// occurrence. Single events have no original start.
+func originalStart(in expand.Instance, row *store.CalendarEvent) (time.Time, bool) {
+	switch {
+	case row.OriginalStartDatetime.Valid:
+		return row.OriginalStartDatetime.Time.UTC(), true
+	case row.OriginalStartDate.Valid:
+		return row.OriginalStartDate.Time.UTC(), true
+	case len(row.Recurrence) > 0:
+		return in.Start, true
+	default:
+		return time.Time{}, false
+	}
 }

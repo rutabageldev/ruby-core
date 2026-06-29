@@ -63,6 +63,65 @@ func (p *Processor) handleProviderDelete(ctx context.Context, evt *schemas.Cloud
 	return nil
 }
 
+// handlePersonUpsert applies ruby_home.directory.person.upsert: create (no id) or update
+// a directory person by id (#155 §3). The payload is a full person record — HA owns the
+// person model and sends the whole object — so this is a straight upsert, not a merge.
+// Local overlay only; never written to Google.
+func (p *Processor) handlePersonUpsert(ctx context.Context, evt *schemas.CloudEvent) error {
+	var d schemas.DirectoryPersonUpsertData
+	if err := decodeData(evt.Data, &d); err != nil {
+		p.log.Warn("calendar: bad person upsert payload", slog.String("error", err.Error()))
+		return nil
+	}
+	if d.DisplayName == "" {
+		p.log.Warn("calendar: person upsert missing display_name")
+		return nil
+	}
+	id, err := uuidOrNew(d.ID)
+	if err != nil {
+		p.log.Warn("calendar: invalid person id", slog.String("id", d.ID), slog.String("error", err.Error()))
+		return nil
+	}
+	kind := d.Kind
+	if kind == "" {
+		kind = "person" // directory_person.kind CHECK default
+	}
+	if err := p.q.UpsertPerson(ctx, &store.UpsertPersonParams{
+		ID:               id,
+		DisplayName:      d.DisplayName,
+		Kind:             kind,
+		HaPersonEntityID: textVal(d.HAPersonEntityID),
+		Email:            textVal(d.Email),
+		Family:           textVal(d.Family),
+		Color:            textVal(d.Color),
+		Active:           true,
+	}); err != nil {
+		return fmt.Errorf("calendar: upsert person: %w", err)
+	}
+	p.log.Info("calendar: person upserted", slog.String("display_name", d.DisplayName))
+	return nil
+}
+
+// handlePersonDelete deactivates a person (soft-delete; the row is retained so historical
+// event associations still resolve).
+func (p *Processor) handlePersonDelete(ctx context.Context, evt *schemas.CloudEvent) error {
+	var d schemas.DirectoryPersonDeleteData
+	if err := decodeData(evt.Data, &d); err != nil {
+		p.log.Warn("calendar: bad person delete payload", slog.String("error", err.Error()))
+		return nil
+	}
+	id, err := parseUUID(d.ID)
+	if err != nil {
+		p.log.Warn("calendar: person delete invalid id", slog.String("id", d.ID))
+		return nil
+	}
+	if err := p.q.DeactivatePerson(ctx, id); err != nil {
+		return fmt.Errorf("calendar: deactivate person: %w", err)
+	}
+	p.log.Info("calendar: person deactivated", slog.String("id", d.ID))
+	return nil
+}
+
 // reconcileAssociations syncs an event's subject and childcare overlay rows to match
 // the upsert payload. A nil slice/pointer means "not provided" — leave unchanged; an
 // empty slice / explicit value means "set to this". Called after the mirror upsert.
@@ -144,4 +203,12 @@ func textPtr(s *string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: *s, Valid: true}
+}
+
+// textVal maps an optional string field to nullable text — empty becomes SQL NULL.
+func textVal(s string) pgtype.Text {
+	if s == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: s, Valid: true}
 }

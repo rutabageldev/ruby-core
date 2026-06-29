@@ -9,6 +9,11 @@ SELECT * FROM directory_person WHERE id = ANY(@ids::uuid[]);
 -- name: GetPersonByEmail :one
 SELECT * FROM directory_person WHERE lower(email) = lower(@email) LIMIT 1;
 
+-- DeactivatePerson soft-deletes a person (#155 §3) — the row is retained so historical
+-- event associations still resolve.
+-- name: DeactivatePerson :exec
+UPDATE directory_person SET active = false WHERE id = @id;
+
 -- name: UpsertPerson :exec
 INSERT INTO directory_person (id, display_name, kind, ha_person_entity_id, email, family, color, active)
 VALUES (@id, @display_name, @kind, @ha_person_entity_id, @email, @family, @color, @active)
