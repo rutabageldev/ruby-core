@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.30.0](https://github.com/rutabageldev/ruby-core/compare/v0.29.0...v0.30.0) (2026-06-29)
+
+
+### Features
+
+* **api:** expose recurrence/etag/recurring_event_id/original_start on calendar instances ([#155](https://github.com/rutabageldev/ruby-core/issues/155) §1) ([a15cc3c](https://github.com/rutabageldev/ruby-core/commit/a15cc3c1d1bbb0060755ca932a4c78f145e2619b))
+* **calendar:** directory-person write route ([#155](https://github.com/rutabageldev/ruby-core/issues/155) §3) ([c67e5ad](https://github.com/rutabageldev/ruby-core/commit/c67e5ad2ec2b11e9bf59cd94c338386e6e7a9cc9))
+* **calendar:** per-instance recurring edit + delete (ADR-0044 §2, [#155](https://github.com/rutabageldev/ruby-core/issues/155)) ([78ccd4e](https://github.com/rutabageldev/ruby-core/commit/78ccd4e787718b140548dc76ca7203b249b6b586))
+* **calendar:** rh-calendar consumer parity — patch-merge, read fields, directory route, per-instance edits ([#155](https://github.com/rutabageldev/ruby-core/issues/155)) ([ac95256](https://github.com/rutabageldev/ruby-core/commit/ac95256e6e2c866ae03c0e5cc47dc733f2afffce))
+
+
+### Bug Fixes
+
+* **calendar:** update via events.patch to preserve omitted fields (ADR-0044 §4b, [#155](https://github.com/rutabageldev/ruby-core/issues/155)) ([1cdb28b](https://github.com/rutabageldev/ruby-core/commit/1cdb28bac9c560550c3566466d3c40128f77a310))
+
 ## [0.29.0](https://github.com/rutabageldev/ruby-core/compare/v0.28.0...v0.29.0) (2026-06-29)
 
 
