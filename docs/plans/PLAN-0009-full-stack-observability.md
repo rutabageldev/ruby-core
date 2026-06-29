@@ -337,3 +337,32 @@ Corrections applied during execution:
 * **#137 folded in** (mark-failure counter + KV-entries observable gauge registered in engine main).
   The existing `ada_boundary_crossings_total` direct-Prometheus counter is refactored to OTel
   (ADR-0004). **#31** closes as superseded-by-OTLP (no `/metrics` endpoint built).
+
+### Execution deviations + PR split (2026-06-29)
+
+* **Split into 2 PRs** (the plan's open-question option): **PR 1 = metrics + log correlation**
+  (`pkg/otel`, OTLP metric export from all 5 services, log-trace ID injection, compose wiring;
+  closes #31 + #137); **PR 2 = distributed traces** (spans, W3C propagation across NATS, the
+  cross-cutting `ctx` threading through the engine `process` path). PR 1 carries the
+  backlog-closing value at low risk; the invasive trace `ctx` change can't block it.
+* **Log bridge — rejected otelslog.** Step 3's literal otelslog OTLP bridge would re-route logs
+  off stdout, but the Foundation promtail scrapes container stdout into Loki and the
+  smoke/stability scripts grep `docker logs`. Instead the stdout JSON handler is **wrapped** to
+  stamp `trace_id`/`span_id` from the active span (`pkg/logging.traceHandler`). Correlation by
+  stamping IDs, not by changing the log transport.
+* **otel.Init ordering — supersedes the Step 7-vs-3 note above.** Because the custom handler
+  reads the span from the record's `context` at log time (not from a provider bound at
+  construction), `otel.Init` does **not** need to precede `NewLogger`. It runs after
+  `slog.SetDefault`, before `LoadConfig`, and before `NewMsgInstruments` (which needs the live
+  MeterProvider). The package import is aliased `rubyotel` to avoid colliding with the SDK `otel`.
+* **Per-service counters re-scoped (Step 8).** Only counters that add information beyond the
+  shared `ruby_core_messages_processed_total{service,outcome}` were built (gateway events +
+  reconnects, engine DLQ-forwarded, presence state-published). audit-sink archived/write-failures
+  and notifier sent/duration were **omitted as redundant** with the shared metric. Spans are
+  deferred to PR 2.
+* **Staging telemetry labeling.** Staging runs `ENVIRONMENT=production` (to exercise prod code
+  paths), which would mislabel its ephemeral smoke-test telemetry as production. Added an
+  `OTEL_DEPLOYMENT_ENVIRONMENT` override (preferred over `ENVIRONMENT` in `otel.Init`); staging
+  compose sets it to `staging`.
+* **Plan stays In Progress** until PR 2 lands — it is archived as the final commit of PR 2, not
+  PR 1. PR-1 verification: `docs/ops/phase9-verification.md`.
