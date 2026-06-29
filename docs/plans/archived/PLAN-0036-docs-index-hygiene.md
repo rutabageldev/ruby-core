@@ -1,6 +1,6 @@
 # PLAN-0036 - Docs / Index Hygiene
 
-* **Status:** In Progress
+* **Status:** Complete
 * **Date:** 2026-06-29
 * **Project:** ruby-core
 * **Roadmap Item:** none (drift cleanup)
@@ -90,3 +90,13 @@ revert. Generated indexes can be regenerated at any time with `make docs-index`.
 ## Open Questions
 
 None. (Decisions: durable generator approach; I edit the global file for #118 — both confirmed.)
+
+---
+
+## Completion Notes (2026-06-29)
+
+Done on `docs/index-hygiene`; markdownlint + shellcheck clean. Commits: `4c1586e` (ADR-0043),
+`f1c7758` (generator `scripts/gen-docs-indexes.sh` + `make docs-index` + regenerated
+ARCHITECTURE_DECISIONS.md/plans-README). The generator is idempotent and its output is
+markdownlint-clean, so the indexes can't re-stale. #118 fixed directly in the global
+`~/.claude/CLAUDE.md` (both `archive/` → `archived/`) and closed. PR closes #115/#116/#32.
