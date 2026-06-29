@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.29.0](https://github.com/rutabageldev/ruby-core/compare/v0.28.0...v0.29.0) (2026-06-29)
+
+
+### Features
+
+* **observability:** distributed traces — W3C propagation + per-service spans (PLAN-0009 PR 2/2) ([5861b74](https://github.com/rutabageldev/ruby-core/commit/5861b7472d1b203b1acf72031e7863ca917e1647))
+* **otel:** gateway ha.ingest span + W3C inject on publish paths (PLAN-0009 traces 2/3) ([7a1b092](https://github.com/rutabageldev/ruby-core/commit/7a1b092a038c080ba2e86aa74eca0bda90236de7))
+* **otel:** NATS trace propagation + engine ctx threading (PLAN-0009 traces 1/3) ([d4171b3](https://github.com/rutabageldev/ruby-core/commit/d4171b32652bc21d2a3e33328cf9409013d69717))
+* **otel:** notify.send + presence.wifi_check leaf spans (PLAN-0009 traces 3/3) ([b65f98b](https://github.com/rutabageldev/ruby-core/commit/b65f98bd1d6e7faa9fd72a807e68d569d219e65e))
+
+
+### Bug Fixes
+
+* **lint:** suppress gosec G704 on configured HA REST calls (PLAN-0009 traces) ([ff740e9](https://github.com/rutabageldev/ruby-core/commit/ff740e98dec9b71628108d61e059267abadd296b))
+
 ## [0.28.0](https://github.com/rutabageldev/ruby-core/compare/v0.27.1...v0.28.0) (2026-06-29)
 
 
