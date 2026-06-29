@@ -39,7 +39,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := Publish(h.nc, raw, h.log); err != nil {
+	if err := Publish(r.Context(), h.nc, raw, h.log); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

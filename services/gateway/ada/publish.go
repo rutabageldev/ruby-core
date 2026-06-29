@@ -1,6 +1,7 @@
 package ada
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 
 	goNats "github.com/nats-io/nats.go"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 )
 
@@ -68,7 +70,7 @@ var eventRoutes = map[string]string{
 // Publish wraps payload in a CloudEvent and publishes to the appropriate
 // ha.events.ada.* NATS subject. Used by both the HTTP handler and the
 // gateway WebSocket ada_event handler.
-func Publish(nc *goNats.Conn, payload map[string]any, log *slog.Logger) error {
+func Publish(ctx context.Context, nc *goNats.Conn, payload map[string]any, log *slog.Logger) error {
 	eventType, _ := payload["event"].(string)
 	subject, ok := eventRoutes[eventType]
 	if !ok {
@@ -94,7 +96,7 @@ func Publish(nc *goNats.Conn, payload map[string]any, log *slog.Logger) error {
 		return fmt.Errorf("ada: marshal CloudEvent: %w", err)
 	}
 
-	if err := nc.Publish(subject, b); err != nil {
+	if err := natsx.PublishWithContext(ctx, nc, subject, b); err != nil {
 		return fmt.Errorf("ada: publish %s: %w", subject, err)
 	}
 
@@ -111,7 +113,7 @@ func Publish(nc *goNats.Conn, payload map[string]any, log *slog.Logger) error {
 // after querying HA — not routed through eventRoutes.
 // availableServices is the full list of mobile_app_* notify service names
 // discovered from HA, forwarded so the engine can populate the device picker.
-func PublishUsersSynced(nc *goNats.Conn, users []schemas.AdaHAUser, availableServices []string, log *slog.Logger) error {
+func PublishUsersSynced(ctx context.Context, nc *goNats.Conn, users []schemas.AdaHAUser, availableServices []string, log *slog.Logger) error {
 	subject := schemas.AdaEventUsersSynced
 	id := newID()
 	evt := schemas.CloudEvent{
@@ -132,7 +134,7 @@ func PublishUsersSynced(nc *goNats.Conn, users []schemas.AdaHAUser, availableSer
 	if err != nil {
 		return fmt.Errorf("ada: marshal users_synced: %w", err)
 	}
-	if err := nc.Publish(subject, b); err != nil {
+	if err := natsx.PublishWithContext(ctx, nc, subject, b); err != nil {
 		return fmt.Errorf("ada: publish users_synced: %w", err)
 	}
 	log.Info("ada: users_synced published", slog.Int("count", len(users)))

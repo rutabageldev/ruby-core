@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 )
 
@@ -40,7 +41,7 @@ func New(nc *goNats.Conn) *Publisher {
 //   - state:    the new entity state string, e.g. "home"
 //   - attrs:    the filtered attribute map (post lean projection)
 //   - lastChanged: the HA last_changed timestamp (RFC3339 UTC)
-func (p *Publisher) PublishHAEvent(entityID, state string, attrs map[string]any, lastChanged string) error {
+func (p *Publisher) PublishHAEvent(ctx context.Context, entityID, state string, attrs map[string]any, lastChanged string) error {
 	domain, entityName, err := splitEntityID(entityID)
 	if err != nil {
 		return err
@@ -74,11 +75,11 @@ func (p *Publisher) PublishHAEvent(entityID, state string, attrs map[string]any,
 	}
 
 	subject := fmt.Sprintf("ha.events.%s.%s", domain, entityName)
-	if err := p.nc.Publish(subject, payload); err != nil {
+	if err := natsx.PublishWithContext(ctx, p.nc, subject, payload); err != nil {
 		return err
 	}
 	if p.eventsReceived != nil {
-		p.eventsReceived.Add(context.Background(), 1, metric.WithAttributes(attribute.String("entity_domain", domain)))
+		p.eventsReceived.Add(ctx, 1, metric.WithAttributes(attribute.String("entity_domain", domain)))
 	}
 	return nil
 }

@@ -6,6 +6,7 @@
 package rubyhome
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,6 +17,7 @@ import (
 
 	goNats "github.com/nats-io/nats.go"
 
+	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 )
 
@@ -32,7 +34,7 @@ var eventRoutes = map[string]string{
 // Publish wraps payload in a CloudEvent and publishes it to the ha.events.* subject
 // derived from the payload "event" string. An unknown event is logged and returns
 // an error without publishing.
-func Publish(nc *goNats.Conn, payload map[string]any, log *slog.Logger) error {
+func Publish(ctx context.Context, nc *goNats.Conn, payload map[string]any, log *slog.Logger) error {
 	eventType, _ := payload["event"].(string)
 	subject, ok := eventRoutes[eventType]
 	if !ok {
@@ -60,7 +62,7 @@ func Publish(nc *goNats.Conn, payload map[string]any, log *slog.Logger) error {
 		return fmt.Errorf("ruby_home: marshal CloudEvent: %w", err)
 	}
 
-	if err := nc.Publish(subject, b); err != nil {
+	if err := natsx.PublishWithContext(ctx, nc, subject, b); err != nil {
 		return fmt.Errorf("ruby_home: publish %s: %w", subject, err)
 	}
 

@@ -13,13 +13,18 @@ import (
 	"github.com/gorilla/websocket"
 	goNats "github.com/nats-io/nats.go"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 	"github.com/primaryrutabaga/ruby-core/services/gateway/ada"
 	gatewayNats "github.com/primaryrutabaga/ruby-core/services/gateway/nats"
 	"github.com/primaryrutabaga/ruby-core/services/gateway/rubyhome"
 )
+
+// tracer opens the ha.ingest span; delegates to the global provider installed by otel.Init.
+var tracer = otel.Tracer("github.com/primaryrutabaga/ruby-core/services/gateway")
 
 // haWSMessage is a generic HA WebSocket protocol message envelope.
 type haWSMessage struct {
@@ -279,15 +284,22 @@ func (c *Client) runOnce(ctx context.Context) error {
 	}
 }
 
-// handleEvent routes an incoming HA WebSocket event by event_type.
+// handleEvent routes an incoming HA WebSocket event by event_type. It opens the root
+// ha.ingest span for the event; the span context flows to the NATS publish so the engine
+// (and notifier) continue the same distributed trace (PLAN-0009).
 func (c *Client) handleEvent(ctx context.Context, conn *websocket.Conn, nextID *int, ev *haEvent) error {
+	ctx, span := tracer.Start(ctx, "ha.ingest",
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(attribute.String("ha.event_type", ev.EventType)))
+	defer span.End()
+
 	switch ev.EventType {
 	case "ada_event":
 		return c.handleAdaEvent(ctx, conn, nextID, ev)
 	case "ruby_home_event":
-		return c.handleRubyHomeEvent(ev)
+		return c.handleRubyHomeEvent(ctx, ev)
 	default:
-		return c.handleStateChanged(ev)
+		return c.handleStateChanged(ctx, ev)
 	}
 }
 
@@ -295,7 +307,7 @@ func (c *Client) handleEvent(ctx context.Context, conn *websocket.Conn, nextID *
 // domain-neutral write path (ROADMAP-0012). Like ada_event, the HA script wraps the
 // caller's payload under a "payload" key; the NATS subject is derived from the
 // payload "event" string.
-func (c *Client) handleRubyHomeEvent(ev *haEvent) error {
+func (c *Client) handleRubyHomeEvent(ctx context.Context, ev *haEvent) error {
 	var wrapper struct {
 		Payload map[string]any `json:"payload"`
 	}
@@ -305,11 +317,11 @@ func (c *Client) handleRubyHomeEvent(ev *haEvent) error {
 	if wrapper.Payload == nil {
 		return fmt.Errorf("ha: ruby_home_event missing payload field")
 	}
-	return rubyhome.Publish(c.nc, wrapper.Payload, c.log)
+	return rubyhome.Publish(ctx, c.nc, wrapper.Payload, c.log)
 }
 
 // handleStateChanged processes a state_changed event from HA.
-func (c *Client) handleStateChanged(ev *haEvent) error {
+func (c *Client) handleStateChanged(ctx context.Context, ev *haEvent) error {
 	var data haEventData
 	if err := json.Unmarshal(ev.Data, &data); err != nil {
 		return fmt.Errorf("ha: unmarshal state_changed data: %w", err)
@@ -329,7 +341,7 @@ func (c *Client) handleStateChanged(ev *haEvent) error {
 	}
 
 	filtered := c.norm.Apply(domain, ns.Attributes)
-	if err := c.publisher.PublishHAEvent(ns.EntityID, ns.State, filtered, ns.LastChanged); err != nil {
+	if err := c.publisher.PublishHAEvent(ctx, ns.EntityID, ns.State, filtered, ns.LastChanged); err != nil {
 		return fmt.Errorf("publish event for %s: %w", ns.EntityID, err)
 	}
 
@@ -369,7 +381,7 @@ func (c *Client) handleAdaEvent(ctx context.Context, conn *websocket.Conn, nextI
 		return c.syncUsers(ctx, conn, id)
 	}
 
-	return ada.Publish(c.nc, wrapper.Payload, c.log)
+	return ada.Publish(ctx, c.nc, wrapper.Payload, c.log)
 }
 
 // syncUsers queries HA for all active users via the config/auth/list WebSocket
@@ -433,7 +445,7 @@ func (c *Client) syncUsers(ctx context.Context, conn *websocket.Conn, id int) er
 		})
 	}
 
-	return ada.PublishUsersSynced(c.nc, users, availableServices, c.log)
+	return ada.PublishUsersSynced(ctx, c.nc, users, availableServices, c.log)
 }
 
 // fetchMobileAppServices queries GET /api/services and returns all mobile_app_*
