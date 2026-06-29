@@ -66,10 +66,12 @@ echo "=== Deploying to production ==="
 echo "    Previous: ${PREV_VERSION}  →  Target: ${VERSION}"
 
 # ---------------------------------------------------------------------------
-# Pull images and start services.
+# Pull images, then start ONLY the NATS plane. The application services start
+# later — after NATS has reloaded the new CA (the SIGHUP step below) — otherwise
+# they race the reload and fail the mTLS handshake against the old ca.pem (#61).
 # ---------------------------------------------------------------------------
 docker compose -f "$PROD_COMPOSE" pull
-docker compose -f "$PROD_COMPOSE" up -d
+docker compose -f "$PROD_COMPOSE" up -d nats-init nats nats-cert-renewer
 
 # ---------------------------------------------------------------------------
 # Force-recreate nats-cert-renewer to pick up any post-render.sh changes.
@@ -96,6 +98,12 @@ docker wait ruby-core-prod-nats-init 2>/dev/null || true
 docker kill --signal=SIGHUP ruby-core-prod-nats
 
 # ---------------------------------------------------------------------------
+# Start the application services now that NATS trusts the reloaded CA (#61).
+# ---------------------------------------------------------------------------
+echo "=== Starting application services ==="
+docker compose -f "$PROD_COMPOSE" up -d
+
+# ---------------------------------------------------------------------------
 # Smoke test: confirm NATS → notifier → HA delivery chain.
 # ---------------------------------------------------------------------------
 echo "=== Running smoke test for ${VERSION} ==="
@@ -120,10 +128,12 @@ if [ "$PREV_VERSION" = "unknown" ]; then
 fi
 
 # Roll back by re-deploying with the old version tag (uses cached images; no pull).
-VERSION="$PREV_VERSION" docker compose -f "$PROD_COMPOSE" up -d
+# Same ordering as the forward deploy: NATS plane + CA reload before the app services (#61).
+VERSION="$PREV_VERSION" docker compose -f "$PROD_COMPOSE" up -d nats-init nats nats-cert-renewer
 VERSION="$PREV_VERSION" docker compose -f "$PROD_COMPOSE" up -d --force-recreate --no-deps nats-cert-renewer
 docker wait ruby-core-prod-nats-init 2>/dev/null || true
 docker kill --signal=SIGHUP ruby-core-prod-nats
+VERSION="$PREV_VERSION" docker compose -f "$PROD_COMPOSE" up -d
 
 echo "=== Running smoke test for rollback to ${PREV_VERSION} ==="
 FAILED_VERSION="$VERSION"  # capture before VERSION changes scope

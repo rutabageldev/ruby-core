@@ -233,8 +233,14 @@ func ConnectNATS(cfg Config, name, seed string, tlsMat *TLSMaterial) (*nats.Conn
 		opts = append(opts, nats.Secure(tlsCfg))
 	}
 
-	nc, err := nats.Connect(cfg.NATSUrl, opts...)
-	if err != nil {
+	opts = append(opts, resilienceOpts(slog.Default())...)
+
+	var nc *nats.Conn
+	if err := withRetryLabeled("nats", func() error {
+		var e error
+		nc, e = nats.Connect(cfg.NATSUrl, opts...)
+		return e
+	}); err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 	return nc, nil
@@ -432,7 +438,13 @@ func FetchGoogleConfig(addr, token, path string) (*GoogleConfig, error) {
 }
 
 // withRetry retries fn up to 3 times with exponential backoff (1s, 2s, 4s).
-func withRetry(fn func() error) error {
+func withRetry(fn func() error) error { return withRetryLabeled("vault", fn) }
+
+// withRetryLabeled retries fn with 1s/2s/4s backoff (4 attempts total), logging each
+// retry under the given label. The label keeps the retry log honest when the same helper
+// is reused for non-Vault dials (e.g. the NATS connect, #111) — the line is
+// operationally load-bearing during an outage.
+func withRetryLabeled(label string, fn func() error) error {
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
 	var err error
 	for i := 0; i <= len(delays); i++ {
@@ -441,7 +453,7 @@ func withRetry(fn func() error) error {
 			return nil
 		}
 		if i < len(delays) {
-			slog.Info("vault: retrying after error",
+			slog.Info(label+": retrying after error",
 				slog.Int("attempt", i+1),
 				slog.Int("max", len(delays)),
 				slog.String("error", err.Error()),
@@ -450,6 +462,31 @@ func withRetry(fn func() error) error {
 		}
 	}
 	return err
+}
+
+// resilienceOpts returns NATS connection options that let a service ride out a NATS
+// restart via auto-reconnect (#18) and log the connection lifecycle. MaxReconnects is
+// finite (NOT -1) on purpose: when reconnection is genuinely exhausted the connection
+// closes and fires each service's ClosedHandler, so the process exits and Docker restarts
+// it from a clean bootstrap. RetryOnFailedConnect is intentionally NOT set — startup dial
+// failures are retried explicitly by the caller (withRetryLabeled) so a down server is a
+// hard error rather than a silent background reconnect that breaks the later nc.JetStream().
+func resilienceOpts(log *slog.Logger) []nats.Option {
+	return []nats.Option{
+		nats.MaxReconnects(60),
+		nats.ReconnectWait(2 * time.Second),
+		nats.ReconnectJitter(500*time.Millisecond, 2*time.Second),
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			if err != nil {
+				log.Warn("nats: disconnected", slog.String("error", err.Error()))
+				return
+			}
+			log.Warn("nats: disconnected")
+		}),
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			log.Info("nats: reconnected", slog.String("url", nc.ConnectedUrl()))
+		}),
+	}
 }
 
 func envOrDefault(key, fallback string) string {

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
@@ -50,6 +51,10 @@ func main() {
 	}
 	defer nc.Close()
 	logger.Info("connected to NATS", slog.String("url", cfg.NATSUrl))
+
+	// Exit for a Docker restart if NATS is permanently lost (reconnects exhausted), #18.
+	var natsLost atomic.Bool
+	nc.SetClosedHandler(boot.OnNATSClosed(ctx, cancel, &natsLost, logger))
 
 	// Home Assistant ingestion gate. All environments share one Home Assistant,
 	// so only the production gateway may consume its event stream (state_changed
@@ -100,4 +105,7 @@ func main() {
 		httpAddr = ":8080"
 	}
 	gateway.Run(ctx, httpAddr)
+	if natsLost.Load() {
+		os.Exit(1)
+	}
 }

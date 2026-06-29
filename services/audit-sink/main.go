@@ -2,12 +2,11 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -61,6 +60,10 @@ func main() {
 	}
 	defer nc.Close()
 	logger.Info("connected to NATS", slog.String("url", cfg.NATSUrl))
+
+	// Exit for a Docker restart if NATS is permanently lost (reconnects exhausted), #18.
+	var natsLost atomic.Bool
+	nc.SetClosedHandler(boot.OnNATSClosed(ctx, cancel, &natsLost, logger))
 
 	js, err := nc.JetStream()
 	if err != nil {
@@ -132,6 +135,9 @@ func main() {
 		logger.Error("fetch loop exited with error", slog.String("error", err.Error()))
 	}
 	logger.Info("audit-sink stopped")
+	if natsLost.Load() {
+		os.Exit(1)
+	}
 }
 
 // runFetchLoop is the main message processing loop for the audit-sink.
@@ -150,15 +156,21 @@ func runFetchLoop(ctx context.Context, sub *nats.Subscription, writer *NDJSONWri
 
 		msgs, err := sub.Fetch(cfg.FetchBatch, nats.MaxWait(2*time.Second))
 		if err != nil {
-			if errors.Is(err, nats.ErrTimeout) {
-				continue
-			}
-			if errors.Is(err, context.Canceled) ||
-				errors.Is(err, nats.ErrConnectionClosed) ||
-				errors.Is(err, nats.ErrSubscriptionClosed) {
+			// Survive a NATS bounce (#18): exit only on ctx cancellation; treat every
+			// other fetch error as transient and resume after nats.go reconnects.
+			switch natsx.ClassifyFetchErr(err, ctx.Err()) {
+			case natsx.FetchStop:
 				return nil
+			case natsx.FetchBackoff:
+				logger.Warn("audit-sink: transient fetch error, retrying",
+					slog.String("error", err.Error()))
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.After(natsx.FetchRetryBackoff):
+				}
 			}
-			return fmt.Errorf("audit-sink: fetch: %w", err)
+			continue
 		}
 
 		for _, msg := range msgs {

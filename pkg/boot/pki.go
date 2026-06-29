@@ -336,9 +336,14 @@ func ConnectNATSDynamicTLS(cfg Config, name, seed string, holder *MaterialHolder
 		nats.Name(name),
 		nats.Secure(tlsCfg),
 	}
+	opts = append(opts, resilienceOpts(slog.Default())...)
 
-	nc, err := nats.Connect(cfg.NATSUrl, opts...)
-	if err != nil {
+	var nc *nats.Conn
+	if err := withRetryLabeled("nats", func() error {
+		var e error
+		nc, e = nats.Connect(cfg.NATSUrl, opts...)
+		return e
+	}); err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 	return nc, nil
