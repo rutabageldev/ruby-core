@@ -13,7 +13,8 @@
         docker-ps docker-images docker-volumes docker-clean \
         setup-creds setup-creds-force setup-staging-creds nats-validate \
         ada-db-snapshot ada-db-seed ada-db-clear-test \
-        openapi-bundle openapi-gen openapi-lint openapi-diff openapi-verify sqlc-gen
+        openapi-bundle openapi-gen openapi-lint openapi-diff openapi-verify sqlc-gen \
+        docs-index
 
 # Default target
 .DEFAULT_GOAL := help
@@ -120,6 +121,9 @@ OPENAPI_PY_CLIENT ?= openapi-python-client
 
 sqlc-gen: ## Regenerate sqlc code for the calendar store (pinned)
 	cd pkg/calendar/store && go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
+
+docs-index: ## Regenerate the ADR index + archived-plans table from docs/ (run after adding an ADR/plan)
+	./scripts/gen-docs-indexes.sh
 
 openapi-bundle: ## Bundle the OpenAPI fragments into api/openapi.gen.yaml
 	npx --yes @redocly/cli@$(REDOCLY_VERSION) bundle api/openapi/openapi.root.yaml -o api/openapi.gen.yaml
