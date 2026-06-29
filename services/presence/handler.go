@@ -316,6 +316,7 @@ func (h *handler) queryWifiState(ctx context.Context) (state string, err error) 
 	}
 	url := strings.TrimRight(h.haURL, "/") + "/api/states/" + h.cfg.WifiEntity
 
+	//nolint:gosec // G704: url host is the Vault-configured Home Assistant base; the path is the configured WiFi entity, not user-controlled.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)

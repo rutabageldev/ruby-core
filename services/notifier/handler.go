@@ -114,6 +114,7 @@ func (h *handler) sendNotification(ctx context.Context, subject, title, message,
 		return fmt.Errorf("notifier: marshal request: %w", err)
 	}
 
+	//nolint:gosec // G704: apiURL host is the Vault-configured Home Assistant base; the path is a fixed notify route, not user-controlled.
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("notifier: build request: %w", err)
