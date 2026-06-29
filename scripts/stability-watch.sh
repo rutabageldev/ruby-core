@@ -6,8 +6,9 @@
 # degradation or on clean completion. Does NOT auto-rollback in v1 — thresholds
 # need tuning against real signal before automated rollback is safe.
 #
-# Started via systemd-run --no-block from the release pipeline so it survives
-# GHA runner process-group cleanup. Logs go to the systemd journal.
+# Started via `nohup setsid` from the release pipeline so it survives GHA runner
+# process-group cleanup (a new detached session). Logs go to
+# /var/log/ruby-core/stability.log.
 #
 # Exit codes:
 #   0  stability window passed clean
@@ -25,7 +26,7 @@ SERVICES=(gateway engine notifier presence audit-sink)
 VAULT_ADDR="${VAULT_ADDR:-https://127.0.0.1:8200}"
 VAULT_CACERT="${VAULT_CACERT:-/opt/foundation/vault/tls/vault-ca.crt}"
 
-# VAULT_TOKEN may not be inherited when launched via systemd-run --user.
+# VAULT_TOKEN may not be inherited when launched detached via nohup setsid.
 # Fall back to the prod .env file so the script works in both contexts.
 if [ -z "${VAULT_TOKEN:-}" ]; then
   PROD_ENV="/opt/ruby-core/deploy/prod/.env"

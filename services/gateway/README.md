@@ -60,4 +60,4 @@ All secrets are fetched from Vault at startup. The service will not start if Vau
 
 **Engine config KV absent at startup** — gateway starts with a pass-all passlist (no filtering) and an empty critical entities list (no reconciliation). This is the safe default for startup ordering; it self-corrects once the engine has published its compiled config.
 
-**NATS or Vault unreachable** — exits 1 immediately. The container will restart per the compose `restart: unless-stopped` policy.
+**NATS or Vault unreachable at startup** — the NATS dial retries with backoff (≈7s) before exiting, so a brief outage no longer triggers an instant respawn storm (#111). Once connected, nats.go auto-reconnects through a NATS restart (the consume path rides it out, #18); only when reconnection is permanently exhausted does the process exit 1 and restart per the compose `restart: unless-stopped` policy.

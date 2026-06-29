@@ -113,9 +113,9 @@ jobs:
   # ==========================================================================
   # Deploy to Production & Start Stability Watcher (PLAN-0017)
   # Gated on staging smoke passing. Skipped for -rc tags (staging-only).
-  # Stability watcher runs detached via systemd-run for 10 min post-deploy.
-  # Prerequisite: GH runner must be installed as a systemd service (svc.sh
-  # install) so systemd-run has a session to attach to.
+  # Stability watcher runs detached via `nohup setsid` for 10 min post-deploy
+  # (a new session that survives the job's process-group cleanup; logs to
+  # /var/log/ruby-core/stability.log).
   # ==========================================================================
   deploy-prod:
     name: Deploy to Production
