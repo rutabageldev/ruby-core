@@ -163,6 +163,36 @@ func (q *Queries) ListActiveProviders(ctx context.Context) ([]*ChildcareProvider
 	return items, nil
 }
 
+const listAllPersonEmails = `-- name: ListAllPersonEmails :many
+SELECT person_id, email FROM person_email
+`
+
+type ListAllPersonEmailsRow struct {
+	PersonID pgtype.UUID
+	Email    string
+}
+
+// ListAllPersonEmails returns every alias email -> person mapping for the read index.
+func (q *Queries) ListAllPersonEmails(ctx context.Context) ([]*ListAllPersonEmailsRow, error) {
+	rows, err := q.db.Query(ctx, listAllPersonEmails)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*ListAllPersonEmailsRow
+	for rows.Next() {
+		var i ListAllPersonEmailsRow
+		if err := rows.Scan(&i.PersonID, &i.Email); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChildcareForEvents = `-- name: ListChildcareForEvents :many
 SELECT google_event_id, provider_id FROM event_childcare
 WHERE google_event_id = ANY($1::text[])
@@ -411,6 +441,27 @@ func (q *Queries) UpsertPerson(ctx context.Context, arg *UpsertPersonParams) err
 		arg.Color,
 		arg.Active,
 	)
+	return err
+}
+
+const upsertPersonEmail = `-- name: UpsertPersonEmail :exec
+
+
+INSERT INTO person_email (person_id, email)
+VALUES ($1, $2)
+ON CONFLICT (lower(email)) DO UPDATE SET person_id = EXCLUDED.person_id
+`
+
+type UpsertPersonEmailParams struct {
+	PersonID pgtype.UUID
+	Email    string
+}
+
+// ============================ person_email ============================
+// person_email holds a directory person's alias / secondary addresses (#133); the
+// primary stays on directory_person.email. Attendee reconciliation matches either source.
+func (q *Queries) UpsertPersonEmail(ctx context.Context, arg *UpsertPersonEmailParams) error {
+	_, err := q.db.Exec(ctx, upsertPersonEmail, arg.PersonID, arg.Email)
 	return err
 }
 

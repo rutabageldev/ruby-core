@@ -114,17 +114,41 @@ func loadChildcare(ctx context.Context, q *store.Queries, keys []string) (map[st
 }
 
 func loadEmailIndex(ctx context.Context, q *store.Queries) (map[string]string, error) {
-	rows, err := q.ListActivePeople(ctx)
+	people, err := q.ListActivePeople(ctx)
 	if err != nil {
 		return nil, err
 	}
-	m := make(map[string]string, len(rows))
-	for _, r := range rows {
+	aliases, err := q.ListAllPersonEmails(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return buildEmailIndex(people, aliases), nil
+}
+
+// buildEmailIndex maps lower(email) -> person_id over active people's primary emails plus
+// their alias / secondary addresses (#133). Aliases resolve only for active people, and a
+// primary email wins over an alias on collision.
+func buildEmailIndex(people []*store.DirectoryPerson, aliases []*store.ListAllPersonEmailsRow) map[string]string {
+	m := make(map[string]string, len(people))
+	active := make(map[string]struct{}, len(people))
+	for _, r := range people {
+		id := uuidStr(r.ID)
+		active[id] = struct{}{}
 		if r.Email.Valid && r.Email.String != "" {
-			m[strings.ToLower(r.Email.String)] = uuidStr(r.ID)
+			m[strings.ToLower(r.Email.String)] = id
 		}
 	}
-	return m, nil
+	for _, a := range aliases {
+		id := uuidStr(a.PersonID)
+		if _, ok := active[id]; !ok {
+			continue
+		}
+		key := strings.ToLower(a.Email)
+		if _, exists := m[key]; !exists {
+			m[key] = id
+		}
+	}
+	return m
 }
 
 // rawEvent is the slice of the stored Google payload we read for attendees.
