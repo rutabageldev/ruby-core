@@ -213,7 +213,7 @@ func TestEnsurePullConsumer_Integration_IdempotencyRejectsDuplicate(t *testing.T
 	if err != nil {
 		t.Fatalf("CreateOrBindKVBucket: %v", err)
 	}
-	store := idempotency.NewHybridStore(kvBucket, 24*time.Hour)
+	store := idempotency.NewHybridStore(kvBucket, 24*time.Hour, "test")
 	defer func() { _ = store.Close() }()
 
 	const subject = "test.events.dedup"

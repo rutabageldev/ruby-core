@@ -15,6 +15,7 @@ import (
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
 	"github.com/primaryrutabaga/ruby-core/pkg/logging"
 	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
+	rubyotel "github.com/primaryrutabaga/ruby-core/pkg/otel"
 )
 
 var (
@@ -25,6 +26,17 @@ var (
 func main() {
 	logger := logging.NewLogger("notifier")
 	slog.SetDefault(logger)
+
+	// Initialize OpenTelemetry (no-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset).
+	otelShutdown, err := rubyotel.Init(context.Background(), "notifier", version)
+	if err != nil {
+		logger.Warn("otel: init failed, continuing without telemetry", slog.String("error", err.Error()))
+	}
+	defer func() {
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer scancel()
+		_ = otelShutdown(sctx)
+	}()
 
 	cfg := boot.LoadConfig("notifier")
 
@@ -101,8 +113,13 @@ func main() {
 		cancel()
 	}()
 
+	msgInstr, err := natsx.NewMsgInstruments("notifier")
+	if err != nil {
+		logger.Warn("otel: message instruments unavailable", slog.String("error", err.Error()))
+	}
+
 	logger.Info("notifier running")
-	runConsumer(ctx, sub, h, consumerCfg.FetchBatch, logger)
+	runConsumer(ctx, sub, h, consumerCfg.FetchBatch, "COMMANDS", "notifier_processor", msgInstr, logger)
 	logger.Info("notifier stopped")
 	if natsLost.Load() {
 		os.Exit(1)
@@ -112,7 +129,7 @@ func main() {
 // runConsumer is a simple pull consumer loop for the notifier. Unlike the engine,
 // the notifier does not use idempotency dedup or DLQ routing — notifications are
 // best-effort with JetStream redelivery backoff as the only retry mechanism.
-func runConsumer(ctx context.Context, sub *nats.Subscription, h *handler, batchSize int, log *slog.Logger) {
+func runConsumer(ctx context.Context, sub *nats.Subscription, h *handler, batchSize int, stream, consumer string, instr *natsx.MsgInstruments, log *slog.Logger) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -135,15 +152,19 @@ func runConsumer(ctx context.Context, sub *nats.Subscription, h *handler, batchS
 			continue
 		}
 		for _, msg := range msgs {
-			if err := h.process(msg.Subject, msg.Data); err != nil {
-				log.Warn("notifier: process failed, naking",
-					slog.String("subject", msg.Subject),
-					slog.String("error", err.Error()),
-				)
-				_ = msg.Nak()
-			} else {
-				_ = msg.Ack()
-			}
+			m := msg
+			instr.Observe(ctx, stream, consumer, func() string {
+				if err := h.process(m.Subject, m.Data); err != nil {
+					log.Warn("notifier: process failed, naking",
+						slog.String("subject", m.Subject),
+						slog.String("error", err.Error()),
+					)
+					_ = m.Nak()
+					return natsx.OutcomeFailure
+				}
+				_ = m.Ack()
+				return natsx.OutcomeSuccess
+			})
 		}
 	}
 }

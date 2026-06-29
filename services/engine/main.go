@@ -10,8 +10,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	otelapi "go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/audit"
 	"github.com/primaryrutabaga/ruby-core/pkg/boot"
@@ -20,6 +23,7 @@ import (
 	"github.com/primaryrutabaga/ruby-core/pkg/idempotency"
 	"github.com/primaryrutabaga/ruby-core/pkg/logging"
 	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
+	rubyotel "github.com/primaryrutabaga/ruby-core/pkg/otel"
 	engineconfig "github.com/primaryrutabaga/ruby-core/services/engine/config"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processors/ada"
 	adastore "github.com/primaryrutabaga/ruby-core/services/engine/processors/ada/store"
@@ -37,6 +41,20 @@ func main() {
 	// Set as the process default so that package-level slog calls (e.g. in pkg/boot,
 	// pkg/idempotency) also emit structured JSON without needing a logger parameter.
 	slog.SetDefault(logger)
+
+	// Initialize OpenTelemetry (OTLP gRPC export to the Foundation collector). No-op when
+	// OTEL_EXPORTER_OTLP_ENDPOINT is unset (dev), so it never blocks or fails startup. The
+	// deferred shutdown flushes pending spans/metrics on graceful exit (skipped on os.Exit
+	// crash paths, which is acceptable).
+	otelShutdown, err := rubyotel.Init(context.Background(), "engine", version)
+	if err != nil {
+		logger.Warn("otel: init failed, continuing without telemetry", slog.String("error", err.Error()))
+	}
+	defer func() {
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer scancel()
+		_ = otelShutdown(sctx)
+	}()
 
 	// LoadConfig uses stdlib log.Fatalf internally — it is called before any
 	// business logic and its fatal path is a pre-flight config check, not an
@@ -118,9 +136,27 @@ func main() {
 		logger.Error("nats: idempotency KV bucket failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-	idStore := idempotency.NewHybridStore(kv, config.DefaultIdempotencyTTL)
+	idStore := idempotency.NewHybridStore(kv, config.DefaultIdempotencyTTL, "engine")
 	defer func() { _ = idStore.Close() }()
 	logger.Info("idempotency: hybrid store ready", slog.Duration("ttl", config.DefaultIdempotencyTTL))
+
+	// Observe the live idempotency KV depth (#137). An observable gauge keeps the
+	// nats.KeyValue handle here (no wider interface) and is collected on each export.
+	if _, gerr := otelapi.Meter("github.com/primaryrutabaga/ruby-core/services/engine").Int64ObservableGauge(
+		"ruby_core_idempotency_kv_entries",
+		metric.WithDescription("Current number of entries in the idempotency KV bucket"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			st, serr := kv.Status()
+			if serr != nil {
+				return serr
+			}
+			// A KV bucket entry count cannot approach int64 max, so the conversion is safe.
+			o.Observe(int64(st.Values())) //nolint:gosec // entry count fits in int64
+			return nil
+		}),
+	); gerr != nil {
+		logger.Warn("otel: kv-entries gauge unavailable", slog.String("error", gerr.Error()))
+	}
 
 	// --- Phase 4: Audit publisher ---
 
@@ -291,6 +327,22 @@ func main() {
 		logger.Error("presence consumer init failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+
+	// --- Observability: attach OTel message instruments to both consumers ---
+	// nil instruments/counter are safe (no-op); both consumers share one set, labeled
+	// per-consumer at record time.
+	msgInstr, err := natsx.NewMsgInstruments("engine")
+	if err != nil {
+		logger.Warn("otel: message instruments unavailable", slog.String("error", err.Error()))
+	}
+	dedupCtr, err := natsx.NewDedupCounter()
+	if err != nil {
+		logger.Warn("otel: dedup counter unavailable", slog.String("error", err.Error()))
+	}
+	consumer.stream, consumer.consumerName = "HA_EVENTS", "engine_processor"
+	consumer.instruments, consumer.dedup = msgInstr, dedupCtr
+	presenceConsumer.stream, presenceConsumer.consumerName = "PRESENCE", "engine_presence_processor"
+	presenceConsumer.instruments, presenceConsumer.dedup = msgInstr, dedupCtr
 
 	// --- Graceful shutdown ---
 

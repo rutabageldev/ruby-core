@@ -110,7 +110,7 @@ func (p *Processor) Initialize(cfg processor.Config) error {
 	if err != nil {
 		return fmt.Errorf("calendar: idempotency kv: %w", err)
 	}
-	p.idStore = idempotency.NewHybridStore(kv, idempotencyTTL)
+	p.idStore = idempotency.NewHybridStore(kv, idempotencyTTL, "engine")
 
 	if !p.syncEnabled {
 		p.log.Warn("calendar: sync disabled (CALENDAR_SYNC_ENABLED != true) — no Google connection; write events ignored")

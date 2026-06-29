@@ -1,6 +1,6 @@
 # PLAN-0009 — Full-Stack Observability
 
-* **Status:** Approved
+* **Status:** In Progress (reconciled 2026-06-29 — see Reconciliation)
 * **Date:** 2026-03-20
 * **Project:** ruby-core
 * **Roadmap Item:** [docs/roadmap/ROADMAP-0009-full-stack-observability.md](../roadmap/ROADMAP-0009-full-stack-observability.md)
@@ -312,3 +312,57 @@ The `pkg/otel` graceful degradation (Step 2) means a misconfigured or unreachabl
 produces a `WARN` log and a no-op provider, not a crash. A blocked gRPC dial at startup
 (wrong endpoint, network misconfigured) is the most likely failure mode — the `WithTimeout`
 on the gRPC connection must be set to avoid hanging the boot sequence.
+
+---
+
+## Reconciliation (2026-06-29) — executed on `phase-9-observability`
+
+The plan above is ~3 months old; several steps target files that moved or are self-contradictory.
+Corrections applied during execution:
+
+* **Step 1 deps:** the OTel API (`otel`, `/metric`, `/trace` v1.44.0) is already a direct dep. Add
+  only `otel/sdk`, `otel/sdk/metric`, `otlptracegrpc`, `otlpmetricgrpc`, `contrib/bridges/otelslog`.
+* **Step 2 no-op:** key the no-op decision on the **raw empty** `OTEL_EXPORTER_OTLP_ENDPOINT` — do
+  **not** default it (defaulting breaks dev no-op). The gRPC exporters are lazy-connect, so `Init`
+  never hangs on an unreachable collector; do **not** add `WithBlock`/dial-timeout (supersedes the
+  Rollback note's `WithTimeout` advice). Set-but-unreachable = background export errors, self-healing.
+* **Step 4 location:** `pkg/natsx/consumer.go` is setup-only. The per-message loops live in 4 files
+  (engine `consumer.go`, notifier/audit-sink `main.go`, presence `handler.go`); a shared
+  `pkg/natsx/instrument.go` helper wraps them.
+* **Step 7 ordering:** `otel.Init` runs **before** `logging.NewLogger` (Step 3 is right, Step 7's
+  "after NewLogger" is wrong). Reorder `ctx` creation above `NewLogger` in each main. `os.Exit`
+  paths (PLAN-0037 `natsLost`) skip the deferred otel flush — accepted on the crash path.
+* **Step 8 engine span:** no per-rule loop exists; use `engine.process` per dispatched event
+  (`host.go` `Process`), attrs `subject`/`processor` (drop the fictional `rule_name`/`triggered`).
+* **#137 folded in** (mark-failure counter + KV-entries observable gauge registered in engine main).
+  The existing `ada_boundary_crossings_total` direct-Prometheus counter is refactored to OTel
+  (ADR-0004). **#31** closes as superseded-by-OTLP (no `/metrics` endpoint built).
+
+### Execution deviations + PR split (2026-06-29)
+
+* **Split into 2 PRs** (the plan's open-question option): **PR 1 = metrics + log correlation**
+  (`pkg/otel`, OTLP metric export from all 5 services, log-trace ID injection, compose wiring;
+  closes #31 + #137); **PR 2 = distributed traces** (spans, W3C propagation across NATS, the
+  cross-cutting `ctx` threading through the engine `process` path). PR 1 carries the
+  backlog-closing value at low risk; the invasive trace `ctx` change can't block it.
+* **Log bridge — rejected otelslog.** Step 3's literal otelslog OTLP bridge would re-route logs
+  off stdout, but the Foundation promtail scrapes container stdout into Loki and the
+  smoke/stability scripts grep `docker logs`. Instead the stdout JSON handler is **wrapped** to
+  stamp `trace_id`/`span_id` from the active span (`pkg/logging.traceHandler`). Correlation by
+  stamping IDs, not by changing the log transport.
+* **otel.Init ordering — supersedes the Step 7-vs-3 note above.** Because the custom handler
+  reads the span from the record's `context` at log time (not from a provider bound at
+  construction), `otel.Init` does **not** need to precede `NewLogger`. It runs after
+  `slog.SetDefault`, before `LoadConfig`, and before `NewMsgInstruments` (which needs the live
+  MeterProvider). The package import is aliased `rubyotel` to avoid colliding with the SDK `otel`.
+* **Per-service counters re-scoped (Step 8).** Only counters that add information beyond the
+  shared `ruby_core_messages_processed_total{service,outcome}` were built (gateway events +
+  reconnects, engine DLQ-forwarded, presence state-published). audit-sink archived/write-failures
+  and notifier sent/duration were **omitted as redundant** with the shared metric. Spans are
+  deferred to PR 2.
+* **Staging telemetry labeling.** Staging runs `ENVIRONMENT=production` (to exercise prod code
+  paths), which would mislabel its ephemeral smoke-test telemetry as production. Added an
+  `OTEL_DEPLOYMENT_ENVIRONMENT` override (preferred over `ENVIRONMENT` in `otel.Init`); staging
+  compose sets it to `staging`.
+* **Plan stays In Progress** until PR 2 lands — it is archived as the final commit of PR 2, not
+  PR 1. PR-1 verification: `docs/ops/phase9-verification.md`.

@@ -16,6 +16,7 @@
 package audit
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -24,6 +25,9 @@ import (
 	"sync"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/primaryrutabaga/ruby-core/pkg/natsx"
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
@@ -41,6 +45,7 @@ type Publisher struct {
 	log       *slog.Logger
 	ch        chan schemas.AuditEvent
 	closeOnce sync.Once
+	dropped   metric.Int64Counter // ruby_core_audit_publish_dropped_total{service}
 }
 
 // NewPublisher returns a Publisher for the given service source.
@@ -48,11 +53,22 @@ type Publisher struct {
 // (e.g. "ruby-core-engine" → "ruby_engine").
 // The background drain goroutine is started immediately.
 func NewPublisher(nc *nats.Conn, source string, log *slog.Logger) *Publisher {
+	// Registered under the global MeterProvider; a no-op counter when otel.Init has not
+	// configured an OTLP endpoint. Registration failure is logged, not fatal — audit
+	// publishing must never be blocked by telemetry (ADR-0019).
+	dropped, err := otel.Meter("github.com/primaryrutabaga/ruby-core/pkg/audit").Int64Counter(
+		"ruby_core_audit_publish_dropped_total",
+		metric.WithDescription("Audit events dropped because the publish channel was full"),
+	)
+	if err != nil {
+		log.Warn("audit: drop counter unavailable", slog.String("error", err.Error()))
+	}
 	p := &Publisher{
-		nc:     nc,
-		source: natsx.SubjectToken(source),
-		log:    log,
-		ch:     make(chan schemas.AuditEvent, publishChannelCap),
+		nc:      nc,
+		source:  natsx.SubjectToken(source),
+		log:     log,
+		ch:      make(chan schemas.AuditEvent, publishChannelCap),
+		dropped: dropped,
 	}
 	go p.drain()
 	return p
@@ -83,6 +99,9 @@ func (p *Publisher) Record(correlationID, causationID, action, natsSubject, outc
 	select {
 	case p.ch <- evt:
 	default:
+		if p.dropped != nil {
+			p.dropped.Add(context.Background(), 1, metric.WithAttributes(attribute.String("service", p.source)))
+		}
 		p.log.Warn("audit: publish channel full, event dropped",
 			slog.String("action", action),
 			slog.String("outcome", outcome),
