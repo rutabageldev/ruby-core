@@ -13,10 +13,12 @@ import (
 	"github.com/primaryrutabaga/ruby-core/services/engine/processors/ada/store"
 )
 
-// Trends aggregation (#82, ADR-0032). The dashboard fires ada.trends.query and reads
-// the bucketed result back from sensor.ada_trends, matched by request_id. Buckets are
-// aligned to the bedtime boundary (sensor.ada_today_boundary): week = 7×1-day, month =
-// 4×7-day, year = 12×~30-day, with the most recent bucket covering the current day-window.
+// Trends aggregation (#82/#161, ADR-0032). The dashboard fires ada.trends.query and reads
+// the bucketed result back from sensor.ada_trends, matched by request_id. Windows are
+// calendar-anchored at local midnight (week = Sun–Sat, month = Sun–Sat weeks clipped to
+// the calendar month, year = 12 calendar months) and navigable via offset ≤ 0; window
+// math lives in trends_window.go. Note the deliberate divergence from the Today view's
+// bedtime rollover (ADR-0043) — see ADR-0032 §5.
 
 const sensorTrends = "sensor.ada_trends"
 
@@ -51,35 +53,12 @@ type trendResponse struct {
 	Totals      map[string]float64 `json:"totals"`
 	Grand       float64            `json:"grand"`
 	PrevGrand   float64            `json:"prevGrand"`
-}
-
-// periodSpec returns the bucket width and count for a period.
-func periodSpec(period string) (width time.Duration, count int, ok bool) {
-	switch period {
-	case "week":
-		return 24 * time.Hour, 7, true
-	case "month":
-		return 7 * 24 * time.Hour, 4, true
-	case "year":
-		return 30 * 24 * time.Hour, 12, true
-	}
-	return 0, 0, false
-}
-
-// trendBuckets returns the boundary-aligned buckets for a period, the most recent ending
-// at windowEnd (the next bedtime boundary, so the current partial day-window is included).
-func trendBuckets(period string, windowEnd time.Time) []bucketWindow {
-	w, n, ok := periodSpec(period)
-	if !ok {
-		return nil
-	}
-	out := make([]bucketWindow, n)
-	for i := 0; i < n; i++ {
-		start := windowEnd.Add(-time.Duration(n-i) * w)
-		end := windowEnd.Add(-time.Duration(n-1-i) * w)
-		out[i] = bucketWindow{start: start, end: end, label: bucketLabel(period, start)}
-	}
-	return out
+	// Window metadata (#161, ADR-0032 §7). WindowEnd is the inclusive last calendar day.
+	WindowStart string `json:"window_start"`
+	WindowEnd   string `json:"window_end"`
+	DaysElapsed int    `json:"days_elapsed"`
+	Offset      int    `json:"offset"`
+	MinOffset   *int   `json:"min_offset,omitempty"`
 }
 
 // bucketLabel renders a bucket's display label from its start. The dashboard may relabel;
@@ -97,9 +76,13 @@ func bucketLabel(period string, start time.Time) string {
 }
 
 // aggregateTrend assigns events to buckets and computes per-segment totals, the grand
-// total (current window), and prevGrand (events before the window, i.e. the prior equal
-// window — callers fetch events back to prevWindowStart). Values are rounded for display.
-func aggregateTrend(events []trendEvent, buckets []bucketWindow, segKeys []string) (out []trendBucket, totals map[string]float64, grand, prevGrand float64) {
+// total (requested window), and prevGrand (events in the explicit [prevStart, prevEnd)
+// comparison window, which the caller may truncate for like-for-like partial-period
+// deltas — ADR-0032 §8). Events matching neither the prev window nor a bucket are
+// dropped: for the current period that is post-truncation comparison spill; for
+// navigated (offset < 0) windows it is everything fetched after windowEnd. Values are
+// rounded for display.
+func aggregateTrend(events []trendEvent, buckets []bucketWindow, segKeys []string, prevStart, prevEnd time.Time) (out []trendBucket, totals map[string]float64, grand, prevGrand float64) {
 	out = make([]trendBucket, len(buckets))
 	totals = make(map[string]float64, len(segKeys))
 	for _, k := range segKeys {
@@ -115,10 +98,9 @@ func aggregateTrend(events []trendEvent, buckets []bucketWindow, segKeys []strin
 	if len(buckets) == 0 {
 		return out, totals, 0, 0
 	}
-	windowStart := buckets[0].start
 
 	for _, e := range events {
-		if e.when.Before(windowStart) {
+		if !e.when.Before(prevStart) && e.when.Before(prevEnd) {
 			for _, v := range e.segs {
 				prevGrand += v
 			}
@@ -194,18 +176,26 @@ func (p *Processor) handleTrendsQuery(ctx context.Context, evt schemas.CloudEven
 		return fmt.Errorf("ada: decode trends_query: %w", err)
 	}
 
+	offset := normalizeOffset(d.Offset)
+	if d.Offset > 0 {
+		p.log.Warn("ada: trends query offset > 0 clamped to current period",
+			slog.Int("offset", d.Offset), slog.String("request_id", d.RequestID))
+	}
+
+	now := time.Now()
 	resp := trendResponse{
 		RequestID:   d.RequestID,
 		Metric:      d.Metric,
 		View:        d.View,
 		Period:      d.Period,
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		GeneratedAt: now.UTC().Format(time.RFC3339),
 		Buckets:     []trendBucket{},
 		Totals:      map[string]float64{},
+		Offset:      offset,
 	}
 
 	segKeys, okSeg := trendSegKeys(d.Metric, d.View)
-	_, n, okPeriod := periodSpec(d.Period)
+	winStart, winEnd, okPeriod := calendarWindow(d.Period, offset, now)
 	if !okSeg || !okPeriod {
 		p.log.Warn("ada: trends query unsupported — returning empty result",
 			slog.String("metric", d.Metric), slog.String("view", d.View), slog.String("period", d.Period))
@@ -213,28 +203,47 @@ func (p *Processor) handleTrendsQuery(ctx context.Context, evt schemas.CloudEven
 		return nil
 	}
 
-	w, _, _ := periodSpec(d.Period)
-	cfg := p.loadSleepConfig(ctx)
-	b0 := computeTodayBoundary(cfg.BedtimeHHMM)
-	windowEnd := b0.Add(24 * time.Hour)
-	buckets := trendBuckets(d.Period, windowEnd)
-	windowStart := buckets[0].start
-	prevStart := windowStart.Add(-time.Duration(n) * w)
+	buckets := calendarBuckets(d.Period, winStart, winEnd)
+	daysElapsed := daysElapsedIn(winStart, winEnd, now, offset)
 
-	events, err := p.trendEvents(ctx, d.Metric, d.View, prevStart, b0)
+	// Previous period for the delta; truncated to days_elapsed for the current partial
+	// period so the comparison is like-for-like (ADR-0032 §8). The clamp keeps the
+	// comparison at the full previous period when it is shorter than days_elapsed
+	// (e.g. 30 days into March vs. February).
+	prevStart, prevEnd, _ := calendarWindow(d.Period, offset-1, now)
+	prevCmpEnd := prevEnd
+	if offset == 0 {
+		if t := prevStart.AddDate(0, 0, daysElapsed); t.Before(prevEnd) {
+			prevCmpEnd = t
+		}
+	}
+
+	events, err := p.trendEvents(ctx, d.Metric, d.View, prevStart, now.Location())
 	if err != nil {
 		return fmt.Errorf("ada: load trends events: %w", err)
 	}
 
-	resp.Buckets, resp.Totals, resp.Grand, resp.PrevGrand = aggregateTrend(events, buckets, segKeys)
+	resp.Buckets, resp.Totals, resp.Grand, resp.PrevGrand = aggregateTrend(events, buckets, segKeys, prevStart, prevCmpEnd)
+	resp.WindowStart = winStart.Format("2006-01-02")
+	resp.WindowEnd = winEnd.AddDate(0, 0, -1).Format("2006-01-02")
+	resp.DaysElapsed = daysElapsed
+
+	// min_offset (ADR-0032 §9): omitted when no profile exists — never an error.
+	if prof, err := p.q.GetProfile(ctx); err == nil && prof.BirthAt.Valid {
+		mo := minOffsetFor(d.Period, prof.BirthAt.Time, now)
+		resp.MinOffset = &mo
+	}
+
 	p.pushTrends(ctx, resp)
 	return nil
 }
 
 // trendEvents fetches the metric's rows since prevStart (reusing the rolling-window
-// queries, which have no upper bound and therefore reach to now) and maps them to
-// additive trend events. b0 is the current bedtime boundary, used for wakeup grouping.
-func (p *Processor) trendEvents(ctx context.Context, metric, view string, prevStart, b0 time.Time) ([]trendEvent, error) {
+// queries, which have no upper bound and therefore reach to now — wasteful for
+// navigated windows but harmless at this data volume; aggregateTrend drops the spill)
+// and maps them to additive trend events. loc is the calendar location for wakeup
+// night grouping.
+func (p *Processor) trendEvents(ctx context.Context, metric, view string, prevStart time.Time, loc *time.Location) ([]trendEvent, error) {
 	since := toTimestamptz(prevStart)
 	switch metric {
 	case "diapers":
@@ -254,7 +263,7 @@ func (p *Processor) trendEvents(ctx context.Context, metric, view string, prevSt
 		if err != nil {
 			return nil, err
 		}
-		return sleepEvents(rows, view, b0), nil
+		return sleepEvents(rows, view, loc), nil
 	case "tummy":
 		rows, err := p.q.GetLast24hTummy(ctx, since)
 		if err != nil {
@@ -294,9 +303,9 @@ func feedingEvents(rows []*store.GetLast24hFeedingsRow, view string) []trendEven
 	return out
 }
 
-func sleepEvents(rows []*store.GetTodaySleepSessionsRow, view string, b0 time.Time) []trendEvent {
+func sleepEvents(rows []*store.GetTodaySleepSessionsRow, view string, loc *time.Location) []trendEvent {
 	if view == "wakeups" {
-		return sleepWakeupEvents(rows, b0)
+		return sleepWakeupEvents(rows, loc)
 	}
 	out := make([]trendEvent, 0, len(rows))
 	for _, r := range rows {
@@ -313,12 +322,15 @@ func sleepEvents(rows []*store.GetTodaySleepSessionsRow, view string, b0 time.Ti
 	return out
 }
 
-// sleepWakeupEvents counts night-sleep sessions beyond the first within each night-window
-// (a bedtime-to-bedtime day) as wakeups. Definition to confirm against the buildTrend() mock.
-func sleepWakeupEvents(rows []*store.GetTodaySleepSessionsRow, b0 time.Time) []trendEvent {
+// sleepWakeupEvents counts night-sleep sessions beyond the first within each night as
+// wakeups (ADR-0032 §10). Nights are keyed by a noon cut in loc: a session starting
+// before 12:00 local belongs to the previous calendar day's night. Wakeups are emitted
+// stamped at the night-day's local midnight, so an early-morning wakeup lands in the
+// bucket of the night it belongs to, not the next day's.
+func sleepWakeupEvents(rows []*store.GetTodaySleepSessionsRow, loc *time.Location) []trendEvent {
 	type night struct {
 		start  time.Time
-		dayIdx int
+		dayKey time.Time
 	}
 	var nights []night
 	for _, r := range rows {
@@ -326,16 +338,20 @@ func sleepWakeupEvents(rows []*store.GetTodaySleepSessionsRow, b0 time.Time) []t
 			continue
 		}
 		st := r.StartTime.Time
-		nights = append(nights, night{start: st, dayIdx: int(math.Floor(st.Sub(b0).Hours() / 24))})
+		key := midnight(st.In(loc))
+		if st.In(loc).Hour() < 12 {
+			key = key.AddDate(0, 0, -1)
+		}
+		nights = append(nights, night{start: st, dayKey: key})
 	}
 	sort.Slice(nights, func(i, j int) bool { return nights[i].start.Before(nights[j].start) })
-	seen := make(map[int]bool)
+	seen := make(map[time.Time]bool)
 	out := make([]trendEvent, 0)
 	for _, nt := range nights {
-		if seen[nt.dayIdx] {
-			out = append(out, trendEvent{when: nt.start, segs: map[string]float64{"wakeups": 1}})
+		if seen[nt.dayKey] {
+			out = append(out, trendEvent{when: nt.dayKey, segs: map[string]float64{"wakeups": 1}})
 		} else {
-			seen[nt.dayIdx] = true
+			seen[nt.dayKey] = true
 		}
 	}
 	return out
