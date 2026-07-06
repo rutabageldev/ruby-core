@@ -401,11 +401,14 @@ type AdaFeedingClaimedData struct {
 // The dashboard mints an opaque RequestID per query; ruby-core echoes it in
 // sensor.ada_trends so the dashboard renders only the response to its latest request.
 // Metric ∈ diapers|feeding|sleep|tummy; View depends on Metric; Period ∈ week|month|year.
+// Offset ≤ 0 selects the calendar period Offset periods back (#161): 0 or absent = the
+// current period; positive values are clamped to 0 by the engine.
 type AdaTrendsQueryData struct {
 	Metric    string `json:"metric"`
 	View      string `json:"view"`
 	Period    string `json:"period"`
 	RequestID string `json:"request_id"`
+	Offset    int    `json:"offset,omitempty"`
 }
 
 // AdaGrowthLoggedData is the payload for a logged growth measurement.
