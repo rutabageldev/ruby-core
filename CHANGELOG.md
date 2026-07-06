@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.31.0](https://github.com/rutabageldev/ruby-core/compare/v0.30.1...v0.31.0) (2026-07-06)
+
+
+### Features
+
+* **ada:** calendar-anchored trend windows with offset navigation ([0e579eb](https://github.com/rutabageldev/ruby-core/commit/0e579ebbfc1355c171dec4de001f0a4fbe40bd34))
+* **ada:** trends period navigation with calendar-anchored windows ([579e007](https://github.com/rutabageldev/ruby-core/commit/579e0076f6446755be83e58cfaee1a95f87dc5ad))
+
 ## [0.30.1](https://github.com/rutabageldev/ruby-core/compare/v0.30.0...v0.30.1) (2026-06-29)
 
 
