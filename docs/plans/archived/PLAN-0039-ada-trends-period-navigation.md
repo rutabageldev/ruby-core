@@ -1,6 +1,6 @@
 # PLAN-0039 - Ada trends period navigation + calendar-anchored windows
 
-* **Status:** Approved
+* **Status:** Complete
 * **Date:** 2026-07-05
 * **Project:** ruby-core
 * **Roadmap Item:** none (issue-driven: #161)
