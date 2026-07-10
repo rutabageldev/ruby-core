@@ -55,25 +55,41 @@ ALTER DEFAULT PRIVILEGES FOR ROLE ruby_core IN SCHEMA public GRANT SELECT ON TAB
 >   psql -h foundation-postgres -p 5432 -U ruby_core_ro -d ruby_core -tAc "SELECT count(*) FROM calendar_event"
 > ```
 
-(For the staging/dev databases, repeat the `GRANT CONNECT … <db>` + the schema grants
-while connected to that database.)
+(For the staging/dev databases, `ruby_core_ro` already exists — do **not** re-`CREATE` it.
+Connect to that database and repeat the `GRANT CONNECT … <db>` + `USAGE`/`SELECT` schema
+grants, and set `ALTER DEFAULT PRIVILEGES FOR ROLE <that env's app user>` — `ruby_core_staging`
+or `ruby_core_dev`, not `ruby_core`. This is how staging + dev were provisioned 2026-07-10.)
 
-> **Status:** prod is provisioned (role `ruby_core_ro` created, `secret/ruby-core/postgres_readonly`
+> **Status:** all three environments are provisioned.
 >
-> + `secret/ruby-core/api` populated, api healthy) as of 2026-06-28 / v0.26.0. The
-> `FOR ROLE ruby_core` default-privileges fix was applied to prod on 2026-06-29 (v0.30.0)
-> after migration `000003` created `person_email` without a grant — see "Known failure
-> mode". staging + dev are not yet provisioned (when they are, use the `FOR ROLE` form above).
+> - **prod** — role `ruby_core_ro` created, `secret/ruby-core/postgres_readonly` +
+>   `secret/ruby-core/api` populated, api healthy, as of 2026-06-28 / v0.26.0. The
+>   `FOR ROLE ruby_core` default-privileges fix was applied 2026-06-29 (v0.30.0) after
+>   migration `000003` created `person_email` without a grant — see "Known failure mode".
+> - **staging + dev** — provisioned 2026-07-10 after the v0.31.0 release un-gated the api
+>   and `ruby-core-staging-api` crash-looped on the missing `secret/ruby-core/staging/postgres_readonly`
+>   (rutabageldev/ruby-core#165). `ruby_core_ro` granted read access on `ruby_core_staging`
+>   and `ruby_core_dev`; `secret/ruby-core/{staging,dev}/{postgres_readonly,api}` populated.
+>   **The `FOR ROLE` clause names each env's own app user** — `ruby_core_staging` /
+>   `ruby_core_dev`, **not** `ruby_core` — because migrations run as that env's app role and
+>   default privileges only cover objects created by the named role. staging-api verified
+>   healthy (`/health` 200); dev-api is `profiles: [services]`-gated and latent, but its
+>   read-only role + secrets are in place.
 
-Store the DSN fields in Vault (the api reads `secret/data/ruby-core/postgres_readonly`):
+Store the DSN fields in Vault (the api reads `secret/data/ruby-core/postgres_readonly`).
+`ruby_core_ro` is a **single role shared across all three databases**, so the `password`
+field MUST be identical in all three secrets — generate it once (when the role is created)
+and reuse it. If you are provisioning a new env against an already-created role, read the
+existing password from a populated secret rather than resetting the role:
+`vault kv get -field=password secret/ruby-core/postgres_readonly`.
 
 ```bash
 vault kv put secret/ruby-core/postgres_readonly \
-  host=<host> port=<port> dbname=ruby_core user=ruby_core_ro password='<generated>'
+  host=<host> port=<port> dbname=ruby_core user=ruby_core_ro password='<shared-ro-password>'
 vault kv put secret/ruby-core/staging/postgres_readonly \
-  host=<host> port=<port> dbname=ruby_core_staging user=ruby_core_ro password='<generated>'
+  host=<host> port=<port> dbname=ruby_core_staging user=ruby_core_ro password='<shared-ro-password>'
 vault kv put secret/ruby-core/dev/postgres_readonly \
-  host=<host> port=<port> dbname=ruby_core_dev user=ruby_core_ro password='<generated>'
+  host=<host> port=<port> dbname=ruby_core_dev user=ruby_core_ro password='<shared-ro-password>'
 ```
 
 ## 2. API bearer token (defense-in-depth, ADR-0040)
@@ -116,8 +132,10 @@ api startup, healthy container.
 one-time `GRANT SELECT ON ALL TABLES` only covers tables that existed when it ran;
 anything created later is covered **only** by `ALTER DEFAULT PRIVILEGES`, and that clause
 applies solely to objects created by the role named in `FOR ROLE`. Migrations run as the
-`ruby_core` app user — so a default-privileges grant scoped to `postgres` (or omitting
-`FOR ROLE`) silently covers nothing the migrations create. This is exactly how
+env's app user — `ruby_core` in prod, `ruby_core_staging` in staging, `ruby_core_dev` in
+dev — so the `FOR ROLE` clause must name **that** env's app role. A grant scoped to
+`postgres`, omitting `FOR ROLE`, or naming the wrong env's role silently covers nothing the
+migrations create. This is exactly how
 `person_email` (migration `000003`, v0.30.0) broke `GET /v1/calendar/events`: that handler
 unconditionally reads `person_email` via `ListAllPersonEmails`, while `/directory/people`
 and `/childcare/providers` don't touch it.
@@ -143,10 +161,14 @@ docker run --rm --network postgres -e PGPASSWORD="$ADMIN_PW" postgres:16-alpine 
   -c "ALTER DEFAULT PRIVILEGES FOR ROLE ruby_core IN SCHEMA public GRANT SELECT ON TABLES TO ruby_core_ro"
 ```
 
-Once the `FOR ROLE ruby_core` default privilege is in place (it is, on prod, as of
-2026-06-29), future migrations are covered automatically — no per-migration grant needed.
+The two snippets above are prod-shaped — for staging/dev swap both the `-d` database
+(`ruby_core_staging` / `ruby_core_dev`) and the `FOR ROLE` app user to match that env.
+
+Once the `FOR ROLE` default privilege is in place for an env (prod since 2026-06-29;
+staging + dev since 2026-07-10), future migrations there are covered automatically — no
+per-migration grant needed.
 
 ## Related
 
-+ Traefik→api **mTLS** (#122) is defense-in-depth on top of this and is a separate
+- Traefik→api **mTLS** (#122) is defense-in-depth on top of this and is a separate
   follow-up — not required for the service to function.
