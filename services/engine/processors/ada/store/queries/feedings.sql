@@ -81,9 +81,17 @@ GROUP BY
 ORDER BY f.timestamp DESC;
 
 -- name: GetTodayFeedingAggregates :one
+-- total_oz takes the greater of the recorded amount and the recorded split, because
+-- neither column alone is complete: a single-source bottle carries amount_oz only,
+-- while a mixed bottle logged via ada.feeding.log carries the split only (amount_oz 0).
+-- This is the same reconciliation the bottle trend applies in bottleSegOz, so the Today
+-- sensor and the trend agree on a feed's volume (PLAN-0040).
 SELECT
     COUNT(DISTINCT f.id)::int                                        AS count,
-    COALESCE(SUM(d.amount_oz), 0)::float8                            AS total_oz,
+    COALESCE(SUM(GREATEST(
+        COALESCE(d.amount_oz, 0),
+        COALESCE(d.breast_milk_oz, 0) + COALESCE(d.formula_oz, 0)
+    )), 0)::float8                                                   AS total_oz,
     COALESCE(SUM(d.breast_milk_oz), 0)::float8                       AS breast_milk_oz,
     COALESCE(SUM(d.formula_oz), 0)::float8                           AS formula_oz
 FROM feedings f

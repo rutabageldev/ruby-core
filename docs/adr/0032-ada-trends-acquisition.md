@@ -1,7 +1,8 @@
 # ADR-0032 - Ada trends acquisition
 
 * **Status:** Proposed
-* **Date:** 2026-06-18 (amended 2026-07-05: calendar-anchored windows + offset navigation, issue #161)
+* **Date:** 2026-06-18 (amended 2026-07-05: calendar-anchored windows + offset navigation, issue #161;
+  amended 2026-07-22: bottle-view volume reconciliation, PLAN-0040)
 * **Supersedes:** *(none)*
 * **Superseded by:** *(none)*
 
@@ -101,6 +102,17 @@ arithmetic. Deliberately diverges from ADR-0043's bedtime rollover (see Decision
    during the Trends effort; the dashboard's verbatim list above is authoritative for the views it
    sends today.)
 
+   **Amendment (2026-07-22, PLAN-0040).** The `feeding`/`bottle` view's `milk` + `formula` segs
+   **MUST** reconcile to each feed's total recorded volume. Neither storage column is complete on
+   its own: a single-source bottle is persisted with `amount_oz` alone and an empty split, while a
+   mixed bottle logged via `ada.feeding.log` is persisted with the split alone and
+   `amount_oz = 0`. A reader therefore **MUST** take the greater of `amount_oz` and
+   `breast_milk_oz + formula_oz`, attributing any excess of the amount over the split by feed
+   source (`bottle_breast`/`breast_milk` → `milk`, `bottle_formula`/`formula` → `formula`, `mixed`
+   → prorated across the logged split). A residual that the source gives no basis to attribute
+   **MUST** be logged, never silently dropped. The same reconciliation **MUST** be applied by the
+   Today feeding-oz aggregate, so the two projections agree on a feed's volume.
+
 5. Windows MUST be calendar-anchored at **local midnight** in the engine's local timezone
    (container `TZ`, America/New_York):
    * **week** = Sun–Sat, 7 one-day buckets; `offset: 0` rolls at Sunday 00:00.
@@ -166,6 +178,17 @@ arithmetic. Deliberately diverges from ADR-0043's bedtime rollover (see Decision
   and bounded (19:00–00:00).
 * Truncated `prevGrand` makes the delta's meaning depend on `offset` and the day of the period —
   correct, but subtler than the old full-window comparison.
+
+### Negative (2026-07-22 amendment)
+
+* §4 originally named the bottle seg keys without stating how a feed's oz reaches them. The
+  implementation summed the split columns only, so every single-source bottle contributed zero —
+  a 21-of-68-oz undercount on the week of 2026-07-19, and a `milk` seg that had never rendered
+  non-zero. Naming a response key is not the same as specifying how it is computed; where two
+  storage columns can each be authoritative, the ADR must say which wins.
+* Bottle volume is now derived from two columns rather than read from one, so a future writer that
+  populates them inconsistently produces a plausible-looking wrong number instead of an obvious
+  zero. The unattributable-residual warning is the tripwire for that.
 
 ### Neutral
 
