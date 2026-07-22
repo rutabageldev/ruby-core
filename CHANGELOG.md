@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.31.1](https://github.com/rutabageldev/ruby-core/compare/v0.31.0...v0.31.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **ada:** attribute unsplit amount_oz to a bottle trend segment ([683792a](https://github.com/rutabageldev/ruby-core/commit/683792ab92500fc7bd514ea2f837e1be222f24c6))
+* **ada:** attribute unsplit amount_oz to a bottle trend segment ([6a99152](https://github.com/rutabageldev/ruby-core/commit/6a99152eecf04e24ac9bfc52eae4f8eb195c914b))
+
 ## [0.31.0](https://github.com/rutabageldev/ruby-core/compare/v0.30.1...v0.31.0) (2026-07-06)
 
 
