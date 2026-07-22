@@ -9,6 +9,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/primaryrutabaga/ruby-core/pkg/schemas"
 	"github.com/primaryrutabaga/ruby-core/services/engine/processors/ada/store"
 )
@@ -257,7 +259,7 @@ func (p *Processor) trendEvents(ctx context.Context, metric, view string, prevSt
 		if err != nil {
 			return nil, err
 		}
-		return feedingEvents(rows, view), nil
+		return feedingEvents(rows, view, p.log), nil
 	case "sleep":
 		rows, err := p.q.GetTodaySleepSessions(ctx, since)
 		if err != nil {
@@ -282,7 +284,52 @@ func diaperEvents(rows []*store.GetTodayDiapersRow) []trendEvent {
 	return out
 }
 
-func feedingEvents(rows []*store.GetLast24hFeedingsRow, view string) []trendEvent {
+// bottleOzEpsilon guards the residual comparison against float noise from the
+// numeric→float8 conversion. Amounts are recorded to 0.25 oz at the finest, so any
+// real residual is orders of magnitude above this.
+const bottleOzEpsilon = 1e-6
+
+// bottleSegOz resolves a bottle feed's (milk, formula) segment contribution,
+// reconciling the split columns against amount_oz. A single-source bottle is persisted
+// with amount_oz alone (schemas.AdaFeedingLoggedData: "AmountOz is set for single-source
+// bottles; BreastMilkOz and FormulaOz for mixed"), so a reader that trusts only the split
+// columns drops it entirely — the #82 undercount. Any amount in excess of the recorded
+// split is therefore attributed by feed source, mirroring the write-side resolution in
+// supplementAmounts.
+//
+// The residual is clamped at zero so a row whose split exceeds its amount — a mixed
+// bottle logged via ada.feeding.log, which carries no amount_oz — keeps its full split
+// instead of being reduced. ok is false when a residual exists but the source gives no
+// basis to attribute it; the caller reports that rather than absorbing it silently.
+func bottleSegOz(source string, amountOz, milkOz, formulaOz float64) (milk, formula float64, ok bool) {
+	milk, formula = milkOz, formulaOz
+	residual := amountOz - (milk + formula)
+	if residual <= bottleOzEpsilon {
+		return milk, formula, true
+	}
+	switch normalizeSource(source) {
+	case "bottle_breast":
+		milk += residual
+	case "bottle_formula":
+		formula += residual
+	case "mixed":
+		// The logged split is the caregiver's stated ratio; prorate the excess across it
+		// so that ratio survives. With no split to prorate against there is no basis.
+		split := milk + formula
+		if split <= 0 {
+			return milk, formula, false
+		}
+		milk += residual * (milk / split)
+		formula += residual * (formula / split)
+	default:
+		// A breast feed carrying bottle detail — a supplement merged by
+		// AddFeedingBottleDetailAmounts whose own source was itself unresolved.
+		return milk, formula, false
+	}
+	return milk, formula, true
+}
+
+func feedingEvents(rows []*store.GetLast24hFeedingsRow, view string, log *slog.Logger) []trendEvent {
 	out := make([]trendEvent, 0, len(rows))
 	for _, r := range rows {
 		var segs map[string]float64
@@ -290,7 +337,15 @@ func feedingEvents(rows []*store.GetLast24hFeedingsRow, view string) []trendEven
 		case "breast":
 			segs = map[string]float64{"left": float64(r.LeftDurationS) / 60, "right": float64(r.RightDurationS) / 60}
 		case "bottle":
-			segs = map[string]float64{"milk": r.BreastMilkOz, "formula": r.FormulaOz}
+			milk, formula, ok := bottleSegOz(r.Source, r.AmountOz, r.BreastMilkOz, r.FormulaOz)
+			if !ok && log != nil {
+				log.Warn("ada: bottle trend residual not attributable to a segment",
+					slog.String("feeding_id", uuid.UUID(r.ID.Bytes).String()),
+					slog.String("source", r.Source),
+					slog.Float64("amount_oz", r.AmountOz),
+					slog.Float64("attributed_oz", milk+formula))
+			}
+			segs = map[string]float64{"milk": milk, "formula": formula}
 		case "feeds":
 			if isBottleSource(r.Source) {
 				segs = map[string]float64{"bo": 1}

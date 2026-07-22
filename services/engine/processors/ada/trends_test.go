@@ -199,3 +199,153 @@ func TestTrendSegKeys(t *testing.T) {
 		t.Error("unknown sleep view should be invalid")
 	}
 }
+
+// ── Bottle segment reconciliation (PLAN-0040) ─────────────────────────────────
+
+func TestBottleSegOz(t *testing.T) {
+	cases := []struct {
+		name               string
+		source             string
+		amount, milk, form float64
+		wantMilk, wantForm float64
+		wantOK             bool
+	}{
+		{
+			name:   "single-source formula bottle carries amount only",
+			source: "bottle_formula", amount: 3, milk: 0, form: 0,
+			wantMilk: 0, wantForm: 3, wantOK: true,
+		},
+		{
+			name:   "single-source breast-milk bottle carries amount only",
+			source: "bottle_breast", amount: 2.5, milk: 0, form: 0,
+			wantMilk: 2.5, wantForm: 0, wantOK: true,
+		},
+		{
+			name:   "legacy dashboard source names normalize",
+			source: "formula", amount: 4, milk: 0, form: 0,
+			wantMilk: 0, wantForm: 4, wantOK: true,
+		},
+		{
+			name:   "explicit split with matching amount is not double-counted",
+			source: "bottle_formula", amount: 3, milk: 0, form: 3,
+			wantMilk: 0, wantForm: 3, wantOK: true,
+		},
+		{
+			name:   "mixed bottle with amount_oz 0 keeps its full split",
+			source: "mixed", amount: 0, milk: 0, form: 1,
+			wantMilk: 0, wantForm: 1, wantOK: true,
+		},
+		{
+			name:   "partial residual is attributed on top of an existing split",
+			source: "bottle_formula", amount: 5, milk: 0, form: 3,
+			wantMilk: 0, wantForm: 5, wantOK: true,
+		},
+		{
+			name:   "mixed residual prorates across the logged ratio",
+			source: "mixed", amount: 8, milk: 1, form: 3,
+			wantMilk: 2, wantForm: 6, wantOK: true,
+		},
+		{
+			name:   "mixed residual with no split to prorate is unattributable",
+			source: "mixed", amount: 3, milk: 0, form: 0,
+			wantMilk: 0, wantForm: 0, wantOK: false,
+		},
+		{
+			name:   "supplement residual on a breast feed is unattributable",
+			source: "breast_left", amount: 2, milk: 0, form: 0,
+			wantMilk: 0, wantForm: 0, wantOK: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			milk, form, ok := bottleSegOz(c.source, c.amount, c.milk, c.form)
+			if milk != c.wantMilk || form != c.wantForm || ok != c.wantOK {
+				t.Errorf("bottleSegOz(%q, %v, %v, %v) = %v, %v, %v; want %v, %v, %v",
+					c.source, c.amount, c.milk, c.form, milk, form, ok, c.wantMilk, c.wantForm, c.wantOK)
+			}
+		})
+	}
+}
+
+func TestFeedingEvents_BottleUsesAmountFallback(t *testing.T) {
+	rows := []*store.GetLast24hFeedingsRow{
+		{
+			ID:        mustUUID("aaaaaaaa-0000-0000-0000-000000000001"),
+			Timestamp: mustTimestamptz("2026-07-22T08:41:30Z"),
+			Source:    "bottle_formula",
+			AmountOz:  3, // amount only — the row shape that was silently dropped
+		},
+		{
+			ID:        mustUUID("aaaaaaaa-0000-0000-0000-000000000002"),
+			Timestamp: mustTimestamptz("2026-07-22T12:15:00Z"),
+			Source:    "bottle_formula",
+			AmountOz:  3,
+			FormulaOz: 3,
+		},
+	}
+	events := feedingEvents(rows, "bottle", nil)
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2", len(events))
+	}
+	var total float64
+	for _, e := range events {
+		if e.segs["milk"] != 0 {
+			t.Errorf("milk = %v, want 0 for a formula-only household", e.segs["milk"])
+		}
+		total += e.segs["formula"]
+	}
+	if total != 6 {
+		t.Errorf("formula total = %v, want 6 (amount-only feed must contribute)", total)
+	}
+}
+
+// TestFeedingEvents_BottleWeekReproduction replays the prod week of 2026-07-19 that
+// surfaced the undercount (#82/#161). Before PLAN-0040 these buckets read 14/10/14/9
+// with a grand of 47, because every amount-only row contributed zero.
+func TestFeedingEvents_BottleWeekReproduction(t *testing.T) {
+	loc := nyLoc(t)
+	now := time.Date(2026, 7, 22, 15, 0, 0, 0, loc) // Wednesday of week [7/19, 7/26)
+
+	// (day, hour, minute, amount_oz, formula_oz) exactly as persisted in prod.
+	feeds := []struct {
+		day, hour, min  int
+		amount, formula float64
+	}{
+		{19, 0, 0, 1, 1}, {19, 3, 45, 3, 3}, {19, 7, 15, 2.5, 2.5}, {19, 10, 5, 2.5, 2.5},
+		{19, 12, 53, 2.5, 0}, {19, 16, 5, 2.5, 2.5}, {19, 19, 28, 2.5, 0}, {19, 21, 55, 2.5, 2.5},
+		{20, 2, 15, 2.5, 2.5}, {20, 6, 0, 2.5, 2.5}, {20, 8, 27, 2, 2}, {20, 12, 35, 3, 3},
+		{20, 14, 58, 2.5, 0}, {20, 18, 35, 2.5, 0}, {20, 21, 37, 3, 0},
+		{21, 1, 55, 3, 3}, {21, 5, 55, 3, 3}, {21, 8, 45, 2.5, 2.5}, {21, 12, 20, 2.5, 2.5},
+		{21, 14, 53, 2.5, 0}, {21, 18, 4, 2.5, 0}, {21, 20, 55, 3, 3},
+		{22, 0, 50, 3, 3}, {22, 4, 41, 3, 0}, {22, 8, 15, 3, 3}, {22, 11, 15, 3, 3},
+	}
+	rows := make([]*store.GetLast24hFeedingsRow, 0, len(feeds))
+	for _, f := range feeds {
+		ts := time.Date(2026, 7, f.day, f.hour, f.min, 0, 0, loc)
+		rows = append(rows, &store.GetLast24hFeedingsRow{
+			Timestamp: pgtype.Timestamptz{Time: ts, Valid: true},
+			Source:    "bottle_formula",
+			AmountOz:  f.amount,
+			FormulaOz: f.formula,
+		})
+	}
+
+	winStart, winEnd, _ := calendarWindow("week", 0, now)
+	buckets := calendarBuckets("week", winStart, winEnd)
+	prevStart, _, _ := calendarWindow("week", -1, now)
+	out, totals, grand, _ := aggregateTrend(
+		feedingEvents(rows, "bottle", nil), buckets, []string{"milk", "formula"}, prevStart, prevStart)
+
+	want := []float64{19, 18, 19, 12, 0, 0, 0} // Sun…Sat
+	for i, w := range want {
+		if out[i].Total != w {
+			t.Errorf("%s bucket = %v, want %v", out[i].Label, out[i].Total, w)
+		}
+	}
+	if grand != 68 {
+		t.Errorf("grand = %v, want 68", grand)
+	}
+	if totals["formula"] != 68 || totals["milk"] != 0 {
+		t.Errorf("totals = %v, want formula=68 milk=0", totals)
+	}
+}
